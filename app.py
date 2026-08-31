@@ -22,7 +22,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.0.3"
+APP_VERSION = "2.1.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -356,6 +356,38 @@ def add_scores(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     out["Riskflaggor"] = out.apply(_risk_flags, axis=1)
     out["Signal"] = out.apply(_signal_label, axis=1)
     out["Varför"] = out.apply(_why_text, axis=1)
+
+    # v2.1: three distinct horizons. These are screening scores, not forecasts.
+    growth = _mean_scores([
+        _percentile_score(out["Omsättningstillväxt"].clip(-1, 2), True),
+        _percentile_score(out["Vinsttillväxt"].clip(-1, 3), True),
+        _percentile_score(out["FCF-yield"].clip(-.5, .5), True),
+    ])
+    invest = .34 * valuation + .31 * quality + .18 * risk + .12 * growth + .05 * setup
+
+    vol_ratio = pd.to_numeric(out.get("Volymkvot", pd.Series(np.nan, index=out.index)), errors="coerce")
+    vol_score = ((vol_ratio - .7) / 1.1 * 100).clip(0, 100).fillna(45)
+    dist200 = pd.to_numeric(out["Avstånd SMA200"], errors="coerce")
+    trend_score = pd.Series(45.0, index=out.index)
+    trend_score.loc[dist200.between(0, .20)] = 85
+    trend_score.loc[dist200.between(-.05, 0, inclusive="left")] = 65
+    trend_score.loc[dist200 > .20] = 65
+    trend_score.loc[dist200 < -.10] = 20
+    swing = .48 * setup + .18 * trend_score + .17 * vol_score + .10 * risk + .07 * quality
+
+    daily = pd.to_numeric(out["Dagsförändring"], errors="coerce")
+    draw = pd.to_numeric(out["52v från topp"], errors="coerce")
+    rsi_num = pd.to_numeric(out["RSI14"], errors="coerce")
+    selloff = ((-daily - .015) / .10 * 100).clip(0, 100).fillna(0)
+    draw_score = ((-draw - .08) / .32 * 100).clip(0, 100).fillna(25)
+    oversold = ((48 - rsi_num) / 23 * 100).clip(0, 100).fillna(30)
+    reversal = .27 * selloff + .20 * draw_score + .18 * oversold + .16 * quality + .12 * risk + .07 * valuation
+    severe_mask = out["Riskflaggor"].astype(str).apply(lambda x: any(term in x for term in SEVERE_RISK_TERMS))
+    reversal = reversal.where(~severe_mask, np.minimum(reversal, 62))
+
+    out["INVEST Score"] = invest.round(1).clip(0, 100)
+    out["SWING Score"] = swing.round(1).clip(0, 100)
+    out["REVERSAL Score"] = reversal.round(1).clip(0, 100)
     return out.sort_values(["Borsify Score", "Datatäckning"], ascending=[False, False])
 
 
@@ -1310,6 +1342,56 @@ def dataframe_for_display(df: pd.DataFrame) -> pd.DataFrame:
     return display
 
 
+def investment_analysis_text(row: pd.Series, horizon: str = "INVEST") -> str:
+    """Deterministic explanation grounded only in fields already shown by Borsify."""
+    name = str(row.get("Namn") or row.get("Ticker") or "Aktien")
+    score_col = {"INVEST": "INVEST Score", "SWING": "SWING Score", "REVERSAL": "REVERSAL Score"}.get(horizon, "INVEST Score")
+    score = _num(row.get(score_col)); val = _num(row.get("Värdering")); qual = _num(row.get("Kvalitet")); risk = _num(row.get("Risk"))
+    pe = _num(row.get("P/E")); roe = _num(row.get("ROE")); growth = _num(row.get("Vinsttillväxt")); m3 = _num(row.get("3 mån")); rsi = _num(row.get("RSI14")); vol = _num(row.get("Volymkvot")); draw = _num(row.get("52v från topp")); daily = _num(row.get("Dagsförändring")); dist = _num(row.get("Avstånd SMA200"))
+    flags = str(row.get("Riskflaggor", "—"))
+    if horizon == "INVEST":
+        parts = [f"{name} får {score:.0f}/100 i INVEST-modellen." if np.isfinite(score) else f"{name} analyseras för lång sikt."]
+        if np.isfinite(val) and val >= 65: parts.append("Värderingen är attraktiv relativt jämförelsegruppen")
+        if np.isfinite(qual) and qual >= 65: parts.append("lönsamhet, tillväxt och balansräkning ger en stark kvalitetsprofil")
+        if np.isfinite(roe): parts.append(f"ROE är {roe:.1%}")
+        if np.isfinite(growth): parts.append(f"rapporterad vinsttillväxt är {growth:+.1%}")
+        if np.isfinite(pe): parts.append(f"P/E är {pe:.1f}")
+        thesis = ". ".join(parts) + "."
+    elif horizon == "SWING":
+        parts=[f"{name} får {score:.0f}/100 i SWING-modellen." if np.isfinite(score) else f"{name} analyseras som swingcase."]
+        if np.isfinite(dist): parts.append("kursen ligger över SMA200" if dist >= 0 else "kursen ligger under SMA200")
+        if np.isfinite(m3): parts.append(f"3-månadersmomentum är {m3:+.1%}")
+        if np.isfinite(rsi): parts.append(f"RSI är {rsi:.0f}")
+        if np.isfinite(vol): parts.append(f"volymen är {vol:.1f}× 20-dagarssnittet")
+        thesis=" ".join(parts)
+    else:
+        parts=[f"{name} får {score:.0f}/100 i REVERSAL-modellen." if np.isfinite(score) else f"{name} analyseras som möjlig överreaktion."]
+        if np.isfinite(daily): parts.append(f"Dagens rörelse är {daily:+.1%}")
+        if np.isfinite(draw): parts.append(f"aktien ligger {abs(draw):.1%} från 52-veckorstoppen")
+        if np.isfinite(rsi): parts.append(f"RSI är {rsi:.0f}")
+        if np.isfinite(qual): parts.append(f"kvalitetspoängen är {qual:.0f}/100")
+        thesis=" ".join(parts)
+    caution = "Inga grova modellflaggor är registrerade" if flags == "—" else f"Viktigaste modellrisker: {flags}"
+    return f"{thesis} {caution}. Bedömningen bygger på tillgänglig marknads- och fundamentaldata och ska användas som underlag för vidare analys, inte som köpbeslut."
+
+
+def render_engine_board(df: pd.DataFrame) -> None:
+    st.subheader("Tre motorer · olika tidshorisonter")
+    st.caption("INVEST söker långsiktig kvalitet till rimligt pris. SWING söker tekniska lägen för dagar–veckor. REVERSAL söker möjliga överreaktioner. Modellerna ska inte blandas ihop.")
+    specs=[("INVEST", "INVEST Score", "Lång sikt · ca 1–5 år"), ("SWING", "SWING Score", "Kort sikt · ca 2 dagar–8 veckor"), ("REVERSAL", "REVERSAL Score", "Överreaktion · dagar–månader") ]
+    cols=st.columns(3)
+    for col,(label,score_col,horizon) in zip(cols,specs):
+        with col:
+            st.markdown(f"### {label}")
+            st.caption(horizon)
+            top=df.sort_values([score_col,"Datatäckning"], ascending=[False,False]).head(3)
+            for rank,(_,r) in enumerate(top.iterrows(),1):
+                with st.container(border=True):
+                    st.markdown(f"**{rank}. {r['Namn']} · {r['Ticker']}**")
+                    st.metric(label, f"{_num(r[score_col]):.0f}/100")
+                    st.write(investment_analysis_text(r,label))
+
+
 def render_detail(row: pd.Series, profile: str) -> None:
     st.subheader(f"{row['Namn']} · {row['Ticker']}")
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -1319,6 +1401,17 @@ def render_detail(row: pd.Series, profile: str) -> None:
     c1.metric("Borsify Score", f"{row['Borsify Score']:.0f}/100", f"{score_delta:+.1f}" if score_delta is not None else None)
     c2.metric("Pris", f"{row['Pris']:.2f} {row.get('Valuta', '')}", fmt_pct(row.get("Dagsförändring")))
     c3.metric("Värdering", f"{row['Värdering']:.0f}")
+    st.markdown("### Varför kan detta vara en bra investering?")
+    st.write(investment_analysis_text(row, "INVEST"))
+    e1, e2, e3 = st.columns(3)
+    e1.metric("INVEST", f"{_num(row.get('INVEST Score')):.0f}/100")
+    e2.metric("SWING", f"{_num(row.get('SWING Score')):.0f}/100")
+    e3.metric("REVERSAL", f"{_num(row.get('REVERSAL Score')):.0f}/100")
+    with st.expander("Visa analys för kort sikt och överreaktion"):
+        st.markdown("**SWING · dagar–veckor**")
+        st.write(investment_analysis_text(row, "SWING"))
+        st.markdown("**REVERSAL · möjlig överreaktion**")
+        st.write(investment_analysis_text(row, "REVERSAL"))
     c4.metric("Kvalitet", f"{row['Kvalitet']:.0f}")
     c5.metric("Risk", f"{row['Risk']:.0f}")
     st.markdown(f"**Bedömning:** {row['Signal']}  \n**Kort förklaring:** {row['Varför']}  \n**Riskflaggor:** {row['Riskflaggor']}")
@@ -1637,6 +1730,8 @@ def main() -> None:
     with tab0:
         render_overview(daily_shortlist, filtered, scored, watch_df_global, signal_history_global, unread_signals, profile, idx, elapsed, latest_price_date)
     with tab1:
+        render_engine_board(filtered)
+        st.divider()
         st.subheader("Dagens fynd · snabbaste beslutsunderlaget")
         st.caption("Dagens relevans är en separat triage ovanpå Borsify Score. Den väger in aktuellt marknadsläge och scoreförändring, och kan begränsas av grova riskflaggor. Den är inte ett köp- eller säljråd.")
         if daily_shortlist.empty:
@@ -1667,7 +1762,7 @@ def main() -> None:
 
             st.divider()
             st.subheader("Jämför dagens kortlista")
-            quick_cols = ["Ticker", "Namn", "Borsify Score", "Dagens relevans", "Prioritet", "Score Δ", "Värdering", "Kvalitet", "Marknadsläge", "Risk", "Riskflaggor"]
+            quick_cols = ["Ticker", "Namn", "Borsify Score", "INVEST Score", "SWING Score", "REVERSAL Score", "Dagens relevans", "Prioritet", "Score Δ", "Värdering", "Kvalitet", "Marknadsläge", "Risk", "Riskflaggor"]
             quick = daily_shortlist[quick_cols].copy()
             st.dataframe(quick, use_container_width=True, hide_index=True, column_config={
                 "Borsify Score": st.column_config.ProgressColumn("Borsify", min_value=0, max_value=100, format="%.0f"),
