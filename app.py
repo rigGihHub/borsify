@@ -22,7 +22,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -1388,7 +1388,12 @@ def render_engine_board(df: pd.DataFrame) -> None:
             for rank,(_,r) in enumerate(top.iterrows(),1):
                 with st.container(border=True):
                     st.markdown(f"**{rank}. {r['Namn']} · {r['Ticker']}**")
-                    st.metric(label, f"{_num(r[score_col]):.0f}/100")
+                    e1, e2 = st.columns(2)
+                    e1.metric(label, f"{_num(r[score_col]):.0f}/100")
+                    price = _num(r.get("Pris"))
+                    price_text = f"{price:.2f} {r.get('Valuta', '')}" if np.isfinite(price) else "—"
+                    e2.metric("Aktuell kurs", price_text, fmt_pct(r.get("Dagsförändring")))
+                    st.caption(f"Senaste kursdag: {r.get('Prisdatum', '—')}")
                     st.write(investment_analysis_text(r,label))
 
 
@@ -1540,11 +1545,13 @@ def render_overview(
             st.info("Ingen kandidat klarade dagens urval. Justera filtren eller kontrollera datakällan.")
         else:
             with st.container(border=True):
-                c1, c2, c3 = st.columns([2.5, 1, 1])
+                c1, c2, c3, c4 = st.columns([2.35, 1, 1, 1.2])
                 c1.markdown(f"## {best['Namn']}")
                 c1.caption(f"{best['Ticker']} · {best['Sektor']} · {best['Signal']}")
                 c2.metric("Borsify", f"{_num(best['Borsify Score']):.0f}/100", f"{_num(best.get('Score Δ')):+.1f}" if np.isfinite(_num(best.get('Score Δ'))) else None)
                 c3.metric("Idag", f"{_num(best['Dagens relevans']):.0f}/100")
+                best_price = _num(best.get("Pris"))
+                c4.metric("Aktuell kurs", f"{best_price:.2f} {best.get('Valuta', '')}" if np.isfinite(best_price) else "—", fmt_pct(best.get("Dagsförändring")))
                 st.markdown(f"**Varför idag:** {best['Varför idag']}")
                 st.markdown(f"**Förändrat:** {best['Förändrat']}")
                 st.markdown(f"**Kontrollera:** {best['Kontrollera']}")
@@ -1552,13 +1559,16 @@ def render_overview(
 
         if len(daily_shortlist) > 1:
             st.markdown("### Nästa kandidater")
-            compact = daily_shortlist.iloc[1:5][["Ticker", "Namn", "Borsify Score", "Dagens relevans", "Prioritet", "Score Δ"]].copy()
+            compact = daily_shortlist.iloc[1:5][["Ticker", "Namn", "Pris", "Valuta", "Dagsförändring", "Prisdatum", "Borsify Score", "Dagens relevans", "Prioritet", "Score Δ"]].copy()
             st.dataframe(
                 compact, use_container_width=True, hide_index=True,
                 column_config={
                     "Borsify Score": st.column_config.ProgressColumn("Borsify", min_value=0, max_value=100, format="%.0f"),
                     "Dagens relevans": st.column_config.ProgressColumn("Idag", min_value=0, max_value=100, format="%.0f"),
                     "Score Δ": st.column_config.NumberColumn("Δ", format="%+.1f"),
+                    "Pris": st.column_config.NumberColumn("Aktuell kurs", format="%.2f"),
+                    "Dagsförändring": st.column_config.NumberColumn("Idag %", format="%.2f%%"),
+                    "Prisdatum": "Kursdag",
                 },
             )
 
@@ -1745,13 +1755,15 @@ def main() -> None:
 
             for rank, (_, case) in enumerate(daily_shortlist.iterrows(), start=1):
                 with st.container(border=True):
-                    h1, h2, h3, h4 = st.columns([3.2, 1, 1, 1])
+                    h1, h2, h3, h4, h5 = st.columns([3.0, 1, 1.15, 1, 1])
                     h1.markdown(f"### {rank}. {case['Namn']} · {case['Ticker']}")
                     h1.caption(f"{case['Signal']} · {case['Sektor']} · senaste kursdag {case.get('Prisdatum','—')}")
                     delta = _num(case.get("Score Δ"))
                     h2.metric("Borsify", f"{_num(case['Borsify Score']):.0f}/100", f"{delta:+.1f}" if np.isfinite(delta) else None)
-                    h3.metric("Dagens relevans", f"{_num(case['Dagens relevans']):.0f}/100")
-                    h4.metric("Prioritet", str(case["Prioritet"]))
+                    case_price = _num(case.get("Pris"))
+                    h3.metric("Aktuell kurs", f"{case_price:.2f} {case.get('Valuta', '')}" if np.isfinite(case_price) else "—", fmt_pct(case.get("Dagsförändring")))
+                    h4.metric("Dagens relevans", f"{_num(case['Dagens relevans']):.0f}/100")
+                    h5.metric("Prioritet", str(case["Prioritet"]))
                     c1, c2, c3 = st.columns(3)
                     c1.markdown("**Varför idag**")
                     c1.write(str(case["Varför idag"]))
@@ -1762,7 +1774,7 @@ def main() -> None:
 
             st.divider()
             st.subheader("Jämför dagens kortlista")
-            quick_cols = ["Ticker", "Namn", "Borsify Score", "INVEST Score", "SWING Score", "REVERSAL Score", "Dagens relevans", "Prioritet", "Score Δ", "Värdering", "Kvalitet", "Marknadsläge", "Risk", "Riskflaggor"]
+            quick_cols = ["Ticker", "Namn", "Pris", "Valuta", "Dagsförändring", "Prisdatum", "Borsify Score", "INVEST Score", "SWING Score", "REVERSAL Score", "Dagens relevans", "Prioritet", "Score Δ", "Värdering", "Kvalitet", "Marknadsläge", "Risk", "Riskflaggor"]
             quick = daily_shortlist[quick_cols].copy()
             st.dataframe(quick, use_container_width=True, hide_index=True, column_config={
                 "Borsify Score": st.column_config.ProgressColumn("Borsify", min_value=0, max_value=100, format="%.0f"),

@@ -1,4 +1,11 @@
-# Borsify v2.1.0
+# Borsify v2.1.1
+
+## v2.1.1 – aktuell kurs i lyfta case
+- Visar aktuell hämtad kurs, valuta och dagsförändring direkt på INVEST-, SWING- och REVERSAL-kandidater.
+- Visar aktuell kurs även för bästa kandidat på Överblick och i Dagens fynd-korten.
+- Nästa kandidater och jämförelsetabellen innehåller kurs, kursdag och dagsförändring.
+- Scoringmodellerna är oförändrade från v2.1.0.
+
 
 
 ## v2.1.0 – live polish
