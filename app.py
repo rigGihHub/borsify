@@ -22,7 +22,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.3"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -1463,8 +1463,8 @@ def render_overview(
             st.dataframe(
                 compact, use_container_width=True, hide_index=True,
                 column_config={
-                    "Borsify Score": st.column_config.ProgressColumn("Borsify", 0, 100, format="%.0f"),
-                    "Dagens relevans": st.column_config.ProgressColumn("Idag", 0, 100, format="%.0f"),
+                    "Borsify Score": st.column_config.ProgressColumn("Borsify", min_value=0, max_value=100, format="%.0f"),
+                    "Dagens relevans": st.column_config.ProgressColumn("Idag", min_value=0, max_value=100, format="%.0f"),
                     "Score Δ": st.column_config.NumberColumn("Δ", format="%+.1f"),
                 },
             )
@@ -1508,17 +1508,26 @@ def main() -> None:
     st.markdown("""
     <style>
     .block-container{padding-top:1.35rem;padding-bottom:3rem;max-width:1480px}
-    [data-testid="stMetric"]{background:#f8fafc;border:1px solid #e2e8f0;padding:12px 14px;border-radius:14px}
+    /* Theme-safe KPI cards: use Streamlit theme variables instead of fixed light colors. */
+    [data-testid="stMetric"]{background:var(--secondary-background-color);border:1px solid color-mix(in srgb,var(--text-color) 16%,transparent);padding:12px 14px;border-radius:14px;color:var(--text-color)}
+    [data-testid="stMetric"] [data-testid="stMetricLabel"],
+    [data-testid="stMetric"] [data-testid="stMetricLabel"] *{color:var(--text-color) !important;opacity:.72}
+    [data-testid="stMetric"] [data-testid="stMetricValue"],
+    [data-testid="stMetric"] [data-testid="stMetricValue"] *{color:var(--text-color) !important;opacity:1}
+    [data-testid="stMetric"] [data-testid="stMetricDelta"],
+    [data-testid="stMetric"] [data-testid="stMetricDelta"] *{opacity:1}
+    [data-testid="stMetric"] svg{fill:currentColor}
     .bq-hero{padding:22px 24px;border-radius:18px;background:linear-gradient(135deg,#0f172a,#1e293b);color:white;margin-bottom:14px}
     .bq-mark{display:inline-flex;width:42px;height:42px;border-radius:12px;align-items:center;justify-content:center;background:#22c55e;color:#07130b;font-weight:900;margin-right:10px}
     .bq-title{font-size:2rem;font-weight:800;letter-spacing:-.03em}.bq-sub{color:#cbd5e1;margin-top:5px}.bq-domain{color:#86efac;font-weight:700}
     .small-muted{color:#64748b;font-size:.9rem}
-    .bq-status{display:flex;justify-content:space-between;gap:18px;padding:9px 0;border-bottom:1px solid #e2e8f0;color:#475569}.bq-status strong{color:#0f172a}
+    .bq-status{display:flex;justify-content:space-between;gap:18px;padding:9px 0;border-bottom:1px solid rgba(148,163,184,.32);color:inherit}.bq-status span{opacity:.72}.bq-status strong{color:inherit}
     div[data-testid="stTabs"] button{font-weight:650}
     @media (max-width: 700px){
       .block-container{padding-top:.65rem;padding-left:.75rem;padding-right:.75rem}
       .bq-hero{padding:16px;border-radius:14px}.bq-title{font-size:1.55rem}.bq-sub{font-size:.82rem}
-      [data-testid="stMetric"]{padding:9px 10px;border-radius:11px}
+      [data-testid="stMetric"]{padding:9px 10px;border-radius:11px;min-height:84px}
+      [data-testid="stMetric"] [data-testid="stMetricValue"]{font-size:1.15rem}
       div[data-testid="stHorizontalBlock"]{gap:.55rem}
       .stDataFrame{font-size:.82rem}
     }
@@ -1601,7 +1610,10 @@ def main() -> None:
     k1,k2,k3,k4,k5 = st.columns(5)
     k1.metric("Analyserade", len(raw_df)); k2.metric("Efter filter", len(filtered)); k3.metric("OMXS30", f"{idx['index']:.2f}" if idx else "—", fmt_pct(idx.get("daily")) if idx else None); k4.metric("Datakörning", f"{elapsed:.1f} s"); k5.metric("Senaste kursdag", latest_price_date)
     if errors:
-        with st.expander(f"{len(errors)} ticker(s) kunde inte läsas"): st.code("\n".join(errors))
+        with st.expander(f"Datakällan saknade {len(errors)} ticker(s) — övriga analyserades"):
+            st.caption("Detta beror oftast på tillfälliga Yahoo-problem, ändrad ticker eller otillräcklig kurshistorik. Det påverkar inte aktier som redan har lästs in.")
+            for error in errors:
+                st.write(f"• {error}")
     if filtered.empty: st.warning("Inga aktier klarade filtren."); st.stop()
 
     # Förbered bevakningsdata och signaler en gång per körning.
@@ -1661,10 +1673,10 @@ def main() -> None:
                 "Borsify Score": st.column_config.ProgressColumn("Borsify", min_value=0, max_value=100, format="%.0f"),
                 "Dagens relevans": st.column_config.ProgressColumn("Dagens relevans", min_value=0, max_value=100, format="%.0f"),
                 "Score Δ": st.column_config.NumberColumn("Score Δ", format="%+.1f"),
-                "Värdering": st.column_config.ProgressColumn("Värdering", 0, 100, format="%.0f"),
-                "Kvalitet": st.column_config.ProgressColumn("Kvalitet", 0, 100, format="%.0f"),
-                "Marknadsläge": st.column_config.ProgressColumn("Setup", 0, 100, format="%.0f"),
-                "Risk": st.column_config.ProgressColumn("Risk", 0, 100, format="%.0f"),
+                "Värdering": st.column_config.ProgressColumn("Värdering", min_value=0, max_value=100, format="%.0f"),
+                "Kvalitet": st.column_config.ProgressColumn("Kvalitet", min_value=0, max_value=100, format="%.0f"),
+                "Marknadsläge": st.column_config.ProgressColumn("Setup", min_value=0, max_value=100, format="%.0f"),
+                "Risk": st.column_config.ProgressColumn("Risk", min_value=0, max_value=100, format="%.0f"),
             })
 
         st.divider(); st.subheader("Topplista enligt ren Borsify Score")
@@ -1674,8 +1686,8 @@ def main() -> None:
             "Pris": st.column_config.NumberColumn("Pris", format="%.2f"), "Dagsförändring": st.column_config.NumberColumn("Idag", format="%.2f%%"),
             "P/E": st.column_config.NumberColumn("P/E", format="%.1f"), "Direktavkastning": st.column_config.NumberColumn("DA", format="%.1f%%"),
             "52v från topp": st.column_config.NumberColumn("Från 52v-topp", format="%.1f%%"), "RSI14": st.column_config.NumberColumn("RSI", format="%.0f"),
-            "Värdering": st.column_config.ProgressColumn("Värdering",0,100,format="%.0f"), "Kvalitet": st.column_config.ProgressColumn("Kvalitet",0,100,format="%.0f"),
-            "Marknadsläge": st.column_config.ProgressColumn("Setup",0,100,format="%.0f"), "Risk": st.column_config.ProgressColumn("Risk",0,100,format="%.0f"),
+            "Värdering": st.column_config.ProgressColumn("Värdering", min_value=0, max_value=100, format="%.0f"), "Kvalitet": st.column_config.ProgressColumn("Kvalitet", min_value=0, max_value=100, format="%.0f"),
+            "Marknadsläge": st.column_config.ProgressColumn("Setup", min_value=0, max_value=100, format="%.0f"), "Risk": st.column_config.ProgressColumn("Risk", min_value=0, max_value=100, format="%.0f"),
         })
         st.download_button("Ladda ner topplistan som CSV", data=display.to_csv(index=False).encode("utf-8-sig"), file_name=f"borsify_{datetime.now():%Y-%m-%d}.csv", mime="text/csv")
         st.divider(); st.subheader("Detaljanalys")

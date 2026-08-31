@@ -1,4 +1,14 @@
-# Borsify v2.0.1
+# Borsify v2.0.3
+
+
+## v2.0.3 – live polish
+
+- Korrigerad kontrast i Streamlit-metrics/KPI-kort när appen körs med mörkt tema.
+- Metric-värden och etiketter får nu explicita läsbara färger i stället för att ärva vit text från temat.
+- Statusrader använder temats textfärg i stället för hårdkodad mörk text.
+- Mobilvyn har kompaktare och mer läsbara KPI-kort.
+- Yahoo-fel visas nu som en tydlig datakällevarning och förklarar att övriga aktier fortfarande analyserats.
+- Ingen ändring av Borsify Score/scoringmodellen.
 
 Borsify är en svensk aktiescreener som rankar aktier med **Borsify Score 0–100** utifrån värdering, kvalitet, marknadsläge, utdelning och risk. Modellen är ett prioriteringsverktyg för vidare analys, inte ett köp- eller säljråd.
 
@@ -76,7 +86,7 @@ Marknads- och fundamentaldata hämtas via Yahoo Finance/yfinance och kan vara f�
 Borsify Score är relativ och påverkas av vilka aktier som finns i det analyserade universumet. Dagens relevans bygger dessutom delvis på tidigare snapshots; innan historik finns används ett neutralt förändringsvärde. Kontrollera alltid bolagets rapporter, IR-information, kassaflöde, skuldsättning och aktuell nyhetsbild innan investeringsbeslut.
 
 
-## Public-ready v2.0.1
+## Public-ready v2.0.3
 
 Den här releasen är förberedd för ett publikt GitHub-repo och Streamlit Community Cloud. Produktnamnet är **Borsify**, domänreferenser använder **borsify.se**, och genererade Python-cachefiler är borttagna.
 
@@ -104,3 +114,9 @@ För den schemalagda GitHub Action-körningen används vid behov:
 När `APP_ACCESS_PASSWORD` finns i Streamlit Secrets stoppas appen innan någon marknadsdata eller användarvy laddas. Besökaren måste först ange lösenordet. Om nyckeln saknas är appen öppen, vilket är praktiskt vid lokal utveckling men inte rekommenderat för den publika testmiljön.
 
 Detta skyddar **appen**, inte källkoden: ett publikt GitHub-repo kan fortfarande läsas av andra. Därför får inga hemligheter finnas i repot.
+## v2.0.3 hotfix
+
+- Rättar Streamlit Cloud-krasch i `ProgressColumn` genom att använda nyckelordsargument för `min_value` och `max_value`.
+- KPI-kort använder nu Streamlits egna temavariabler i stället för fasta ljusa färger, så texten är läsbar i både mörkt och ljust tema.
+- Felande tickers visas fortsatt individuellt i datakällans expander.
+- Scoringmodellen är oförändrad.
