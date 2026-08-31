@@ -1,8 +1,15 @@
 __pycache__/
 *.pyc
 .streamlit/secrets.toml
-borsiq.db
-borsiq.db-*
+borsify.db
+borsify.db-*
 
 *.db-wal
 *.db-shm
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.pytest_cache/
+.DS_Store

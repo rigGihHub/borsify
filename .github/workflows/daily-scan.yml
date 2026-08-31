@@ -1,4 +1,4 @@
-name: Borsiq Daily Scan
+name: Borsify Daily Scan
 
 on:
   schedule:
@@ -18,9 +18,9 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python daily_scan.py
         env:
-          BORSIQ_SUPABASE_URL: ${{ secrets.BORSIQ_SUPABASE_URL }}
-          BORSIQ_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.BORSIQ_SUPABASE_SERVICE_ROLE_KEY }}
-          BORSIQ_RESEND_API_KEY: ${{ secrets.BORSIQ_RESEND_API_KEY }}
-          BORSIQ_EMAIL_FROM: ${{ secrets.BORSIQ_EMAIL_FROM }}
-          BORSIQ_DAILY_PROFILE: Balanserad
-          BORSIQ_APP_URL: https://borsiq.se
+          BORSIFY_SUPABASE_URL: ${{ secrets.BORSIFY_SUPABASE_URL }}
+          BORSIFY_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.BORSIFY_SUPABASE_SERVICE_ROLE_KEY }}
+          BORSIFY_RESEND_API_KEY: ${{ secrets.BORSIFY_RESEND_API_KEY }}
+          BORSIFY_EMAIL_FROM: ${{ secrets.BORSIFY_EMAIL_FROM }}
+          BORSIFY_DAILY_PROFILE: Balanserad
+          BORSIFY_APP_URL: https://borsify.se

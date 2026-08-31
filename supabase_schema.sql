@@ -1,4 +1,4 @@
--- Borsiq v1.8.0 – kompatibel med v1.7-schema; kör i Supabase SQL Editor vid uppgradering från äldre version.
+-- Borsify v2.0.1 – kompatibel med v1.7-schema; kör i Supabase SQL Editor vid uppgradering från äldre version.
 create table if not exists public.watchlist (
   user_id uuid not null references auth.users(id) on delete cascade,
   symbol text not null,

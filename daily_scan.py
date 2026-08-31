@@ -1,14 +1,14 @@
-"""Borsiq scheduled scanner + e-mail digest.
+"""Borsify scheduled scanner + e-mail digest.
 
 Designed for GitHub Actions or another server-side scheduler.
 Required for scanning:
-  BORSIQ_SUPABASE_URL
-  BORSIQ_SUPABASE_SERVICE_ROLE_KEY
+  BORSIFY_SUPABASE_URL
+  BORSIFY_SUPABASE_SERVICE_ROLE_KEY
 
 Optional e-mail delivery via Resend:
-  BORSIQ_RESEND_API_KEY
-  BORSIQ_EMAIL_FROM            e.g. "Borsiq <radar@borsiq.se>"
-  BORSIQ_APP_URL               defaults to https://borsiq.se
+  BORSIFY_RESEND_API_KEY
+  BORSIFY_EMAIL_FROM            e.g. "Borsify <radar@borsify.se>"
+  BORSIFY_APP_URL               defaults to https://borsify.se
 
 The service-role key and Resend key must only exist in server/GitHub Secrets.
 """
@@ -26,12 +26,12 @@ from supabase import create_client
 
 import app as core
 
-URL = os.getenv("BORSIQ_SUPABASE_URL", "").strip()
-KEY = os.getenv("BORSIQ_SUPABASE_SERVICE_ROLE_KEY", "").strip()
-PROFILE = os.getenv("BORSIQ_DAILY_PROFILE", "Balanserad").strip() or "Balanserad"
-RESEND_API_KEY = os.getenv("BORSIQ_RESEND_API_KEY", "").strip()
-EMAIL_FROM = os.getenv("BORSIQ_EMAIL_FROM", "").strip()
-APP_URL = os.getenv("BORSIQ_APP_URL", "https://borsiq.se").strip() or "https://borsiq.se"
+URL = os.getenv("BORSIFY_SUPABASE_URL", "").strip()
+KEY = os.getenv("BORSIFY_SUPABASE_SERVICE_ROLE_KEY", "").strip()
+PROFILE = os.getenv("BORSIFY_DAILY_PROFILE", "Balanserad").strip() or "Balanserad"
+RESEND_API_KEY = os.getenv("BORSIFY_RESEND_API_KEY", "").strip()
+EMAIL_FROM = os.getenv("BORSIFY_EMAIL_FROM", "").strip()
+APP_URL = os.getenv("BORSIFY_APP_URL", "https://borsify.se").strip() or "https://borsify.se"
 
 if PROFILE not in core.PROFILE_WEIGHTS:
     PROFILE = "Balanserad"
@@ -56,7 +56,7 @@ def _send_resend_email(to_email: str, subject: str, html_body: str) -> tuple[boo
         headers={
             "Authorization": f"Bearer {RESEND_API_KEY}",
             "Content-Type": "application/json",
-            "User-Agent": "Borsiq/1.8",
+            "User-Agent": "Borsify/2.0.1",
         },
     )
     try:
@@ -82,14 +82,14 @@ def _email_digest(signals: list[dict], today: str) -> str:
     return f"""
     <div style="font-family:Arial,sans-serif;max-width:680px;margin:auto;color:#0f172a;line-height:1.45">
       <div style="background:#0f172a;color:white;padding:22px 24px;border-radius:14px 14px 0 0">
-        <div style="font-size:24px;font-weight:800">Borsiq Radar</div>
+        <div style="font-size:24px;font-weight:800">Borsify Radar</div>
         <div style="color:#cbd5e1;margin-top:4px">{html.escape(today)} · {html.escape(PROFILE)}</div>
       </div>
       <div style="border:1px solid #e2e8f0;border-top:0;padding:22px 24px;border-radius:0 0 14px 14px">
         <p>Din automatiska scanning gav <strong>{len(signals)} signal{'er' if len(signals) != 1 else ''}</strong> som matchar dina e-postinställningar.</p>
         <ul style="padding-left:22px">{''.join(items)}</ul>
-        <p><a href="{html.escape(APP_URL)}" style="display:inline-block;background:#0f172a;color:white;text-decoration:none;padding:10px 15px;border-radius:8px">Öppna Borsiq</a></p>
-        <p style="font-size:12px;color:#64748b">Borsiq Score och signaler är kvantitativ screening och inte köp- eller säljråd. Kontrollera alltid bolagsdata och nyheter.</p>
+        <p><a href="{html.escape(APP_URL)}" style="display:inline-block;background:#0f172a;color:white;text-decoration:none;padding:10px 15px;border-radius:8px">Öppna Borsify</a></p>
+        <p style="font-size:12px;color:#64748b">Borsify Score och signaler är kvantitativ screening och inte köp- eller säljråd. Kontrollera alltid bolagsdata och nyheter.</p>
       </div>
     </div>
     """
@@ -141,7 +141,7 @@ def _deliver_user_email(client, uid: str, today: str) -> bool:
         return False
 
     pending.sort(key=lambda x: (-int(n(x.get("priority"), 1)), str(x.get("symbol") or ""), str(x.get("kind") or "")))
-    subject = f"Borsiq Radar: {len(pending)} signal{'er' if len(pending) != 1 else ''}"
+    subject = f"Borsify Radar: {len(pending)} signal{'er' if len(pending) != 1 else ''}"
     ok, reason = _send_resend_email(to_email, subject, _email_digest(pending, today))
     if not ok:
         print(f"Email delivery skipped/failed for one user: {reason}")
@@ -156,7 +156,7 @@ def _deliver_user_email(client, uid: str, today: str) -> bool:
 
 def main() -> int:
     if not URL or not KEY:
-        raise SystemExit("Missing BORSIQ_SUPABASE_URL or BORSIQ_SUPABASE_SERVICE_ROLE_KEY")
+        raise SystemExit("Missing BORSIFY_SUPABASE_URL or BORSIFY_SUPABASE_SERVICE_ROLE_KEY")
     client = create_client(URL, KEY)
     watch = client.table("watchlist").select(
         "user_id,symbol,target_price,signal_score_threshold,signal_score_move,signal_daily_drop"
@@ -183,7 +183,7 @@ def main() -> int:
         current_top = set(top.head(10)["Ticker"].astype(str))
         for i, row in top.iterrows():
             client.table("radar_history").upsert(
-                {"user_id": uid, "symbol": str(row["Ticker"]), "profile": PROFILE, "rank": int(i + 1), "score": float(row["Borsiq Score"]), "captured_date": today},
+                {"user_id": uid, "symbol": str(row["Ticker"]), "profile": PROFILE, "rank": int(i + 1), "score": float(row["Borsify Score"]), "captured_date": today},
                 on_conflict="user_id,symbol,profile,captured_date",
             ).execute()
 
@@ -194,7 +194,7 @@ def main() -> int:
             row = by_symbol.get(sym)
             if row is None:
                 continue
-            score = n(row.get("Borsiq Score")); price = n(row.get("Pris")); daily = n(row.get("Dagsförändring"))
+            score = n(row.get("Borsify Score")); price = n(row.get("Pris")); daily = n(row.get("Dagsförändring"))
             prev_rows = client.table("score_history").select("score,captured_date").eq("user_id", uid).eq("symbol", sym).eq("profile", PROFILE).lt("captured_date", today).order("captured_date", desc=True).limit(1).execute().data or []
             prev = n(prev_rows[0]["score"]) if prev_rows else np.nan
             snapshot = {
@@ -213,15 +213,15 @@ def main() -> int:
             sigs: list[tuple[int, str, str]] = []
             if sym in current_top and prior_top and sym not in prior_top:
                 rank = next((i + 1 for i, x in enumerate(top.head(10)["Ticker"].astype(str).tolist()) if x == sym), None)
-                sigs.append((3, "Ny i topp 10", f"{sym} har gått in på plats {rank} i Borsiq Radar ({score:.0f}/100)."))
+                sigs.append((3, "Ny i topp 10", f"{sym} har gått in på plats {rank} i Borsify Radar ({score:.0f}/100)."))
             if np.isfinite(prev):
                 delta = score - prev
                 if delta >= move:
-                    sigs.append((3, "Score lyfter", f"Borsiq Score har stigit {delta:+.1f} till {score:.0f}/100. Din gräns är {move:.1f}."))
+                    sigs.append((3, "Score lyfter", f"Borsify Score har stigit {delta:+.1f} till {score:.0f}/100. Din gräns är {move:.1f}."))
                 if prev < threshold <= score:
-                    sigs.append((2, "Scoregräns passerad", f"Borsiq Score har passerat din gräns {threshold:.0f}: {prev:.1f} → {score:.1f}."))
+                    sigs.append((2, "Scoregräns passerad", f"Borsify Score har passerat din gräns {threshold:.0f}: {prev:.1f} → {score:.1f}."))
                 if delta <= -move:
-                    sigs.append((2, "Score faller", f"Borsiq Score har sjunkit {delta:.1f} till {score:.0f}/100. Din gräns är {move:.1f}."))
+                    sigs.append((2, "Score faller", f"Borsify Score har sjunkit {delta:.1f} till {score:.0f}/100. Din gräns är {move:.1f}."))
             if np.isfinite(target) and np.isfinite(price) and price >= target:
                 sigs.append((3, "Målkurs nådd", f"Kursen {price:.2f} har nått/passerat din målkurs {target:.2f}."))
             if np.isfinite(daily) and daily <= -(drop / 100):

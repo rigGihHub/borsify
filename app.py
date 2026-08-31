@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import hmac
 import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,11 +22,11 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.0.0"
-APP_NAME = "Borsiq"
-APP_DOMAIN = "borsiq.se"
+APP_VERSION = "2.0.1"
+APP_NAME = "Borsify"
+APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
-DB_PATH = APP_DIR / "borsiq.db"
+DB_PATH = APP_DIR / "borsify.db"
 UNIVERSE_PATH = APP_DIR / "universe.csv"
 
 OMXS30_TICKERS = [
@@ -351,11 +352,11 @@ def add_scores(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     coverage_cols = ["P/E", "Forward P/E", "EV/EBITDA", "FCF-yield", "ROE", "Vinstmarginal", "Omsättningstillväxt", "Skuld/eget kapital"]
     coverage = out[coverage_cols].notna().mean(axis=1)
     out["Datatäckning"] = coverage
-    out["Borsiq Score"] = (base * (.80 + .20 * coverage)).round(1).clip(0, 100)
+    out["Borsify Score"] = (base * (.80 + .20 * coverage)).round(1).clip(0, 100)
     out["Riskflaggor"] = out.apply(_risk_flags, axis=1)
     out["Signal"] = out.apply(_signal_label, axis=1)
     out["Varför"] = out.apply(_why_text, axis=1)
-    return out.sort_values(["Borsiq Score", "Datatäckning"], ascending=[False, False])
+    return out.sort_values(["Borsify Score", "Datatäckning"], ascending=[False, False])
 
 
 def _risk_flags(row: pd.Series) -> str:
@@ -373,7 +374,7 @@ def _risk_flags(row: pd.Series) -> str:
 
 
 def _signal_label(row: pd.Series) -> str:
-    score = _num(row.get("Borsiq Score")); flags = str(row.get("Riskflaggor", ""))
+    score = _num(row.get("Borsify Score")); flags = str(row.get("Riskflaggor", ""))
     severe = any(x in flags for x in ["negativ ROE", "negativ marginal", "hög skuldsättning", "fallande lång trend"])
     if score >= 78 and not severe: return "Starkt fyndläge"
     if score >= 68: return "Intressant"
@@ -399,7 +400,7 @@ SEVERE_RISK_TERMS = ["negativ ROE", "negativ marginal", "hög skuldsättning", "
 
 def _daily_case(row: pd.Series, profile: str) -> dict[str, Any]:
     """Create a compact, explainable 'why today' triage without pretending to be a buy recommendation."""
-    score = _num(row.get("Borsiq Score"))
+    score = _num(row.get("Borsify Score"))
     setup = _num(row.get("Marknadsläge"))
     quality = _num(row.get("Kvalitet"))
     valuation = _num(row.get("Värdering"))
@@ -415,7 +416,7 @@ def _daily_case(row: pd.Series, profile: str) -> dict[str, Any]:
     prev_score = _num(prev.get("score")) if prev else np.nan
     delta = score - prev_score if np.isfinite(score) and np.isfinite(prev_score) else np.nan
 
-    # 'Dagens relevans' deliberately remains separate from Borsiq Score. It emphasizes
+    # 'Dagens relevans' deliberately remains separate from Borsify Score. It emphasizes
     # current setup and recent score improvement while risk gates can cap the result.
     delta_factor = 50.0 if not np.isfinite(delta) else float(np.clip(50 + delta * 4.0, 0, 100))
     relevance = (
@@ -440,9 +441,9 @@ def _daily_case(row: pd.Series, profile: str) -> dict[str, Any]:
 
     why_today: list[str] = []
     if np.isfinite(delta) and delta >= 3:
-        why_today.append(f"Borsiq Score har stigit {delta:+.1f} sedan föregående snapshot")
+        why_today.append(f"Borsify Score har stigit {delta:+.1f} sedan föregående snapshot")
     elif np.isfinite(delta) and delta <= -3:
-        why_today.append(f"Borsiq Score har fallit {delta:+.1f} sedan föregående snapshot")
+        why_today.append(f"Borsify Score har fallit {delta:+.1f} sedan föregående snapshot")
     if np.isfinite(setup) and setup >= 70:
         why_today.append(f"marknadsläget är starkt i modellen ({setup:.0f}/100)")
     if np.isfinite(rsi) and 32 <= rsi <= 48:
@@ -497,12 +498,12 @@ def build_daily_shortlist(df: pd.DataFrame, profile: str, limit: int = 5) -> pd.
         return df.copy()
     # Do not hit history storage for the entire market; the strongest 15 by base score
     # are enough candidates for the daily triage.
-    pool = df.sort_values(["Borsiq Score", "Datatäckning"], ascending=[False, False]).head(15).copy()
+    pool = df.sort_values(["Borsify Score", "Datatäckning"], ascending=[False, False]).head(15).copy()
     cases = [_daily_case(row, profile) for _, row in pool.iterrows()]
     case_df = pd.DataFrame(cases, index=pool.index)
     for col in case_df.columns:
         pool[col] = case_df[col]
-    return pool.sort_values(["Dagens relevans", "Borsiq Score", "Datatäckning"], ascending=[False, False, False]).head(limit)
+    return pool.sort_values(["Dagens relevans", "Borsify Score", "Datatäckning"], ascending=[False, False, False]).head(limit)
 
 
 def scan_universe(symbols: list[str]) -> tuple[pd.DataFrame, list[str]]:
@@ -599,6 +600,40 @@ def _fmt_date(value: Any) -> str:
         return ts.strftime("%Y-%m-%d")
     except Exception:
         return str(value)[:10] if value else "—"
+
+
+def _site_access_password() -> str:
+    """Optional shared site password stored only in Streamlit Secrets."""
+    try:
+        return str(st.secrets.get("APP_ACCESS_PASSWORD", "")).strip()
+    except Exception:
+        return ""
+
+
+def require_site_access() -> None:
+    """Gate a public Streamlit deployment behind an app-level password when configured.
+
+    Local development remains open if APP_ACCESS_PASSWORD is not configured.
+    The password itself never belongs in source control.
+    """
+    expected = _site_access_password()
+    if not expected:
+        return
+    if st.session_state.get("bq_site_access") is True:
+        return
+
+    st.subheader("Borsify är låst")
+    st.caption("Ange åtkomstlösenordet för att öppna appen.")
+    with st.form("site_access_form", clear_on_submit=True):
+        supplied = st.text_input("Åtkomstlösenord", type="password")
+        submitted = st.form_submit_button("Öppna Borsify", type="primary", use_container_width=True)
+    if submitted:
+        if hmac.compare_digest(supplied, expected):
+            st.session_state["bq_site_access"] = True
+            st.rerun()
+        else:
+            st.error("Fel lösenord.")
+    st.stop()
 
 
 def _supabase_config() -> tuple[str, str]:
@@ -924,8 +959,8 @@ def save_score_history(df: pd.DataFrame, profile: str) -> None:
     watched = set(watched_symbols())
     if not watched or df.empty:
         return
-    cols = ["Ticker", "Borsiq Score", "Värdering", "Kvalitet", "Marknadsläge", "Utdelning", "Risk", "Datatäckning"]
-    rows = df[df["Ticker"].isin(watched)][cols].dropna(subset=["Borsiq Score"])
+    cols = ["Ticker", "Borsify Score", "Värdering", "Kvalitet", "Marknadsläge", "Utdelning", "Risk", "Datatäckning"]
+    rows = df[df["Ticker"].isin(watched)][cols].dropna(subset=["Borsify Score"])
     if rows.empty:
         return
     today = datetime.now().date().isoformat()
@@ -933,7 +968,7 @@ def save_score_history(df: pd.DataFrame, profile: str) -> None:
     if client is not None and uid:
         for _, row in rows.iterrows():
             payload = {
-                "user_id": uid, "symbol": str(row["Ticker"]), "score": float(row["Borsiq Score"]), "profile": profile, "captured_date": today,
+                "user_id": uid, "symbol": str(row["Ticker"]), "score": float(row["Borsify Score"]), "profile": profile, "captured_date": today,
                 "valuation": _num(row.get("Värdering")), "quality": _num(row.get("Kvalitet")), "setup": _num(row.get("Marknadsläge")),
                 "income": _num(row.get("Utdelning")), "risk": _num(row.get("Risk")), "coverage": _num(row.get("Datatäckning")),
             }
@@ -950,7 +985,7 @@ def save_score_history(df: pd.DataFrame, profile: str) -> None:
     with _db_connect() as conn:
         for _, row in rows.iterrows():
             vals = (
-                float(row["Borsiq Score"]), _num(row.get("Värdering")), _num(row.get("Kvalitet")), _num(row.get("Marknadsläge")),
+                float(row["Borsify Score"]), _num(row.get("Värdering")), _num(row.get("Kvalitet")), _num(row.get("Marknadsläge")),
                 _num(row.get("Utdelning")), _num(row.get("Risk")), _num(row.get("Datatäckning")),
             )
             existing = conn.execute("SELECT rowid FROM score_history WHERE symbol=? AND profile=? AND substr(captured_at,1,10)=?", (str(row["Ticker"]), profile, today)).fetchone()
@@ -1096,10 +1131,10 @@ def save_radar_history(top_df: pd.DataFrame, profile: str) -> None:
         return
     today = datetime.now().date().isoformat()
     client = _supabase_client(); uid = current_user_id()
-    rows = top_df.head(20)[["Ticker", "Borsiq Score"]].reset_index(drop=True)
+    rows = top_df.head(20)[["Ticker", "Borsify Score"]].reset_index(drop=True)
     if client is not None and uid:
         for i, row in rows.iterrows():
-            payload = {"user_id": uid, "symbol": str(row["Ticker"]), "profile": profile, "rank": int(i + 1), "score": float(row["Borsiq Score"]), "captured_date": today}
+            payload = {"user_id": uid, "symbol": str(row["Ticker"]), "profile": profile, "rank": int(i + 1), "score": float(row["Borsify Score"]), "captured_date": today}
             try:
                 client.table("radar_history").upsert(payload, on_conflict="user_id,symbol,profile,captured_date").execute()
             except Exception:
@@ -1110,7 +1145,7 @@ def save_radar_history(top_df: pd.DataFrame, profile: str) -> None:
         for i, row in rows.iterrows():
             conn.execute(
                 "INSERT INTO radar_history(symbol,profile,rank,score,captured_date) VALUES (?,?,?,?,?) ON CONFLICT(symbol,profile,captured_date) DO UPDATE SET rank=excluded.rank,score=excluded.score,captured_at=CURRENT_TIMESTAMP",
-                (str(row["Ticker"]), profile, int(i + 1), float(row["Borsiq Score"]), today),
+                (str(row["Ticker"]), profile, int(i + 1), float(row["Borsify Score"]), today),
             )
 
 
@@ -1195,7 +1230,7 @@ def build_watch_signals(watch_df: pd.DataFrame, top_df: pd.DataFrame, watch_meta
     signals: list[dict[str, Any]] = []
     for _, row in watch_df.iterrows():
         sym = str(row["Ticker"]); name = str(row.get("Namn") or sym)
-        score = _num(row.get("Borsiq Score")); price = _num(row.get("Pris")); daily = _num(row.get("Dagsförändring"))
+        score = _num(row.get("Borsify Score")); price = _num(row.get("Pris")); daily = _num(row.get("Dagsförändring"))
         prev = previous_score(sym, profile)
         delta = score - prev if np.isfinite(score) and prev is not None and np.isfinite(prev) else None
         meta = meta_by_symbol.get(sym)
@@ -1209,17 +1244,17 @@ def build_watch_signals(watch_df: pd.DataFrame, top_df: pd.DataFrame, watch_meta
 
         if sym in current_top and prior_top and sym not in prior_top:
             rank = next((i + 1 for i, x in enumerate(top_df.head(10)["Ticker"].astype(str).tolist()) if x == sym), None)
-            signals.append({"priority": 3, "symbol": sym, "name": name, "kind": "Ny i topp 10", "text": f"{name} har gått in på plats {rank} i Borsiq Radar ({score:.0f}/100)."})
+            signals.append({"priority": 3, "symbol": sym, "name": name, "kind": "Ny i topp 10", "text": f"{name} har gått in på plats {rank} i Borsify Radar ({score:.0f}/100)."})
         if delta is not None and delta >= move:
-            signals.append({"priority": 3, "symbol": sym, "name": name, "kind": "Score lyfter", "text": f"Borsiq Score har stigit {delta:+.1f} sedan föregående registrerade dag till {score:.0f}/100. Din gräns är {move:.1f}."})
+            signals.append({"priority": 3, "symbol": sym, "name": name, "kind": "Score lyfter", "text": f"Borsify Score har stigit {delta:+.1f} sedan föregående registrerade dag till {score:.0f}/100. Din gräns är {move:.1f}."})
         if prev is not None and prev < threshold <= score:
-            signals.append({"priority": 2, "symbol": sym, "name": name, "kind": "Scoregräns passerad", "text": f"Borsiq Score har passerat din gräns {threshold:.0f}: {prev:.1f} → {score:.1f}."})
+            signals.append({"priority": 2, "symbol": sym, "name": name, "kind": "Scoregräns passerad", "text": f"Borsify Score har passerat din gräns {threshold:.0f}: {prev:.1f} → {score:.1f}."})
         if np.isfinite(target) and np.isfinite(price) and price >= target:
             signals.append({"priority": 3, "symbol": sym, "name": name, "kind": "Målkurs nådd", "text": f"Kursen {price:.2f} har nått/passerat din målkurs {target:.2f}."})
         if np.isfinite(daily) and daily <= -(daily_drop / 100.0):
             signals.append({"priority": 2, "symbol": sym, "name": name, "kind": "Kraftigt dagsfall", "text": f"Aktien är ned {daily:.1%} idag, vilket passerar din gräns på {daily_drop:.1f} %. Kontrollera nyheter/bolagshändelser."})
         if delta is not None and delta <= -move:
-            signals.append({"priority": 2, "symbol": sym, "name": name, "kind": "Score faller", "text": f"Borsiq Score har sjunkit {delta:.1f} sedan föregående registrerade dag till {score:.0f}/100. Din gräns är {move:.1f}."})
+            signals.append({"priority": 2, "symbol": sym, "name": name, "kind": "Score faller", "text": f"Borsify Score har sjunkit {delta:.1f} sedan föregående registrerade dag till {score:.0f}/100. Din gräns är {move:.1f}."})
     return sorted(signals, key=lambda x: (-int(x["priority"]), x["symbol"], x["kind"]))
 
 
@@ -1268,7 +1303,7 @@ def parse_symbols(text: str) -> list[str]:
 
 
 def dataframe_for_display(df: pd.DataFrame) -> pd.DataFrame:
-    cols = ["Ticker", "Namn", "Sektor", "Borsiq Score", "Signal", "Pris", "Prisdatum", "Dagsförändring", "P/E", "Direktavkastning", "52v från topp", "RSI14", "Värdering", "Kvalitet", "Marknadsläge", "Risk", "Riskflaggor", "Varför"]
+    cols = ["Ticker", "Namn", "Sektor", "Borsify Score", "Signal", "Pris", "Prisdatum", "Dagsförändring", "P/E", "Direktavkastning", "52v från topp", "RSI14", "Värdering", "Kvalitet", "Marknadsläge", "Risk", "Riskflaggor", "Varför"]
     display = df[[c for c in cols if c in df.columns]].copy()
     for col in ["Dagsförändring", "Direktavkastning", "52v från topp"]:
         if col in display: display[col] = pd.to_numeric(display[col], errors="coerce") * 100
@@ -1280,8 +1315,8 @@ def render_detail(row: pd.Series, profile: str) -> None:
     c1, c2, c3, c4, c5 = st.columns(5)
     prev = previous_score_snapshot(str(row["Ticker"]), profile)
     score_delta = None
-    if prev and np.isfinite(_num(prev.get("score"))): score_delta = _num(row.get("Borsiq Score")) - _num(prev.get("score"))
-    c1.metric("Borsiq Score", f"{row['Borsiq Score']:.0f}/100", f"{score_delta:+.1f}" if score_delta is not None else None)
+    if prev and np.isfinite(_num(prev.get("score"))): score_delta = _num(row.get("Borsify Score")) - _num(prev.get("score"))
+    c1.metric("Borsify Score", f"{row['Borsify Score']:.0f}/100", f"{score_delta:+.1f}" if score_delta is not None else None)
     c2.metric("Pris", f"{row['Pris']:.2f} {row.get('Valuta', '')}", fmt_pct(row.get("Dagsförändring")))
     c3.metric("Värdering", f"{row['Värdering']:.0f}")
     c4.metric("Kvalitet", f"{row['Kvalitet']:.0f}")
@@ -1389,7 +1424,7 @@ def render_overview(
 ) -> None:
     """A compact start screen that answers: what matters, why, and what next?"""
     st.subheader("Överblick")
-    st.caption("Borsiq ska först hjälpa dig prioritera vad som är värt att analysera vidare — inte överösa dig med tabeller.")
+    st.caption("Borsify ska först hjälpa dig prioritera vad som är värt att analysera vidare — inte överösa dig med tabeller.")
 
     best = daily_shortlist.iloc[0] if not daily_shortlist.empty else None
     high_priority = int((daily_shortlist["Prioritet"] == "Hög").sum()) if not daily_shortlist.empty else 0
@@ -1415,7 +1450,7 @@ def render_overview(
                 c1, c2, c3 = st.columns([2.5, 1, 1])
                 c1.markdown(f"## {best['Namn']}")
                 c1.caption(f"{best['Ticker']} · {best['Sektor']} · {best['Signal']}")
-                c2.metric("Borsiq", f"{_num(best['Borsiq Score']):.0f}/100", f"{_num(best.get('Score Δ')):+.1f}" if np.isfinite(_num(best.get('Score Δ'))) else None)
+                c2.metric("Borsify", f"{_num(best['Borsify Score']):.0f}/100", f"{_num(best.get('Score Δ')):+.1f}" if np.isfinite(_num(best.get('Score Δ'))) else None)
                 c3.metric("Idag", f"{_num(best['Dagens relevans']):.0f}/100")
                 st.markdown(f"**Varför idag:** {best['Varför idag']}")
                 st.markdown(f"**Förändrat:** {best['Förändrat']}")
@@ -1424,11 +1459,11 @@ def render_overview(
 
         if len(daily_shortlist) > 1:
             st.markdown("### Nästa kandidater")
-            compact = daily_shortlist.iloc[1:5][["Ticker", "Namn", "Borsiq Score", "Dagens relevans", "Prioritet", "Score Δ"]].copy()
+            compact = daily_shortlist.iloc[1:5][["Ticker", "Namn", "Borsify Score", "Dagens relevans", "Prioritet", "Score Δ"]].copy()
             st.dataframe(
                 compact, use_container_width=True, hide_index=True,
                 column_config={
-                    "Borsiq Score": st.column_config.ProgressColumn("Borsiq", 0, 100, format="%.0f"),
+                    "Borsify Score": st.column_config.ProgressColumn("Borsify", 0, 100, format="%.0f"),
                     "Dagens relevans": st.column_config.ProgressColumn("Idag", 0, 100, format="%.0f"),
                     "Score Δ": st.column_config.NumberColumn("Δ", format="%+.1f"),
                 },
@@ -1462,7 +1497,7 @@ def render_overview(
     st.divider()
     st.markdown("### Gå vidare till en aktie")
     candidates = filtered.head(min(25, len(filtered)))
-    choices = {f"{r['Ticker']} · {r['Namn']} · {r['Borsiq Score']:.0f}/100": i for i, r in candidates.iterrows()}
+    choices = {f"{r['Ticker']} · {r['Namn']} · {r['Borsify Score']:.0f}/100": i for i, r in candidates.iterrows()}
     if choices:
         selected = st.selectbox("Välj kandidat för full analys", list(choices), key="overview_detail_choice")
         with st.expander("Öppna full analys", expanded=False):
@@ -1490,9 +1525,10 @@ def main() -> None:
     </style>
     """, unsafe_allow_html=True)
     st.markdown(f"""<div class='bq-hero'><div><span class='bq-mark'>BQ</span><span class='bq-title'>{APP_NAME}</span></div><div class='bq-sub'>Hitta vad som är värt att analysera idag — och förstå varför · <span class='bq-domain'>{APP_DOMAIN}</span> · v{APP_VERSION}</div></div>""", unsafe_allow_html=True)
-    st.info("Borsiq Score är en kvantitativ screeningmodell — inte ett köp- eller säljråd. Kursdata hämtas i bulk och cachas 15 min; fundamentaldata cachas 6 timmar. Yahoo-data kan vara fördröjd eller ofullständig.")
+    st.info("Borsify Score är en kvantitativ screeningmodell — inte ett köp- eller säljråd. Kursdata hämtas i bulk och cachas 15 min; fundamentaldata cachas 6 timmar. Yahoo-data kan vara fördröjd eller ofullständig.")
     st.caption("Arbetsflöde: 1) Överblick → 2) Dagens fynd → 3) full aktieanalys → 4) bevaka och få Radar-signaler.")
 
+    require_site_access()
     init_db()
     universe_df = load_universe_file()
     file_universe_symbols = universe_df["Ticker"].tolist()
@@ -1522,7 +1558,7 @@ def main() -> None:
         else:
             st.caption("Lokalt läge · konfigurera Supabase för konto och molnsynk.")
         st.divider()
-        st.header("Borsiq Radar")
+        st.header("Borsify Radar")
         universe = st.radio("Universum", ["OMXS30", "Sverige bred", "Egen lista"], index=1)
         custom = st.text_area("Tickers", value="INVE-B.ST, VOLV-B.ST, SAND.ST, EVO.ST", height=110) if universe == "Egen lista" else ""
         if universe == "Sverige bred": st.caption(f"Universumsfil: {len(file_universe_symbols)} svenska tickers. Listan ligger i universe.csv och kan underhållas utan kodändring.")
@@ -1539,7 +1575,7 @@ def main() -> None:
     if refresh: st.cache_data.clear()
     if not symbols: st.warning("Ange minst en ticker."); st.stop()
     start = time.perf_counter()
-    with st.spinner(f"Borsiq analyserar {len(symbols)} aktier…"):
+    with st.spinner(f"Borsify analyserar {len(symbols)} aktier…"):
         raw_df, errors = scan_universe(symbols)
     if raw_df.empty:
         st.error("Ingen marknadsdata kunde hämtas. Yahoo Finance kan tillfälligt begränsa anrop.")
@@ -1590,7 +1626,7 @@ def main() -> None:
         render_overview(daily_shortlist, filtered, scored, watch_df_global, signal_history_global, unread_signals, profile, idx, elapsed, latest_price_date)
     with tab1:
         st.subheader("Dagens fynd · snabbaste beslutsunderlaget")
-        st.caption("Dagens relevans är en separat triage ovanpå Borsiq Score. Den väger in aktuellt marknadsläge och scoreförändring, och kan begränsas av grova riskflaggor. Den är inte ett köp- eller säljråd.")
+        st.caption("Dagens relevans är en separat triage ovanpå Borsify Score. Den väger in aktuellt marknadsläge och scoreförändring, och kan begränsas av grova riskflaggor. Den är inte ett köp- eller säljråd.")
         if daily_shortlist.empty:
             st.info("Ingen kandidat kunde byggas från dagens filtrerade universum.")
         else:
@@ -1606,7 +1642,7 @@ def main() -> None:
                     h1.markdown(f"### {rank}. {case['Namn']} · {case['Ticker']}")
                     h1.caption(f"{case['Signal']} · {case['Sektor']} · senaste kursdag {case.get('Prisdatum','—')}")
                     delta = _num(case.get("Score Δ"))
-                    h2.metric("Borsiq", f"{_num(case['Borsiq Score']):.0f}/100", f"{delta:+.1f}" if np.isfinite(delta) else None)
+                    h2.metric("Borsify", f"{_num(case['Borsify Score']):.0f}/100", f"{delta:+.1f}" if np.isfinite(delta) else None)
                     h3.metric("Dagens relevans", f"{_num(case['Dagens relevans']):.0f}/100")
                     h4.metric("Prioritet", str(case["Prioritet"]))
                     c1, c2, c3 = st.columns(3)
@@ -1619,10 +1655,10 @@ def main() -> None:
 
             st.divider()
             st.subheader("Jämför dagens kortlista")
-            quick_cols = ["Ticker", "Namn", "Borsiq Score", "Dagens relevans", "Prioritet", "Score Δ", "Värdering", "Kvalitet", "Marknadsläge", "Risk", "Riskflaggor"]
+            quick_cols = ["Ticker", "Namn", "Borsify Score", "Dagens relevans", "Prioritet", "Score Δ", "Värdering", "Kvalitet", "Marknadsläge", "Risk", "Riskflaggor"]
             quick = daily_shortlist[quick_cols].copy()
             st.dataframe(quick, use_container_width=True, hide_index=True, column_config={
-                "Borsiq Score": st.column_config.ProgressColumn("Borsiq", min_value=0, max_value=100, format="%.0f"),
+                "Borsify Score": st.column_config.ProgressColumn("Borsify", min_value=0, max_value=100, format="%.0f"),
                 "Dagens relevans": st.column_config.ProgressColumn("Dagens relevans", min_value=0, max_value=100, format="%.0f"),
                 "Score Δ": st.column_config.NumberColumn("Score Δ", format="%+.1f"),
                 "Värdering": st.column_config.ProgressColumn("Värdering", 0, 100, format="%.0f"),
@@ -1631,26 +1667,26 @@ def main() -> None:
                 "Risk": st.column_config.ProgressColumn("Risk", 0, 100, format="%.0f"),
             })
 
-        st.divider(); st.subheader("Topplista enligt ren Borsiq Score")
+        st.divider(); st.subheader("Topplista enligt ren Borsify Score")
         display = dataframe_for_display(top)
         st.dataframe(display, use_container_width=True, hide_index=True, column_config={
-            "Borsiq Score": st.column_config.ProgressColumn("Borsiq Score", min_value=0, max_value=100, format="%.0f"),
+            "Borsify Score": st.column_config.ProgressColumn("Borsify Score", min_value=0, max_value=100, format="%.0f"),
             "Pris": st.column_config.NumberColumn("Pris", format="%.2f"), "Dagsförändring": st.column_config.NumberColumn("Idag", format="%.2f%%"),
             "P/E": st.column_config.NumberColumn("P/E", format="%.1f"), "Direktavkastning": st.column_config.NumberColumn("DA", format="%.1f%%"),
             "52v från topp": st.column_config.NumberColumn("Från 52v-topp", format="%.1f%%"), "RSI14": st.column_config.NumberColumn("RSI", format="%.0f"),
             "Värdering": st.column_config.ProgressColumn("Värdering",0,100,format="%.0f"), "Kvalitet": st.column_config.ProgressColumn("Kvalitet",0,100,format="%.0f"),
             "Marknadsläge": st.column_config.ProgressColumn("Setup",0,100,format="%.0f"), "Risk": st.column_config.ProgressColumn("Risk",0,100,format="%.0f"),
         })
-        st.download_button("Ladda ner topplistan som CSV", data=display.to_csv(index=False).encode("utf-8-sig"), file_name=f"borsiq_{datetime.now():%Y-%m-%d}.csv", mime="text/csv")
+        st.download_button("Ladda ner topplistan som CSV", data=display.to_csv(index=False).encode("utf-8-sig"), file_name=f"borsify_{datetime.now():%Y-%m-%d}.csv", mime="text/csv")
         st.divider(); st.subheader("Detaljanalys")
-        choices = {f"{r['Ticker']} · {r['Namn']} · {r['Borsiq Score']:.0f}/100": i for i,r in top.iterrows()}
+        choices = {f"{r['Ticker']} · {r['Namn']} · {r['Borsify Score']:.0f}/100": i for i,r in top.iterrows()}
         selected = st.selectbox("Välj aktie", list(choices)); render_detail(top.loc[choices[selected]], profile)
     with tab4:
         st.subheader("Marknad · hela analysuniversumet")
         st.caption("Här finns rålistan för jämförelser och egen analys. Överblick och Dagens fynd är de rekommenderade startpunkterna.")
         st.dataframe(dataframe_for_display(scored), use_container_width=True, hide_index=True)
     with tab2:
-        st.subheader("Borsiq Radar · dagens förändringar")
+        st.subheader("Borsify Radar · dagens förändringar")
         today_str = datetime.now().date().isoformat()
         today_hist = signal_history_global.copy()
         if not today_hist.empty:
@@ -1731,9 +1767,9 @@ def main() -> None:
                 watch_df["_watch_order"] = watch_df["Ticker"].map(order).fillna(9999)
                 watch_df = watch_df.sort_values("_watch_order").drop(columns=["_watch_order"])
                 watch_display = dataframe_for_display(watch_df)
-                watch_display.insert(4, "Score Δ", [score_change(str(r["Ticker"]), profile, float(r["Borsiq Score"])) for _, r in watch_df.iterrows()])
+                watch_display.insert(4, "Score Δ", [score_change(str(r["Ticker"]), profile, float(r["Borsify Score"])) for _, r in watch_df.iterrows()])
                 st.dataframe(watch_display, use_container_width=True, hide_index=True, column_config={"Score Δ": st.column_config.NumberColumn("Score Δ", format="%+.1f")})
-                st.download_button("Exportera bevakningslista", data="Ticker\n" + "\n".join(watched), file_name="borsiq_bevakning.csv", mime="text/csv")
+                st.download_button("Exportera bevakningslista", data="Ticker\n" + "\n".join(watched), file_name="borsify_bevakning.csv", mime="text/csv")
 
             st.markdown("#### Anteckningar och målkurser")
             for _, meta in watch_meta.iterrows():
@@ -1764,7 +1800,7 @@ def main() -> None:
         st.caption("Inloggad användare: bevakning, scorehistorik, radarhistorik och signalhistorik lagras i Supabase. Gäst/lokalt läge: SQLite används på aktuell dator.")
     with tab5:
         w = PROFILE_WEIGHTS[profile]
-        st.subheader("Så räknas Borsiq Score")
+        st.subheader("Så räknas Borsify Score")
         st.markdown(f"""
     **Vald strategi: {profile}.** Vikter: värdering {w['valuation']:.0%}, kvalitet {w['quality']:.0%}, marknadsläge {w['setup']:.0%}, utdelning {w['income']:.0%}, risk {w['risk']:.0%}.
 
