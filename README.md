@@ -1,6 +1,6 @@
-# Borsify v2.12.0
+# Borsify v2.13.0
 
-## Nytt i v2.12.0 – Kvalitet till rätt pris + Idéflöde
+## Nytt i v2.13.0 – Kvalitet till rätt pris + Idéflöde
 
 - Ny **Kvalitet till rätt pris**-kontroll för långsiktiga case. Den kombinerar aktuell kvalitet, värdering och risk och förklarar på vanlig svenska vad som talar för och vad som behöver granskas.
 - Kontrollen är medvetet märkt som en **nulägesbild**. Borsify låtsas inte att dagens fundamenta bevisar 5–10 års uthållighet; point-in-time historiska fundamenta saknas fortfarande.

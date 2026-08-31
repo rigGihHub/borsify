@@ -30,7 +30,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.12.0"
+APP_VERSION = "2.13.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -1497,60 +1497,95 @@ def fetch_idea_flow_cached() -> tuple[pd.DataFrame, list[str]]:
 
 
 def render_idea_flow(scored: pd.DataFrame) -> None:
-    st.subheader("Idéflöde · forum och ekonomimedia")
-    st.caption("Tanken här är inte att tro på ett tips bara för att det diskuteras. Externa källor används enbart för att hitta uppslag. Därefter kör Borsify samma kontroll av kvalitet, värdering, risk och övriga nyckeltal som för alla andra aktier.")
-    st.info("En aktie kan alltså vara omtalad och ändå få **Uppslag, inte fynd**. Forum- eller medieintresse höjer inte Borsify Score.")
-    if st.button("Hämta senaste externa uppslag", key="idea_flow_fetch", type="primary"):
-        with st.spinner("Hämtar publika rubriker från ekonomimedia och forum…"):
+    st.subheader("Idéflöde · vad pratas det om just nu?")
+    st.caption("Borsify använder media och forum för att hitta uppslag – aldrig som bevis för att en aktie är bra. Varje matchad aktie måste därefter klara kontrollen av pris, kvalitet, risk och övriga nyckeltal.")
+    st.info("Många omnämnanden kan göra ett uppslag lättare att upptäcka, men de höjer **inte** Borsify Score. Forum väger dessutom lägre än ekonomimedia i själva upptäcktsstyrkan.")
+
+    f1, f2 = st.columns([1.2, 2.2])
+    with f1:
+        fetch_clicked = st.button("Hämta senaste uppslag", key="idea_flow_fetch", type="primary", use_container_width=True)
+    with f2:
+        flow_filter = st.radio("Visa", ["Alla", "Ekonomimedia", "Forum"], horizontal=True, key="idea_flow_kind_filter")
+
+    if fetch_clicked:
+        with st.spinner("Hämtar publika rubriker och foruminlägg…"):
             feed, errors = fetch_idea_flow_cached()
             st.session_state["idea_flow_feed"] = feed
             st.session_state["idea_flow_errors"] = errors
+
     feed = st.session_state.get("idea_flow_feed")
     errors = st.session_state.get("idea_flow_errors", [])
     if feed is None:
-        st.write("Tryck på knappen för att hämta ett färskt idéflöde. Borsify läser publika RSS/Atom-flöden och sparar inte hela artiklar.")
+        st.write("Tryck på knappen. Borsify läser endast publika RSS/Atom-flöden och återger rubrik, källa och länk – inte hela artiklar.")
+        with st.expander("Vilka typer av källor bevakas?"):
+            st.write("Ekonomimedia: EFN direkt RSS samt svenska ekonomimedier via Google News, inklusive flöden för breda börsnyheter, analyser/riktkurser och bolagshändelser. Forum: Reddit Aktiemarknaden och ISKbets. ISKbets behandlas uttryckligen som en mer spekulativ idékälla.")
         return
+
     if errors:
-        with st.expander("Några källor kunde inte läsas"):
-            st.write("Det kan bero på tillfälliga nätproblem eller att en publik feed ändrats. Övriga källor används ändå.")
-            for e in errors: st.write(f"• {e}")
+        with st.expander(f"{len(errors)} källa/källor kunde inte läsas"):
+            st.write("Övriga källor används ändå. Felet kan vara tillfälligt eller bero på att en publik feed ändrats.")
+            for e in errors:
+                st.write(f"• {e}")
     if feed.empty:
         st.warning("Inga externa rubriker kunde hämtas just nu.")
         return
-    mentions = map_mentions(feed, scored)
+
+    view_feed = feed.copy()
+    if flow_filter == "Ekonomimedia":
+        view_feed = view_feed[view_feed["kind"] == "media"]
+    elif flow_filter == "Forum":
+        view_feed = view_feed[view_feed["kind"] == "forum"]
+
+    mentions = map_mentions(view_feed, scored)
     ideas = build_verified_ideas(mentions, scored)
-    m1,m2,m3=st.columns(3)
-    m1.metric("Rubriker hämtade", len(feed))
-    m2.metric("Aktier som matchades", len(ideas))
-    passed=int((ideas.get("Borsify-granskning", pd.Series(dtype=str)) == "Klarar första kontrollen").sum()) if not ideas.empty else 0
-    m3.metric("Klarar första kontrollen", passed)
+    media_items = int((feed["kind"] == "media").sum())
+    forum_items = int((feed["kind"] == "forum").sum())
+    publishers = int(feed.get("publisher", feed["source"]).astype(str).nunique())
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Uppslag hämtade", len(feed))
+    m2.metric("Ekonomimedia", media_items)
+    m3.metric("Forum", forum_items)
+    m4.metric("Olika källor", publishers)
+
     if ideas.empty:
-        st.info("Rubriker hämtades, men inget bolag kunde matchas säkert mot aktierna i ditt nuvarande universum.")
+        st.info("Uppslag hämtades, men inget bolag kunde matchas säkert mot aktierna i ditt nuvarande universum med valt källfilter.")
         return
+
+    passed = int((ideas.get("Borsify-granskning", pd.Series(dtype=str)) == "Klarar första kontrollen").sum())
+    st.caption(f"{len(ideas)} aktier matchades · {passed} klarar Borsifys första kontroll. Upptäcktsstyrka betyder hur brett och nyligen aktien nämnts – inte förväntad avkastning.")
+
     for _, r in ideas.head(12).iterrows():
-        status=str(r.get("Borsify-granskning", ""))
+        status = str(r.get("Borsify-granskning", ""))
         with st.container(border=True):
-            a,b,c,d=st.columns([2.7,1,1,1.3])
+            a, b, c = st.columns([3.2, 1, 1.25])
             a.markdown(f"### {r.get('Namn','')} · {r.get('Ticker','')}")
-            a.caption(f"{int(r.get('Antal omnämnanden',0))} omnämnande(n) · {int(r.get('Källor',0))} källa/källor · media {int(r.get('Media',0))} · forum {int(r.get('Forum',0))}")
+            media_sources = int(r.get("Mediekällor", 0) or 0)
+            forum_sources = int(r.get("Forumkällor", 0) or 0)
+            a.caption(f"{int(r.get('Antal omnämnanden',0))} uppslag · {media_sources} mediekälla/källor · {forum_sources} forumkälla/källor")
             b.metric("Borsify", f"{_num(r.get('Borsify Score')):.0f}/100" if np.isfinite(_num(r.get('Borsify Score'))) else "—")
-            c.metric("Upptäcktsstyrka", f"{_num(r.get('Upptäcktsstyrka')):.0f}/100")
-            d.metric("Kontroll", status)
+            c.metric("Kontroll", status)
             st.write(str(r.get("Förklaring", "")))
-            flags=str(r.get("Riskflaggor", ""))
-            if flags and flags not in {"—", "nan"}: st.caption(f"Riskflaggor: {flags}")
-            headlines=r.get("Rubriker") or []
+            st.caption(f"Upptäcktsstyrka {_num(r.get('Upptäcktsstyrka')):.0f}/100 · mäter bara hur tydligt uppslaget syns i externa källor.")
+            flags = str(r.get("Riskflaggor", ""))
+            if flags and flags not in {"—", "nan"}:
+                st.caption(f"Riskflaggor: {flags}")
+            headlines = r.get("Rubriker") or []
             if headlines:
-                with st.expander("Visa uppslagen som ledde hit"):
+                with st.expander("Visa rubrikerna bakom uppslaget"):
                     for h in headlines:
-                        title=str(h.get("title", "")).replace("[", "(").replace("]", ")")
-                        link=str(h.get("link", ""))
-                        source=str(h.get("source", ""))
+                        title = str(h.get("title", "")).replace("[", "(").replace("]", ")")
+                        link = str(h.get("link", ""))
+                        source = str(h.get("source", ""))
+                        category = str(h.get("category", ""))
+                        label = f"{source} · {category}" if category else source
                         if link.startswith("http"):
-                            st.markdown(f"- [{title}]({link}) · {source}")
+                            st.markdown(f"- [{title}]({link}) · {label}")
                         else:
-                            st.write(f"• {title} · {source}")
-    st.caption("Källor i v2.12: publika ekonomimedierubriker via Google News RSS samt Reddit r/Aktiemarknaden via publik Atom-feed. Borsify återger rubriker/länkar och använder dem som uppslag – inte som fakta om bolaget.")
+                            st.write(f"• {title} · {label}")
+
+    with st.expander("Så ska mediabevakningen tolkas"):
+        st.write("Borsify försöker hitta **uppslag**, inte följa flocken. Flera oberoende mediekällor ger högre upptäcktsstyrka än många inlägg från ett enda forum. Ett bolag kan ändå sorteras bort direkt om nyckeltalen är svaga. Spekulativa forumkällor får lägre vikt och kan aldrig ensamma ge maximal upptäcktsstyrka.")
+        st.caption("Bevakningen bygger på publika flöden. Paywall-innehåll läses inte och Borsify ska inte tolka en rubrik som ett verifierat faktapåstående om bolaget.")
 
 
 def render_dividend_discovery(df: pd.DataFrame) -> None:
@@ -1831,91 +1866,78 @@ def render_overview(
     elapsed: float,
     latest_price_date: str,
 ) -> None:
-    """A compact start screen that answers: what matters, why, and what next?"""
-    st.subheader("Överblick")
-    st.caption("Borsify ska först hjälpa dig prioritera vad som är värt att analysera vidare — inte överösa dig med tabeller.")
-
+    """Ren startsida: vad är intressant, varför och vad bör jag se upp med?"""
     best = daily_shortlist.iloc[0] if not daily_shortlist.empty else None
     high_priority = int((daily_shortlist["Prioritet"] == "Hög").sum()) if not daily_shortlist.empty else 0
     today = datetime.now().date().isoformat()
     today_signals = signal_history[signal_history["occurred_date"].astype(str) == today] if not signal_history.empty else pd.DataFrame()
 
-    m1, m2, m3, m4 = st.columns(4)
-    if best is not None:
-        m1.metric("Bästa kandidat idag", str(best["Ticker"]), f"Relevans {_num(best['Dagens relevans']):.0f}/100")
+    st.markdown("## Dagens mest intressanta aktie")
+    st.caption("Borsify börjar med slutsatsen. Du kan öppna siffrorna och den fulla analysen när du vill.")
+    if best is None:
+        st.info("Ingen kandidat klarade dagens urval. Prova att lätta på filtren eller kontrollera datakällan.")
     else:
-        m1.metric("Bästa kandidat idag", "—")
-    m2.metric("Hög prioritet", high_priority)
-    m3.metric("Olästa Radar-signaler", unread_signals)
-    m4.metric("Bevakade aktier", len(watch_df))
+        with st.container(border=True):
+            title, score, price = st.columns([3.2, 1, 1.25])
+            title.markdown(f"## {best['Namn']}")
+            title.caption(f"{best['Ticker']} · {best['Sektor']} · {best['Signal']}")
+            score.metric("Borsify", f"{_num(best['Borsify Score']):.0f}/100")
+            best_price = _num(best.get("Pris"))
+            price.metric("Aktuell kurs", f"{best_price:.2f} {best.get('Valuta', '')}" if np.isfinite(best_price) else "—", fmt_pct(best.get("Dagsförändring")))
 
-    left, right = st.columns([1.55, 1])
-    with left:
-        st.markdown("### Det viktigaste just nu")
-        if best is None:
-            st.info("Ingen kandidat klarade dagens urval. Justera filtren eller kontrollera datakällan.")
-        else:
-            with st.container(border=True):
-                c1, c2, c3, c4 = st.columns([2.35, 1, 1, 1.2])
-                c1.markdown(f"## {best['Namn']}")
-                c1.caption(f"{best['Ticker']} · {best['Sektor']} · {best['Signal']}")
-                c2.metric("Borsify", f"{_num(best['Borsify Score']):.0f}/100", f"{_num(best.get('Score Δ')):+.1f}" if np.isfinite(_num(best.get('Score Δ'))) else None)
-                c3.metric("Idag", f"{_num(best['Dagens relevans']):.0f}/100")
-                best_price = _num(best.get("Pris"))
-                c4.metric("Aktuell kurs", f"{best_price:.2f} {best.get('Valuta', '')}" if np.isfinite(best_price) else "—", fmt_pct(best.get("Dagsförändring")))
-                st.markdown(f"**Varför idag:** {best['Varför idag']}")
-                st.markdown(f"**Förändrat:** {best['Förändrat']}")
-                st.markdown(f"**Kontrollera:** {best['Kontrollera']}")
-                st.caption("Detta är screening för vidare analys, inte ett köpbeslut.")
+            why, caution = st.columns(2)
+            with why:
+                st.markdown("**Varför den sticker ut**")
+                st.write(str(best.get("Varför idag", "—")))
+            with caution:
+                st.markdown("**Vad du bör kontrollera**")
+                st.write(str(best.get("Kontrollera", "—")))
+            changed = str(best.get("Förändrat", "")).strip()
+            if changed and changed != "—":
+                st.caption(f"Vad som förändrats: {changed}")
+            st.caption("Borsify pekar ut vad som är värt att undersöka vidare. Det är inte ett köp- eller säljråd.")
 
-        if len(daily_shortlist) > 1:
-            st.markdown("### Nästa kandidater")
-            compact = daily_shortlist.iloc[1:5][["Ticker", "Namn", "Pris", "Valuta", "Dagsförändring", "Prisdatum", "Borsify Score", "Dagens relevans", "Prioritet", "Score Δ"]].copy()
-            st.dataframe(
-                compact, use_container_width=True, hide_index=True,
-                column_config={
-                    "Borsify Score": st.column_config.ProgressColumn("Borsify", min_value=0, max_value=100, format="%.0f"),
-                    "Dagens relevans": st.column_config.ProgressColumn("Idag", min_value=0, max_value=100, format="%.0f"),
-                    "Score Δ": st.column_config.NumberColumn("Δ", format="%+.1f"),
-                    "Pris": st.column_config.NumberColumn("Aktuell kurs", format="%.2f"),
-                    "Dagsförändring": st.column_config.NumberColumn("Idag %", format="%.2f%%"),
-                    "Prisdatum": "Kursdag",
-                },
-            )
+    s1, s2, s3 = st.columns(3)
+    s1.metric("Fler med hög prioritet", high_priority)
+    s2.metric("Nya Radar-signaler", unread_signals)
+    s3.metric("Bevakade aktier", len(watch_df))
 
-    with right:
-        st.markdown("### Radar")
-        if today_signals.empty:
-            st.caption("Inga nya signaler idag.")
-        else:
-            for _, sig in today_signals.sort_values(["priority", "created_at"], ascending=[False, False]).head(4).iterrows():
-                prefix = "🔔" if int(sig.get("priority", 1)) >= 3 else "•"
-                st.markdown(f"{prefix} **{sig['symbol']} · {sig['kind']}**  ")
-                st.caption(str(sig["text"]))
-        if unread_signals:
-            st.info(f"{unread_signals} olästa signaler finns i Radar-fliken.")
+    if len(daily_shortlist) > 1:
+        st.markdown("### Fler aktier värda en titt")
+        compact = daily_shortlist.iloc[1:5][["Ticker", "Namn", "Pris", "Valuta", "Dagsförändring", "Borsify Score", "Dagens relevans", "Prioritet"]].copy()
+        st.dataframe(
+            compact, use_container_width=True, hide_index=True,
+            column_config={
+                "Borsify Score": st.column_config.ProgressColumn("Borsify", min_value=0, max_value=100, format="%.0f"),
+                "Dagens relevans": st.column_config.ProgressColumn("Idag", min_value=0, max_value=100, format="%.0f"),
+                "Pris": st.column_config.NumberColumn("Kurs", format="%.2f"),
+                "Dagsförändring": st.column_config.NumberColumn("Idag %", format="%.2f%%"),
+            },
+        )
 
-        st.markdown("### Körstatus")
-        status_rows = [
-            ("Strategi", profile),
-            ("Analyserade", str(len(scored))),
-            ("Efter filter", str(len(filtered))),
-            ("Senaste kursdag", latest_price_date),
-            ("Körtid", f"{elapsed:.1f} s"),
-        ]
-        if idx:
-            status_rows.insert(2, ("OMXS30", f"{idx['index']:.2f} ({fmt_pct(idx.get('daily'))})"))
-        for label, value in status_rows:
-            st.markdown(f"<div class='bq-status'><span>{label}</span><strong>{value}</strong></div>", unsafe_allow_html=True)
+    if not today_signals.empty or unread_signals:
+        with st.expander(f"Radar · {unread_signals} olästa signaler", expanded=False):
+            if today_signals.empty:
+                st.write("Inga nya signaler idag.")
+            else:
+                for _, sig in today_signals.sort_values(["priority", "created_at"], ascending=[False, False]).head(6).iterrows():
+                    prefix = "🔔" if int(sig.get("priority", 1)) >= 3 else "•"
+                    st.markdown(f"{prefix} **{sig['symbol']} · {sig['kind']}** — {sig['text']}")
 
-    st.divider()
-    st.markdown("### Gå vidare till en aktie")
+    st.markdown("### Vill du förstå en kandidat bättre?")
     candidates = filtered.head(min(25, len(filtered)))
     choices = {f"{r['Ticker']} · {r['Namn']} · {r['Borsify Score']:.0f}/100": i for i, r in candidates.iterrows()}
     if choices:
-        selected = st.selectbox("Välj kandidat för full analys", list(choices), key="overview_detail_choice")
+        selected = st.selectbox("Välj aktie", list(choices), key="overview_detail_choice")
         with st.expander("Öppna full analys", expanded=False):
             render_detail(candidates.loc[choices[selected]], profile, key_prefix="overview")
+
+    with st.expander("Datastatus", expanded=False):
+        st.write(f"Strategi: {profile} · analyserade: {len(scored)} · efter filter: {len(filtered)} · senaste kursdag: {latest_price_date} · körtid: {elapsed:.1f} s")
+        if idx:
+            st.write(f"OMXS30: {idx['index']:.2f} ({fmt_pct(idx.get('daily'))})")
+        st.caption(f"Borsify v{APP_VERSION}. Kurs- och fundamentaldata kan vara fördröjd eller ofullständig.")
+
 
 def render_edge_lab(default_symbol: str) -> None:
     st.subheader("Edge Lab · historiskt signaltest")
@@ -2320,9 +2342,7 @@ def main() -> None:
     }
     </style>
     """, unsafe_allow_html=True)
-    st.markdown(f"""<div class='bq-hero'><div><span class='bq-mark'>BQ</span><span class='bq-title'>{APP_NAME}</span></div><div class='bq-sub'>Hitta vad som är värt att analysera idag — och förstå varför · <span class='bq-domain'>{APP_DOMAIN}</span> · v{APP_VERSION}</div></div>""", unsafe_allow_html=True)
-    st.info("Borsify Score är en kvantitativ screeningmodell — inte ett köp- eller säljråd. Kursdata hämtas i bulk och cachas 15 min; fundamentaldata cachas 6 timmar. Yahoo-data kan vara fördröjd eller ofullständig.")
-    st.caption("Arbetsflöde: 1) Överblick → 2) Dagens fynd → 3) full aktieanalys → 4) bevaka och få Radar-signaler.")
+    st.markdown(f"""<div class='bq-hero'><div><span class='bq-mark'>BQ</span><span class='bq-title'>{APP_NAME}</span></div><div class='bq-sub'>Hitta intressanta aktier — och förstå varför · <span class='bq-domain'>{APP_DOMAIN}</span></div></div>""", unsafe_allow_html=True)
 
     require_site_access()
     init_db()
@@ -2330,11 +2350,44 @@ def main() -> None:
     file_universe_symbols = universe_df["Ticker"].tolist()
 
     with st.sidebar:
-        st.header("Konto")
-        if cloud_enabled():
-            user = current_user()
-            if user is None:
-                with st.expander("Logga in / skapa konto", expanded=False):
+        st.header("Hitta aktier")
+        st.markdown("### Vad letar du efter?")
+        discovery_intent = st.selectbox(
+            "Mitt mål", DISCOVERY_INTENTS, index=0,
+            help="Välj med vanliga ord. Borsify översätter målet till en ranking bakom kulisserna.",
+        )
+        st.caption(intent_plain_text(discovery_intent))
+
+        universe = st.radio("Universum", ["OMXS30", "Sverige bred", "Egen lista"], index=1)
+        custom = st.text_area("Tickers", value="INVE-B.ST, VOLV-B.ST, SAND.ST, EVO.ST", height=100) if universe == "Egen lista" else ""
+        if universe == "Sverige bred":
+            st.caption(f"{len(file_universe_symbols)} svenska aktier i nuvarande universum.")
+
+        with st.expander("Fler filter", expanded=False):
+            profile = st.selectbox("Borsify-strategi", list(PROFILE_WEIGHTS), index=0, help="Påverkar grundscoren. Om du är osäker kan Balanserad vara kvar.")
+            min_market_cap = st.number_input("Min börsvärde (mdr SEK)", 0.0, value=5.0, step=1.0)
+            min_turnover = st.number_input("Min omsättning/dag (MSEK)", 0.0, value=5.0, step=1.0)
+            require_positive = st.checkbox("Kräv positiv P/E", value=True)
+            dividend_only = st.checkbox(
+                "Bara aktier med direktavkastning",
+                value=False,
+                help="Visar bara bolag där datakällan just nu registrerar en positiv direktavkastning.",
+            )
+            min_dividend_yield = st.number_input(
+                "Min direktavkastning (%)", 0.0, 20.0, value=0.0, step=0.5,
+                disabled=not dividend_only,
+                help="Exempel: 3 betyder minst cirka 3 % direktavkastning enligt aktuell data. Utdelningar kan ändras eller slopas.",
+            )
+            allow_missing_filter_data = st.checkbox("Tillåt saknade filtervärden", value=False)
+            top_n = st.slider("Visa topp", 3, 20, 10)
+
+        refresh = st.button("Uppdatera marknadsdata", type="primary", use_container_width=True)
+        st.caption("Kurser cachas 15 min · fundamenta 6 h.")
+
+        with st.expander("Konto", expanded=False):
+            if cloud_enabled():
+                user = current_user()
+                if user is None:
                     auth_mode = st.radio("Kontoåtgärd", ["Logga in", "Skapa konto"], horizontal=True, label_visibility="collapsed")
                     with st.form("auth_form"):
                         email = st.text_input("E-post")
@@ -2345,41 +2398,13 @@ def main() -> None:
                         (st.success if ok else st.error)(msg)
                         if ok and current_user() is not None:
                             st.rerun()
-                st.caption("Utan inloggning används lokal SQLite på denna dator.")
+                else:
+                    st.success(f"Inloggad som {getattr(user, 'email', '')}")
+                    if st.button("Logga ut", use_container_width=True):
+                        auth_sign_out(); st.rerun()
+                    st.caption("Bevakning och scorehistorik sparas i molnet.")
             else:
-                st.success(f"Inloggad som {getattr(user, 'email', '')}")
-                if st.button("Logga ut", use_container_width=True):
-                    auth_sign_out(); st.rerun()
-                st.caption("Bevakning och scorehistorik sparas i Supabase.")
-        else:
-            st.caption("Lokalt läge · konfigurera Supabase för konto och molnsynk.")
-        st.divider()
-        st.header("Borsify Radar")
-        universe = st.radio("Universum", ["OMXS30", "Sverige bred", "Egen lista"], index=1)
-        custom = st.text_area("Tickers", value="INVE-B.ST, VOLV-B.ST, SAND.ST, EVO.ST", height=110) if universe == "Egen lista" else ""
-        if universe == "Sverige bred": st.caption(f"Universumsfil: {len(file_universe_symbols)} svenska tickers. Listan ligger i universe.csv och kan underhållas utan kodändring.")
-        st.markdown("### Vad letar du efter?")
-        discovery_intent = st.selectbox("Mitt mål", DISCOVERY_INTENTS, index=0, help="Välj med vanliga ord. Borsify översätter målet till en ranking bakom kulisserna.")
-        st.caption(intent_plain_text(discovery_intent))
-        profile = st.selectbox("Fördjupning · Borsify-strategi", list(PROFILE_WEIGHTS), index=0, help="Påverkar grundscoren. Om du är osäker kan du låta Balanserad vara kvar.")
-        min_market_cap = st.number_input("Min börsvärde (mdr SEK)", 0.0, value=5.0, step=1.0)
-        min_turnover = st.number_input("Min omsättning/dag (MSEK)", 0.0, value=5.0, step=1.0)
-        require_positive = st.checkbox("Kräv positiv P/E", value=True)
-        dividend_only = st.checkbox(
-            "Bara aktier med direktavkastning",
-            value=False,
-            help="Bocka i om du bara vill se bolag som enligt aktuell datakälla har en positiv direktavkastning (utdelning i förhållande till aktiekursen).",
-        )
-        min_dividend_yield = st.number_input(
-            "Min direktavkastning (%)", 0.0, 20.0, value=0.0, step=0.5,
-            disabled=not dividend_only,
-            help="Exempel: 3 betyder att aktiens registrerade årliga utdelning motsvarar minst cirka 3 % av aktiekursen. Utdelningar kan ändras eller slopas.",
-        )
-        allow_missing_filter_data = st.checkbox("Tillåt saknade filtervärden", value=False, help="Om avstängd måste börsvärde och omsättning finnas när respektive minimifilter är större än 0.")
-        top_n = st.slider("Visa topp", 3, 20, 10)
-        refresh = st.button("Uppdatera marknadsdata", type="primary", use_container_width=True)
-        st.caption("Kurser: cache 15 min · fundamenta: cache 6 h. Knappen rensar båda cacharna.")
-
+                st.caption("Lokalt läge · konfigurera Supabase för konto och molnsynk.")
     symbols = OMXS30_TICKERS if universe == "OMXS30" else (file_universe_symbols if universe == "Sverige bred" else parse_symbols(custom))
     if refresh: st.cache_data.clear()
     if not symbols: st.warning("Ange minst en ticker."); st.stop()
@@ -2412,8 +2437,8 @@ def main() -> None:
 
     price_dates = sorted({str(x) for x in raw_df.get("Prisdatum", pd.Series(dtype=str)).dropna().tolist() if str(x) != "—"})
     latest_price_date = price_dates[-1] if price_dates else "—"
-    k1,k2,k3,k4,k5 = st.columns(5)
-    k1.metric("Analyserade", len(raw_df)); k2.metric("Efter filter", len(filtered)); k3.metric("OMXS30", f"{idx['index']:.2f}" if idx else "—", fmt_pct(idx.get("daily")) if idx else None); k4.metric("Datakörning", f"{elapsed:.1f} s"); k5.metric("Senaste kursdag", latest_price_date)
+    market_note = f" · OMXS30 {idx['index']:.0f} ({fmt_pct(idx.get('daily'))})" if idx else ""
+    st.caption(f"{len(raw_df)} aktier analyserade · {len(filtered)} kvar efter dina val · kursdata {latest_price_date}{market_note}")
     if errors:
         with st.expander(f"Datakällan saknade {len(errors)} ticker(s) — övriga analyserades"):
             st.caption("Detta beror oftast på tillfälliga Yahoo-problem, ändrad ticker eller otillräcklig kurshistorik. Det påverkar inte aktier som redan har lästs in.")
@@ -2438,157 +2463,157 @@ def main() -> None:
     unread_signals = int((~signal_history_global["is_read"].astype(bool)).sum()) if not signal_history_global.empty else 0
     save_radar_history(filtered.head(max(20, top_n)), profile)
 
-    tab0, tab1, tab_ideas, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Överblick", "Dagens fynd", "Idéflöde", f"Radar ({unread_signals})", "Bevakning", "Marknad", "Metod", "Edge Lab"])
-    with tab0:
+    nav_overview, nav_discover, nav_watch, nav_analyse, nav_method = st.tabs([
+        "Överblick", "Upptäck", f"Bevakning ({len(watch_df_global)})", "Analysera", "Metod"
+    ])
+    with nav_overview:
         render_overview(daily_shortlist, filtered, scored, watch_df_global, signal_history_global, unread_signals, profile, idx, elapsed, latest_price_date)
-    with tab1:
-        st.info(f"Du letar efter: **{discovery_intent}**. {intent_plain_text(discovery_intent)}")
-        render_discovery_shortlist(filtered, discovery_intent)
-        st.divider()
-        if discovery_intent in {"Bra långsiktig investering", "Billiga kvalitetsbolag", "Bästa möjligheter just nu"}:
-            render_quality_at_fair_price(filtered)
+    with nav_discover:
+        discover_daily, discover_ideas, discover_radar = st.tabs(["Dagens fynd", "Idéflöde", f"Radar ({unread_signals})"])
+        with discover_daily:
+            st.info(f"Du letar efter: **{discovery_intent}**. {intent_plain_text(discovery_intent)}")
+            render_discovery_shortlist(filtered, discovery_intent)
             st.divider()
-        if discovery_intent == "Utdelningsaktier" or dividend_only:
-            render_dividend_discovery(filtered)
+            if discovery_intent in {"Bra långsiktig investering", "Billiga kvalitetsbolag", "Bästa möjligheter just nu"}:
+                render_quality_at_fair_price(filtered)
+                st.divider()
+            if discovery_intent == "Utdelningsaktier" or dividend_only:
+                render_dividend_discovery(filtered)
+                st.divider()
+            render_engine_board(filtered)
             st.divider()
-        render_engine_board(filtered)
-        st.divider()
-        st.subheader("Dagens fynd · snabbaste beslutsunderlaget")
-        st.caption("Dagens relevans är en separat triage ovanpå Borsify Score. Den väger in aktuellt marknadsläge och scoreförändring, och kan begränsas av grova riskflaggor. Den är inte ett köp- eller säljråd.")
-        if daily_shortlist.empty:
-            st.info("Ingen kandidat kunde byggas från dagens filtrerade universum.")
-        else:
-            high_count = int((daily_shortlist["Prioritet"] == "Hög").sum())
-            d1, d2, d3 = st.columns(3)
-            d1.metric("Kortlista", len(daily_shortlist))
-            d2.metric("Hög prioritet", high_count)
-            d3.metric("Bästa relevans", f"{daily_shortlist.iloc[0]['Dagens relevans']:.0f}/100")
-
-            for rank, (_, case) in enumerate(daily_shortlist.iterrows(), start=1):
-                with st.container(border=True):
-                    h1, h2, h3, h4, h5 = st.columns([3.0, 1, 1.15, 1, 1])
-                    h1.markdown(f"### {rank}. {case['Namn']} · {case['Ticker']}")
-                    h1.caption(f"{case['Signal']} · {case['Sektor']} · senaste kursdag {case.get('Prisdatum','—')}")
-                    delta = _num(case.get("Score Δ"))
-                    h2.metric("Borsify", f"{_num(case['Borsify Score']):.0f}/100", f"{delta:+.1f}" if np.isfinite(delta) else None)
-                    case_price = _num(case.get("Pris"))
-                    h3.metric("Aktuell kurs", f"{case_price:.2f} {case.get('Valuta', '')}" if np.isfinite(case_price) else "—", fmt_pct(case.get("Dagsförändring")))
-                    h4.metric("Dagens relevans", f"{_num(case['Dagens relevans']):.0f}/100")
-                    h5.metric("Prioritet", str(case["Prioritet"]))
-                    c1, c2, c3 = st.columns(3)
-                    c1.markdown("**Varför idag**")
-                    c1.write(str(case["Varför idag"]))
-                    c2.markdown("**Vad har förändrats**")
-                    c2.write(str(case["Förändrat"]))
-                    c3.markdown("**Kontrollera innan du går vidare**")
-                    c3.write(str(case["Kontrollera"]))
-
-            st.divider()
-            st.subheader("Jämför dagens kortlista")
-            quick_cols = ["Ticker", "Namn", "Pris", "Valuta", "Dagsförändring", "Prisdatum", "Borsify Score", "INVEST Score", "SWING Score", "REVERSAL Score", "Dagens relevans", "Prioritet", "Score Δ", "Värdering", "Kvalitet", "Marknadsläge", "Risk", "Riskflaggor"]
-            quick = daily_shortlist[quick_cols].copy()
-            st.dataframe(quick, use_container_width=True, hide_index=True, column_config={
-                "Borsify Score": st.column_config.ProgressColumn("Borsify", min_value=0, max_value=100, format="%.0f"),
-                "Dagens relevans": st.column_config.ProgressColumn("Dagens relevans", min_value=0, max_value=100, format="%.0f"),
-                "Score Δ": st.column_config.NumberColumn("Score Δ", format="%+.1f"),
-                "Värdering": st.column_config.ProgressColumn("Värdering", min_value=0, max_value=100, format="%.0f"),
-                "Kvalitet": st.column_config.ProgressColumn("Kvalitet", min_value=0, max_value=100, format="%.0f"),
-                "Marknadsläge": st.column_config.ProgressColumn("Setup", min_value=0, max_value=100, format="%.0f"),
-                "Risk": st.column_config.ProgressColumn("Risk", min_value=0, max_value=100, format="%.0f"),
-            })
-
-        st.divider(); st.subheader("Topplista enligt ditt val")
-        display = dataframe_for_display(top)
-        st.dataframe(display, use_container_width=True, hide_index=True, column_config={
-            "Match Score": st.column_config.ProgressColumn("Match", min_value=0, max_value=100, format="%.0f"),
-            "Borsify Score": st.column_config.ProgressColumn("Borsify Score", min_value=0, max_value=100, format="%.0f"),
-            "Pris": st.column_config.NumberColumn("Pris", format="%.2f"), "Dagsförändring": st.column_config.NumberColumn("Idag", format="%.2f%%"),
-            "P/E": st.column_config.NumberColumn("P/E", format="%.1f"), "Direktavkastning": st.column_config.NumberColumn("DA", format="%.1f%%"),
-            "52v från topp": st.column_config.NumberColumn("Från 52v-topp", format="%.1f%%"), "RSI14": st.column_config.NumberColumn("RSI", format="%.0f"),
-            "Värdering": st.column_config.ProgressColumn("Värdering", min_value=0, max_value=100, format="%.0f"), "Kvalitet": st.column_config.ProgressColumn("Kvalitet", min_value=0, max_value=100, format="%.0f"),
-            "Marknadsläge": st.column_config.ProgressColumn("Setup", min_value=0, max_value=100, format="%.0f"), "Risk": st.column_config.ProgressColumn("Risk", min_value=0, max_value=100, format="%.0f"),
-        })
-        st.download_button("Ladda ner topplistan som CSV", data=display.to_csv(index=False).encode("utf-8-sig"), file_name=f"borsify_{datetime.now():%Y-%m-%d}.csv", mime="text/csv")
-        st.divider(); st.subheader("Detaljanalys")
-        choices = {f"{r['Ticker']} · {r['Namn']} · {r['Borsify Score']:.0f}/100": i for i,r in top.iterrows()}
-        selected = st.selectbox("Välj aktie", list(choices)); render_detail(top.loc[choices[selected]], profile, key_prefix="daily")
-    with tab4:
-        st.subheader("Marknad · hela analysuniversumet")
-        st.caption("Här finns rålistan för jämförelser och egen analys. Överblick och Dagens fynd är de rekommenderade startpunkterna.")
-        st.dataframe(dataframe_for_display(scored), use_container_width=True, hide_index=True)
-    with tab_ideas:
-        render_idea_flow(scored)
-
-    with tab2:
-        st.subheader("Borsify Radar · dagens förändringar")
-        today_str = datetime.now().date().isoformat()
-        today_hist = signal_history_global.copy()
-        if not today_hist.empty:
-            today_hist = today_hist[today_hist["occurred_date"].astype(str) == today_str]
-        if today_hist.empty:
-            st.info("Inga sparade Radar-händelser för idag ännu. De skapas vid analys eller av den schemalagda scanningen.")
-        else:
-            r1, r2, r3 = st.columns(3)
-            r1.metric("Händelser idag", len(today_hist))
-            r2.metric("Hög prioritet", int((pd.to_numeric(today_hist["priority"], errors="coerce") >= 3).sum()))
-            r3.metric("Berörda aktier", int(today_hist["symbol"].astype(str).nunique()))
-            for _, sig in today_hist.sort_values(["priority", "created_at"], ascending=[False, False]).head(8).iterrows():
-                icon = "🔔" if int(sig["priority"]) >= 3 else "⚠️"
-                st.markdown(f"**{icon} {sig['kind']} · {sig['symbol']}** — {sig['text']}")
-
-        st.divider()
-        st.subheader("Signalhistorik")
-        st.caption("Signaler sparas i historiken och kan markeras som lästa. Trösklar för Score och dagsfall kan ställas per bevakad aktie.")
-        if not watched_global:
-            st.info("Lägg till aktier i bevakningslistan för att få signaler.")
-        else:
-            if unread_signals:
-                if st.button(f"Markera alla {unread_signals} som lästa", use_container_width=False):
-                    mark_all_signals_read(); st.rerun()
-            history_mode = st.radio("Visa", ["Olästa", "Alla"], horizontal=True, label_visibility="collapsed")
-            hist = signal_history_global.copy()
-            if history_mode == "Olästa" and not hist.empty:
-                hist = hist[~hist["is_read"].astype(bool)]
-            if hist.empty:
-                st.info("Inga signaler i den valda vyn.")
+            st.subheader("Dagens fynd · snabbaste beslutsunderlaget")
+            st.caption("Dagens relevans är en separat triage ovanpå Borsify Score. Den väger in aktuellt marknadsläge och scoreförändring, och kan begränsas av grova riskflaggor. Den är inte ett köp- eller säljråd.")
+            if daily_shortlist.empty:
+                st.info("Ingen kandidat kunde byggas från dagens filtrerade universum.")
             else:
-                for _, sig in hist.head(100).iterrows():
-                    icon = "🔔" if int(sig["priority"]) >= 3 else "⚠️"
-                    read_label = "Läst" if bool(sig["is_read"]) else "Oläst"
-                    email_label = " · E-post skickad" if pd.notna(sig.get("email_sent_at")) and str(sig.get("email_sent_at") or "").strip() else ""
+                high_count = int((daily_shortlist["Prioritet"] == "Hög").sum())
+                d1, d2, d3 = st.columns(3)
+                d1.metric("Kortlista", len(daily_shortlist))
+                d2.metric("Hög prioritet", high_count)
+                d3.metric("Bästa relevans", f"{daily_shortlist.iloc[0]['Dagens relevans']:.0f}/100")
+
+                for rank, (_, case) in enumerate(daily_shortlist.iterrows(), start=1):
                     with st.container(border=True):
-                        st.markdown(f"**{icon} {sig['kind']} · {sig['symbol']}** · {sig['occurred_date']} · {read_label}{email_label}")
-                        st.write(str(sig["text"]))
-                        if not bool(sig["is_read"]) and st.button("Markera läst", key=f"read_{sig['event_key']}"):
-                            mark_signal_read(str(sig["event_key"]), True); st.rerun()
-            st.caption("Regler: ny i topp 10, egen Score-förändringsgräns, egen Score-nivå, målkurs och egen dagsfallsgräns.")
+                        h1, h2, h3, h4, h5 = st.columns([3.0, 1, 1.15, 1, 1])
+                        h1.markdown(f"### {rank}. {case['Namn']} · {case['Ticker']}")
+                        h1.caption(f"{case['Signal']} · {case['Sektor']} · senaste kursdag {case.get('Prisdatum','—')}")
+                        delta = _num(case.get("Score Δ"))
+                        h2.metric("Borsify", f"{_num(case['Borsify Score']):.0f}/100", f"{delta:+.1f}" if np.isfinite(delta) else None)
+                        case_price = _num(case.get("Pris"))
+                        h3.metric("Aktuell kurs", f"{case_price:.2f} {case.get('Valuta', '')}" if np.isfinite(case_price) else "—", fmt_pct(case.get("Dagsförändring")))
+                        h4.metric("Dagens relevans", f"{_num(case['Dagens relevans']):.0f}/100")
+                        h5.metric("Prioritet", str(case["Prioritet"]))
+                        c1, c2, c3 = st.columns(3)
+                        c1.markdown("**Varför idag**")
+                        c1.write(str(case["Varför idag"]))
+                        c2.markdown("**Vad har förändrats**")
+                        c2.write(str(case["Förändrat"]))
+                        c3.markdown("**Kontrollera innan du går vidare**")
+                        c3.write(str(case["Kontrollera"]))
 
-        st.divider()
-        st.subheader("E-postnotiser")
-        if not (cloud_enabled() and current_user_id()):
-            st.info("E-postnotiser kräver inloggat Supabase-konto. Lokalt gästläge sparar bara signalerna i appen.")
-        else:
-            prefs = get_notification_preferences()
-            with st.form("notification_preferences_form"):
-                enabled = st.checkbox("Skicka e-post efter den automatiska vardagsscanningen", value=bool(prefs.get("email_enabled", False)))
-                email = st.text_input("Mottagare", value=str(prefs.get("email") or current_user_email()))
-                min_priority = st.select_slider(
-                    "Minsta prioritet", options=[1, 2, 3], value=int(prefs.get("min_priority", 2)),
-                    format_func=lambda x: {1: "Alla", 2: "Viktiga", 3: "Hög"}[x],
-                )
-                selected_kinds = st.multiselect("Signaltyper", SIGNAL_KINDS, default=[x for x in prefs.get("notify_kinds", SIGNAL_KINDS) if x in SIGNAL_KINDS])
-                save_notif = st.form_submit_button("Spara e-postinställningar")
-            if save_notif:
-                if enabled and ("@" not in email or "." not in email.split("@")[-1]):
-                    st.error("Ange en giltig e-postadress.")
-                elif enabled and not selected_kinds:
-                    st.error("Välj minst en signaltyp eller stäng av e-postnotiser.")
+                st.divider()
+                st.subheader("Jämför dagens kortlista")
+                quick_cols = ["Ticker", "Namn", "Pris", "Valuta", "Dagsförändring", "Prisdatum", "Borsify Score", "INVEST Score", "SWING Score", "REVERSAL Score", "Dagens relevans", "Prioritet", "Score Δ", "Värdering", "Kvalitet", "Marknadsläge", "Risk", "Riskflaggor"]
+                quick = daily_shortlist[quick_cols].copy()
+                st.dataframe(quick, use_container_width=True, hide_index=True, column_config={
+                    "Borsify Score": st.column_config.ProgressColumn("Borsify", min_value=0, max_value=100, format="%.0f"),
+                    "Dagens relevans": st.column_config.ProgressColumn("Dagens relevans", min_value=0, max_value=100, format="%.0f"),
+                    "Score Δ": st.column_config.NumberColumn("Score Δ", format="%+.1f"),
+                    "Värdering": st.column_config.ProgressColumn("Värdering", min_value=0, max_value=100, format="%.0f"),
+                    "Kvalitet": st.column_config.ProgressColumn("Kvalitet", min_value=0, max_value=100, format="%.0f"),
+                    "Marknadsläge": st.column_config.ProgressColumn("Setup", min_value=0, max_value=100, format="%.0f"),
+                    "Risk": st.column_config.ProgressColumn("Risk", min_value=0, max_value=100, format="%.0f"),
+                })
+
+            st.divider(); st.subheader("Topplista enligt ditt val")
+            display = dataframe_for_display(top)
+            st.dataframe(display, use_container_width=True, hide_index=True, column_config={
+                "Match Score": st.column_config.ProgressColumn("Match", min_value=0, max_value=100, format="%.0f"),
+                "Borsify Score": st.column_config.ProgressColumn("Borsify Score", min_value=0, max_value=100, format="%.0f"),
+                "Pris": st.column_config.NumberColumn("Pris", format="%.2f"), "Dagsförändring": st.column_config.NumberColumn("Idag", format="%.2f%%"),
+                "P/E": st.column_config.NumberColumn("P/E", format="%.1f"), "Direktavkastning": st.column_config.NumberColumn("DA", format="%.1f%%"),
+                "52v från topp": st.column_config.NumberColumn("Från 52v-topp", format="%.1f%%"), "RSI14": st.column_config.NumberColumn("RSI", format="%.0f"),
+                "Värdering": st.column_config.ProgressColumn("Värdering", min_value=0, max_value=100, format="%.0f"), "Kvalitet": st.column_config.ProgressColumn("Kvalitet", min_value=0, max_value=100, format="%.0f"),
+                "Marknadsläge": st.column_config.ProgressColumn("Setup", min_value=0, max_value=100, format="%.0f"), "Risk": st.column_config.ProgressColumn("Risk", min_value=0, max_value=100, format="%.0f"),
+            })
+            st.download_button("Ladda ner topplistan som CSV", data=display.to_csv(index=False).encode("utf-8-sig"), file_name=f"borsify_{datetime.now():%Y-%m-%d}.csv", mime="text/csv")
+            st.divider(); st.subheader("Detaljanalys")
+            choices = {f"{r['Ticker']} · {r['Namn']} · {r['Borsify Score']:.0f}/100": i for i,r in top.iterrows()}
+            selected = st.selectbox("Välj aktie", list(choices)); render_detail(top.loc[choices[selected]], profile, key_prefix="daily")
+        with discover_ideas:
+            render_idea_flow(scored)
+
+        with discover_radar:
+            st.subheader("Borsify Radar · dagens förändringar")
+            today_str = datetime.now().date().isoformat()
+            today_hist = signal_history_global.copy()
+            if not today_hist.empty:
+                today_hist = today_hist[today_hist["occurred_date"].astype(str) == today_str]
+            if today_hist.empty:
+                st.info("Inga sparade Radar-händelser för idag ännu. De skapas vid analys eller av den schemalagda scanningen.")
+            else:
+                r1, r2, r3 = st.columns(3)
+                r1.metric("Händelser idag", len(today_hist))
+                r2.metric("Hög prioritet", int((pd.to_numeric(today_hist["priority"], errors="coerce") >= 3).sum()))
+                r3.metric("Berörda aktier", int(today_hist["symbol"].astype(str).nunique()))
+                for _, sig in today_hist.sort_values(["priority", "created_at"], ascending=[False, False]).head(8).iterrows():
+                    icon = "🔔" if int(sig["priority"]) >= 3 else "⚠️"
+                    st.markdown(f"**{icon} {sig['kind']} · {sig['symbol']}** — {sig['text']}")
+
+            st.divider()
+            st.subheader("Signalhistorik")
+            st.caption("Signaler sparas i historiken och kan markeras som lästa. Trösklar för Score och dagsfall kan ställas per bevakad aktie.")
+            if not watched_global:
+                st.info("Lägg till aktier i bevakningslistan för att få signaler.")
+            else:
+                if unread_signals:
+                    if st.button(f"Markera alla {unread_signals} som lästa", use_container_width=False):
+                        mark_all_signals_read(); st.rerun()
+                history_mode = st.radio("Visa", ["Olästa", "Alla"], horizontal=True, label_visibility="collapsed")
+                hist = signal_history_global.copy()
+                if history_mode == "Olästa" and not hist.empty:
+                    hist = hist[~hist["is_read"].astype(bool)]
+                if hist.empty:
+                    st.info("Inga signaler i den valda vyn.")
                 else:
-                    update_notification_preferences(enabled, email, min_priority, selected_kinds)
-                    st.success("E-postinställningarna är sparade.")
-            st.caption("Leverans sker från den schemalagda serverkörningen. Resend/API-nyckeln ligger bara i GitHub Secrets/servermiljö, aldrig i klientappen.")
+                    for _, sig in hist.head(100).iterrows():
+                        icon = "🔔" if int(sig["priority"]) >= 3 else "⚠️"
+                        read_label = "Läst" if bool(sig["is_read"]) else "Oläst"
+                        email_label = " · E-post skickad" if pd.notna(sig.get("email_sent_at")) and str(sig.get("email_sent_at") or "").strip() else ""
+                        with st.container(border=True):
+                            st.markdown(f"**{icon} {sig['kind']} · {sig['symbol']}** · {sig['occurred_date']} · {read_label}{email_label}")
+                            st.write(str(sig["text"]))
+                            if not bool(sig["is_read"]) and st.button("Markera läst", key=f"read_{sig['event_key']}"):
+                                mark_signal_read(str(sig["event_key"]), True); st.rerun()
+                st.caption("Regler: ny i topp 10, egen Score-förändringsgräns, egen Score-nivå, målkurs och egen dagsfallsgräns.")
 
-    with tab3:
+            st.divider()
+            st.subheader("E-postnotiser")
+            if not (cloud_enabled() and current_user_id()):
+                st.info("E-postnotiser kräver inloggat Supabase-konto. Lokalt gästläge sparar bara signalerna i appen.")
+            else:
+                prefs = get_notification_preferences()
+                with st.form("notification_preferences_form"):
+                    enabled = st.checkbox("Skicka e-post efter den automatiska vardagsscanningen", value=bool(prefs.get("email_enabled", False)))
+                    email = st.text_input("Mottagare", value=str(prefs.get("email") or current_user_email()))
+                    min_priority = st.select_slider(
+                        "Minsta prioritet", options=[1, 2, 3], value=int(prefs.get("min_priority", 2)),
+                        format_func=lambda x: {1: "Alla", 2: "Viktiga", 3: "Hög"}[x],
+                    )
+                    selected_kinds = st.multiselect("Signaltyper", SIGNAL_KINDS, default=[x for x in prefs.get("notify_kinds", SIGNAL_KINDS) if x in SIGNAL_KINDS])
+                    save_notif = st.form_submit_button("Spara e-postinställningar")
+                if save_notif:
+                    if enabled and ("@" not in email or "." not in email.split("@")[-1]):
+                        st.error("Ange en giltig e-postadress.")
+                    elif enabled and not selected_kinds:
+                        st.error("Välj minst en signaltyp eller stäng av e-postnotiser.")
+                    else:
+                        update_notification_preferences(enabled, email, min_priority, selected_kinds)
+                        st.success("E-postinställningarna är sparade.")
+                st.caption("Leverans sker från den schemalagda serverkörningen. Resend/API-nyckeln ligger bara i GitHub Secrets/servermiljö, aldrig i klientappen.")
+
+    with nav_watch:
         st.subheader("Min bevakning")
         watch_meta = watch_meta_global
         watched = watched_global
@@ -2639,7 +2664,16 @@ def main() -> None:
                 clear_watchlist()
                 st.rerun()
         st.caption("Inloggad användare: bevakning, scorehistorik, radarhistorik och signalhistorik lagras i Supabase. Gäst/lokalt läge: SQLite används på aktuell dator.")
-    with tab5:
+    with nav_analyse:
+        analyse_market, analyse_edge = st.tabs(["Marknad", "Edge Lab"])
+        with analyse_market:
+            st.subheader("Marknad · hela analysuniversumet")
+            st.caption("Här finns rålistan för jämförelser och egen analys. Överblick och Dagens fynd är de rekommenderade startpunkterna.")
+            st.dataframe(dataframe_for_display(scored), use_container_width=True, hide_index=True)
+        with analyse_edge:
+            default_edge_symbol = str(filtered.iloc[0]["Ticker"]) if not filtered.empty else "INVE-B.ST"
+            render_edge_lab(default_edge_symbol)
+    with nav_method:
         w = PROFILE_WEIGHTS[profile]
         st.subheader("Så räknas Borsify Score")
         with st.expander("Risk på vanlig svenska · det viktigaste före ett köp", expanded=False):
@@ -2666,9 +2700,6 @@ Borsify försöker därför visa både **varför något ser intressant ut** och 
 
     st.caption("Konton/molnsynk: Supabase när konfigurerat. Datakälla: Yahoo Finance via yfinance. Sverige bred läses från universe.csv och är inte garanterat en officiell komplett Nasdaq-lista. Kontrollera alltid rapporter, nyheter, kassaflöde, skuldsättning och bolagsspecifika händelser före investeringsbeslut.")
 
-    with tab6:
-        default_edge_symbol = str(filtered.iloc[0]["Ticker"]) if not filtered.empty else "INVE-B.ST"
-        render_edge_lab(default_edge_symbol)
 
 
 if __name__ == "__main__":
