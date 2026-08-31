@@ -1,0 +1,26 @@
+name: Borsiq Daily Scan
+
+on:
+  schedule:
+    # 16:45 UTC = 18:45 svensk sommartid / 17:45 svensk vintertid.
+    - cron: "45 16 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python daily_scan.py
+        env:
+          BORSIQ_SUPABASE_URL: ${{ secrets.BORSIQ_SUPABASE_URL }}
+          BORSIQ_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.BORSIQ_SUPABASE_SERVICE_ROLE_KEY }}
+          BORSIQ_RESEND_API_KEY: ${{ secrets.BORSIQ_RESEND_API_KEY }}
+          BORSIQ_EMAIL_FROM: ${{ secrets.BORSIQ_EMAIL_FROM }}
+          BORSIQ_DAILY_PROFILE: Balanserad
+          BORSIQ_APP_URL: https://borsiq.se
