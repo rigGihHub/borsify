@@ -76,6 +76,33 @@ DEFAULT_SOURCES = [
         weight=1.1,
     ),
     IdeaSource(
+        "Internationell ekonomimedia · brett",
+        "media",
+        _google_news_query(
+            '(stock OR shares OR earnings OR dividend OR analyst OR target price) '
+            '(site:reuters.com OR site:cnbc.com OR site:marketwatch.com OR site:finance.yahoo.com OR site:investing.com)'
+        ),
+        category="Internationell ekonomimedia",
+        weight=1.0,
+    ),
+    IdeaSource(
+        "Internationella analyser & bolagshändelser",
+        "media",
+        _google_news_query(
+            '(earnings OR guidance OR upgrade OR downgrade OR dividend OR acquisition OR buyback) '
+            '(site:reuters.com OR site:cnbc.com OR site:marketwatch.com OR site:finance.yahoo.com)'
+        ),
+        category="Internationell analys & bolagshändelse",
+        weight=1.05,
+    ),
+    IdeaSource(
+        "Forum · Reddit stocks",
+        "forum",
+        "https://www.reddit.com/r/stocks/new/.rss",
+        category="Forum · internationellt",
+        weight=0.55,
+    ),
+    IdeaSource(
         "Forum · Reddit Aktiemarknaden",
         "forum",
         "https://www.reddit.com/r/Aktiemarknaden/new/.rss",
@@ -117,7 +144,7 @@ def _fetch_xml(url: str, timeout: int = 8) -> bytes:
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "Borsify/2.13 (+https://borsify.se; public-feed-reader)",
+            "User-Agent": "Borsify/2.14 (+https://borsify.se; public-feed-reader)",
             "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
         },
     )

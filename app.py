@@ -17,6 +17,7 @@ import streamlit as st
 import yfinance as yf
 
 from idea_radar import fetch_public_idea_flow, map_mentions, build_verified_ideas
+from fx import FX_TO_SEK_SYMBOLS, major_currency, quote_amount_to_sek, major_amount_to_sek
 
 from edge_lab import (
     build_technical_history, summarize_backtest, summarize_universe_backtest,
@@ -30,7 +31,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.13.0"
+APP_VERSION = "2.15.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -59,6 +60,56 @@ SWEDEN_BROAD_TICKERS = list(dict.fromkeys(OMXS30_TICKERS + [
     "SYNSAM.ST", "THULE.ST", "TREL-B.ST", "VIT-B.ST",
     "WALL-B.ST", "WIHL.ST"
 ]))
+
+# Kuraterade startuniversum för utländska marknader. Fokus ligger på stora och
+# relativt likvida bolag för att hålla första internationella versionen robust.
+US_LARGE_TICKERS = [
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "BRK-B", "LLY", "AVGO", "JPM",
+    "V", "MA", "XOM", "COST", "WMT", "NFLX", "ORCL", "JNJ", "PG", "HD",
+    "BAC", "KO", "ABBV", "CVX", "CRM", "AMD", "PEP", "TMO", "CSCO", "MCD",
+    "IBM", "GE", "CAT", "GS", "AXP", "AMGN", "TXN", "INTU", "QCOM", "NOW"
+]
+
+NORDIC_LARGE_TICKERS = [
+    # Danmark
+    "NOVO-B.CO", "DSV.CO", "MAERSK-B.CO", "CARL-B.CO", "VWS.CO", "ORSTED.CO", "COLO-B.CO", "GMAB.CO",
+    "DANSKE.CO", "PNDORA.CO", "ROCK-B.CO", "TRYG.CO",
+    # Norge
+    "EQNR.OL", "DNB.OL", "KOG.OL", "TEL.OL", "MOWI.OL", "NHY.OL", "YAR.OL", "ORK.OL",
+    "AKRBP.OL", "SALM.OL", "TOM.OL", "GJF.OL",
+    # Finland
+    "NOKIA.HE", "KNEBV.HE", "SAMPO.HE", "FORTUM.HE", "UPM.HE", "NESTE.HE", "WRT1V.HE", "METSO.HE",
+    "STERV.HE", "KESKOB.HE", "ELISA.HE", "ORNBV.HE"
+]
+
+GERMANY_LARGE_TICKERS = [
+    "SAP.DE", "SIE.DE", "ALV.DE", "DTE.DE", "AIR.DE", "MUV2.DE", "MBG.DE", "BMW.DE", "VOW3.DE",
+    "BAS.DE", "BAYN.DE", "DB1.DE", "DHL.DE", "RWE.DE", "IFX.DE", "ADS.DE", "HEN3.DE", "BEI.DE",
+    "FRE.DE", "HEI.DE", "MTX.DE", "SY1.DE", "VNA.DE", "CON.DE", "PAH3.DE", "ENR.DE", "SHL.DE", "QIA.DE"
+]
+
+UK_LARGE_TICKERS = [
+    "AZN.L", "SHEL.L", "HSBA.L", "ULVR.L", "RIO.L", "BP.L", "GSK.L", "REL.L", "LSEG.L", "BA.L",
+    "DGE.L", "NG.L", "BATS.L", "GLEN.L", "BARC.L", "LLOY.L", "RR.L", "CPG.L", "AAL.L", "PRU.L",
+    "IMB.L", "VOD.L", "STAN.L", "EXPN.L", "III.L", "ANTO.L", "SSE.L", "NWG.L"
+]
+
+MARKET_CONFIGS = {
+    "Sverige": {"currency": "SEK", "benchmark": "^OMXS30", "benchmark_name": "OMXS30"},
+    "USA": {"currency": "USD", "benchmark": "^GSPC", "benchmark_name": "S&P 500"},
+    "Norden exkl. Sverige": {"currency": "lokal valuta", "benchmark": None, "benchmark_name": "—"},
+    "Tyskland": {"currency": "EUR", "benchmark": "^GDAXI", "benchmark_name": "DAX"},
+    "Storbritannien": {"currency": "GBP", "benchmark": "^FTSE", "benchmark_name": "FTSE 100"},
+}
+
+MARKET_UNIVERSES = {
+    "Sverige": SWEDEN_BROAD_TICKERS,
+    "USA": US_LARGE_TICKERS,
+    "Norden exkl. Sverige": NORDIC_LARGE_TICKERS,
+    "Tyskland": GERMANY_LARGE_TICKERS,
+    "Storbritannien": UK_LARGE_TICKERS,
+}
+
 
 PROFILE_WEIGHTS = {
     "Balanserad": {"valuation": .34, "quality": .28, "setup": .18, "income": .08, "risk": .12},
@@ -142,6 +193,8 @@ def fetch_fundamentals(symbol: str) -> dict[str, Any]:
         "Sektor": info.get("sector") or "Okänd",
         "Bransch": info.get("industry") or "Okänd",
         "Valuta": info.get("currency") or "SEK",
+        "Finansiell valuta": info.get("financialCurrency") or major_currency(info.get("currency") or "SEK"),
+        "Börsvärde lokal mdr": market_cap / 1e9 if np.isfinite(market_cap) else np.nan,
         "Börsvärde BSEK": market_cap / 1e9 if np.isfinite(market_cap) else np.nan,
         "P/E": _num(info.get("trailingPE")), "Forward P/E": _num(info.get("forwardPE")),
         "P/B": _num(info.get("priceToBook")), "EV/EBITDA": _num(info.get("enterpriseToEbitda")),
@@ -249,6 +302,7 @@ def _price_snapshot(symbol: str, hist: pd.DataFrame, fundamentals: dict[str, Any
         "Avstånd SMA200": price / sma200 - 1 if np.isfinite(sma200) and sma200 else np.nan,
         "RSI14": _rsi(close),
         "Volymkvot": last_volume / avg20_volume if np.isfinite(avg20_volume) and avg20_volume > 0 else np.nan,
+        "Omsättning lokal M/dag": avg20_volume * price / 1e6 if np.isfinite(avg20_volume) and np.isfinite(price) else np.nan,
         "Omsättning MSEK/dag": avg20_volume * price / 1e6 if np.isfinite(avg20_volume) and np.isfinite(price) else np.nan,
         "Analytikerpotential": target / price - 1 if np.isfinite(target) and np.isfinite(price) and price > 0 else np.nan,
         "Yahoo": f"https://finance.yahoo.com/quote/{quote(symbol)}", "_history": hist.tail(260),
@@ -257,9 +311,66 @@ def _price_snapshot(symbol: str, hist: pd.DataFrame, fundamentals: dict[str, Any
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def fetch_index_snapshot() -> dict[str, float]:
+def fetch_fx_rates_to_sek(currencies: tuple[str, ...]) -> dict[str, float]:
+    """Fetch latest SEK conversion rates for the currencies used in the current scan."""
+    needed = sorted({major_currency(c) for c in currencies if major_currency(c) != "SEK"})
+    rates: dict[str, float] = {"SEK": 1.0}
+    for currency in needed:
+        symbol = FX_TO_SEK_SYMBOLS.get(currency)
+        if not symbol:
+            continue
+        try:
+            hist = yf.Ticker(symbol).history(period="5d", interval="1d", auto_adjust=True, actions=False)
+            if isinstance(hist, pd.DataFrame) and not hist.empty and "Close" in hist.columns:
+                close = pd.to_numeric(hist["Close"], errors="coerce").dropna()
+                if not close.empty:
+                    rate = _num(close.iloc[-1])
+                    if np.isfinite(rate) and rate > 0:
+                        rates[currency] = rate
+        except Exception:
+            continue
+    return rates
+
+
+def add_sek_conversions(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float], list[str]]:
+    """Add comparable SEK price, market-cap and turnover columns without changing source values."""
+    if df.empty:
+        return df.copy(), {"SEK": 1.0}, []
+    out = df.copy()
+    quote_ccy = out.get("Valuta", pd.Series("SEK", index=out.index)).fillna("SEK").astype(str)
+    fin_ccy = out.get("Finansiell valuta", quote_ccy).fillna(quote_ccy).astype(str)
+    currencies = tuple(sorted(set(quote_ccy.tolist() + fin_ccy.tolist())))
+    rates = fetch_fx_rates_to_sek(currencies)
+    missing = sorted({major_currency(c) for c in currencies if major_currency(c) not in rates and major_currency(c) != "SEK"})
+
+    out["Pris SEK"] = [quote_amount_to_sek(v, c, rates) for v, c in zip(out.get("Pris", pd.Series(np.nan, index=out.index)), quote_ccy)]
+    local_cap = out.get("Börsvärde lokal mdr", out.get("Börsvärde BSEK", pd.Series(np.nan, index=out.index)))
+    out["Börsvärde BSEK"] = [major_amount_to_sek(v, c, rates) for v, c in zip(local_cap, fin_ccy)]
+    local_turn = out.get("Omsättning lokal M/dag", out.get("Omsättning MSEK/dag", pd.Series(np.nan, index=out.index)))
+    out["Omsättning MSEK/dag"] = [quote_amount_to_sek(v, c, rates) for v, c in zip(local_turn, quote_ccy)]
+    out["FX till SEK"] = [rates.get(major_currency(c), np.nan) for c in quote_ccy]
+    return out, rates, missing
+
+
+def fmt_price_with_sek(row: pd.Series | dict[str, Any]) -> str:
+    price = _num(row.get("Pris"))
+    ccy = str(row.get("Valuta") or "")
+    sek = _num(row.get("Pris SEK"))
+    if not np.isfinite(price):
+        return "—"
+    major = major_currency(ccy)
+    base = f"{price:.2f} {ccy}".strip()
+    if major == "SEK" or not np.isfinite(sek):
+        return base
+    return f"{base} · ≈ {sek:,.0f} SEK".replace(",", " ")
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_index_snapshot(symbol: str = "^OMXS30") -> dict[str, float]:
+    if not symbol:
+        return {}
     try:
-        hist = yf.Ticker("^OMXS30").history(period="1mo", interval="1d", auto_adjust=True, actions=False)
+        hist = yf.Ticker(symbol).history(period="1mo", interval="1d", auto_adjust=True, actions=False)
         if hist is None or hist.empty:
             return {}
         close = hist["Close"].dropna().astype(float)
@@ -1730,7 +1841,7 @@ def render_engine_board(df: pd.DataFrame) -> None:
                     e1, e2 = st.columns(2)
                     e1.metric(label, f"{_num(r[score_col]):.0f}/100")
                     price = _num(r.get("Pris"))
-                    price_text = f"{price:.2f} {r.get('Valuta', '')}" if np.isfinite(price) else "—"
+                    price_text = fmt_price_with_sek(r)
                     e2.metric("Aktuell kurs", price_text, fmt_pct(r.get("Dagsförändring")))
                     st.caption(f"Senaste kursdag: {r.get('Prisdatum', '—')}")
                     st.write(investment_analysis_text(r,label))
@@ -1743,7 +1854,7 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail") -> N
     score_delta = None
     if prev and np.isfinite(_num(prev.get("score"))): score_delta = _num(row.get("Borsify Score")) - _num(prev.get("score"))
     c1.metric("Borsify Score", f"{row['Borsify Score']:.0f}/100", f"{score_delta:+.1f}" if score_delta is not None else None)
-    c2.metric("Pris", f"{row['Pris']:.2f} {row.get('Valuta', '')}", fmt_pct(row.get("Dagsförändring")))
+    c2.metric("Pris", fmt_price_with_sek(row), fmt_pct(row.get("Dagsförändring")))
     c3.metric("Värdering", f"{row['Värdering']:.0f}")
     st.markdown("### Varför kan detta vara en bra investering?")
     st.write(investment_analysis_text(row, "INVEST"))
@@ -1883,7 +1994,7 @@ def render_overview(
             title.caption(f"{best['Ticker']} · {best['Sektor']} · {best['Signal']}")
             score.metric("Borsify", f"{_num(best['Borsify Score']):.0f}/100")
             best_price = _num(best.get("Pris"))
-            price.metric("Aktuell kurs", f"{best_price:.2f} {best.get('Valuta', '')}" if np.isfinite(best_price) else "—", fmt_pct(best.get("Dagsförändring")))
+            price.metric("Aktuell kurs", fmt_price_with_sek(best), fmt_pct(best.get("Dagsförändring")))
 
             why, caution = st.columns(2)
             with why:
@@ -1904,7 +2015,7 @@ def render_overview(
 
     if len(daily_shortlist) > 1:
         st.markdown("### Fler aktier värda en titt")
-        compact = daily_shortlist.iloc[1:5][["Ticker", "Namn", "Pris", "Valuta", "Dagsförändring", "Borsify Score", "Dagens relevans", "Prioritet"]].copy()
+        compact = daily_shortlist.iloc[1:5][["Ticker", "Namn", "Pris", "Valuta", "Pris SEK", "Dagsförändring", "Borsify Score", "Dagens relevans", "Prioritet"]].copy()
         st.dataframe(
             compact, use_container_width=True, hide_index=True,
             column_config={
@@ -1933,13 +2044,13 @@ def render_overview(
             render_detail(candidates.loc[choices[selected]], profile, key_prefix="overview")
 
     with st.expander("Datastatus", expanded=False):
-        st.write(f"Strategi: {profile} · analyserade: {len(scored)} · efter filter: {len(filtered)} · senaste kursdag: {latest_price_date} · körtid: {elapsed:.1f} s")
+        st.write(f"Marknad: {market} · strategi: {profile} · analyserade: {len(scored)} · efter filter: {len(filtered)} · senaste kursdag: {latest_price_date} · körtid: {elapsed:.1f} s")
         if idx:
-            st.write(f"OMXS30: {idx['index']:.2f} ({fmt_pct(idx.get('daily'))})")
+            st.write(f"{benchmark_name}: {idx['index']:.2f} ({fmt_pct(idx.get('daily'))})")
         st.caption(f"Borsify v{APP_VERSION}. Kurs- och fundamentaldata kan vara fördröjd eller ofullständig.")
 
 
-def render_edge_lab(default_symbol: str) -> None:
+def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_symbol: str | None = "^OMXS30", benchmark_name: str = "OMXS30") -> None:
     st.subheader("Edge Lab · historiskt signaltest")
     st.caption("Edge Lab försöker svara på en enkel fråga: om Borsify hade gett samma signaler tidigare, hur hade de gått då? Historik bevisar inte vad som händer framåt, men hjälper oss att upptäcka svaga modeller.")
     render_beginner_glossary("edge_terms")
@@ -2006,15 +2117,15 @@ def render_edge_lab(default_symbol: str) -> None:
 
     st.divider()
     st.subheader("Marknadsregim · när fungerar signalen?")
-    st.caption("Samma signal delas upp efter OMXS30-regim. Regimen använder bara information som fanns den dagen: index mot SMA200, SMA50 mot SMA200 och 60-dagars momentum. Risk-on, Neutral och Risk-off testas separat.")
+    st.caption("Samma signal delas upp efter vald marknads regim. Regimen använder bara information som fanns den dagen: jämförelseindex mot SMA200, SMA50 mot SMA200 och 60-dagars momentum. Risk-on, Neutral och Risk-off testas separat.")
     try:
-        benchmark_hist = yf.download("^OMXS30", period=period, interval="1d", auto_adjust=False, progress=False, threads=False)
+        benchmark_hist = yf.download(benchmark_symbol, period=period, interval="1d", auto_adjust=False, progress=False, threads=False) if benchmark_symbol else pd.DataFrame()
     except Exception:
         benchmark_hist = pd.DataFrame()
     regime_hist = build_market_regime_history(benchmark_hist)
     regime_summary = summarize_backtest_by_regime(tech, regime_hist, score_col, threshold, horizon)
     if regime_summary.empty:
-        st.info("Kunde inte bygga tillräcklig OMXS30-historik för regimtestet just nu.")
+        st.info("Kunde inte bygga tillräcklig historik för jämförelseindexet i regimtestet just nu.")
     else:
         display_regime = regime_summary.copy()
         display_regime["Träffsäkerhet %"] = (display_regime["win_rate"] * 100).round(1)
@@ -2103,17 +2214,18 @@ def render_edge_lab(default_symbol: str) -> None:
                 st.info("Signalen överlever kostnaderna, men marginalen är tunn. Små förändringar i spread, slippage eller exekvering kan fortfarande äta upp resultatet.")
 
     st.divider()
-    st.subheader("Universumtest · fungerar signalen över många svenska aktier?")
-    st.caption("Det här är ett hårdare test än en enda ticker. Samma tekniska signal körs över Sverige bred och jämförs med respektive akties normala framtida avkastning. Fundamenta används fortfarande inte historiskt.")
+    st.subheader("Universumtest · fungerar signalen över många aktier?")
+    st.caption("Det här är ett hårdare test än en enda ticker. Samma tekniska signal körs över det valda marknadsuniversumet och jämförs med respektive akties normala framtida avkastning. Fundamenta används fortfarande inte historiskt.")
     uc1, uc2, uc3 = st.columns(3)
     uni_threshold = uc1.slider("Min score · universum", 40, 90, threshold, 5, key="edge_uni_threshold")
     uni_horizon = uc2.selectbox("Utfall · universum", [5, 10, 20], index=[5,10,20].index(horizon), format_func=lambda x: f"{x} börsdagar", key="edge_uni_horizon")
     uni_years = uc3.slider("Historik · universum", 2, 10, min(years, 5), key="edge_uni_years")
-    max_symbols = st.slider("Antal aktier i universumtest", 10, min(81, len(load_universe_file())), min(50, len(load_universe_file())), 5, key="edge_uni_count")
+    max_available = max(1, len(universe_symbols))
+    min_test = min(10, max_available)
+    max_symbols = st.slider("Antal aktier i universumtest", min_test, max_available, min(50, max_available), 1 if max_available < 10 else 5, key="edge_uni_count")
     run_universe = st.button("Kör universumtest", type="primary", key="run_universe_edge")
     if run_universe:
-        universe_df = load_universe_file().head(max_symbols)
-        symbols = universe_df["Ticker"].dropna().astype(str).str.upper().tolist()
+        symbols = [str(x).upper() for x in universe_symbols[:max_symbols]]
         period = f"{uni_years}y"
         with st.spinner(f"Testar {len(symbols)} aktier över {uni_years} års historik …"):
             try:
@@ -2225,38 +2337,42 @@ def render_edge_lab(default_symbol: str) -> None:
                     exposure_chart = eq[exposure_cols].rename(columns={"exposure": "Exponering", "open_risk": "Öppen stop-risk"}) * 100
                     st.area_chart(exposure_chart, use_container_width=True)
 
-                    st.markdown("#### Borsify mot OMXS30 · samma tidsperiod")
+                    if benchmark_symbol:
+                        st.markdown(f"#### Borsify mot {benchmark_name} · samma tidsperiod")
+                    else:
+                        st.markdown("#### Benchmark")
+                        st.info("Det nordiska urvalet blandar Danmark, Norge och Finland. Borsify visar därför ingen förenklad benchmark här ännu i stället för att jämföra mot ett missvisande index.")
                     try:
-                        bench_raw = yf.download("^OMXS30", start=pd.Timestamp(eq.index.min()).date().isoformat(), end=(pd.Timestamp(eq.index.max()) + pd.Timedelta(days=2)).date().isoformat(), interval="1d", auto_adjust=False, progress=False, threads=False)
+                        bench_raw = yf.download(benchmark_symbol, start=pd.Timestamp(eq.index.min()).date().isoformat(), end=(pd.Timestamp(eq.index.max()) + pd.Timedelta(days=2)).date().isoformat(), interval="1d", auto_adjust=False, progress=False, threads=False) if benchmark_symbol else pd.DataFrame()
                     except Exception:
                         bench_raw = pd.DataFrame()
-                    bench_close = _download_close_series(bench_raw, "^OMXS30")
+                    bench_close = _download_close_series(bench_raw, benchmark_symbol or "")
                     if not bench_close.empty:
                         compare_index = pd.DatetimeIndex(pd.to_datetime(eq.index)).tz_localize(None)
                         bench_aligned = bench_close.reindex(compare_index).ffill().bfill()
                         if bench_aligned.notna().sum() >= 2 and _num(bench_aligned.iloc[0]) > 0:
                             bq_index = pd.to_numeric(eq["equity"], errors="coerce") / _num(eq["equity"].iloc[0]) * 100
                             omx_index = bench_aligned / _num(bench_aligned.iloc[0]) * 100
-                            comparison = pd.DataFrame({"Borsify": bq_index.values, "OMXS30": omx_index.values}, index=compare_index)
+                            comparison = pd.DataFrame({"Borsify": bq_index.values, benchmark_name: omx_index.values}, index=compare_index)
                             st.line_chart(comparison, use_container_width=True)
                             bq_stats = _performance_stats(pd.Series(bq_index.values, index=compare_index))
                             omx_stats = _performance_stats(pd.Series(omx_index.values, index=compare_index))
                             bm1, bm2, bm3, bm4 = st.columns(4)
-                            bm1.metric("Borsify total", f"{bq_stats['return']:+.1%}" if np.isfinite(bq_stats['return']) else "—", f"OMXS30 {omx_stats['return']:+.1%}" if np.isfinite(omx_stats['return']) else None)
-                            bm2.metric("Årstakt (CAGR)", f"{bq_stats['cagr']:+.1%}" if np.isfinite(bq_stats['cagr']) else "—", f"OMXS30 {omx_stats['cagr']:+.1%}" if np.isfinite(omx_stats['cagr']) else None, help="Ungefär vilken årlig tillväxttakt som skulle ge samma totalresultat över perioden.")
-                            bm3.metric("Max fall från topp", f"{bq_stats['max_drawdown']:.1%}" if np.isfinite(bq_stats['max_drawdown']) else "—", f"OMXS30 {omx_stats['max_drawdown']:.1%}" if np.isfinite(omx_stats['max_drawdown']) else None, help=beginner_term("drawdown"))
-                            bm4.metric("Riskjusterad kvot", f"{bq_stats['sharpe']:.2f}" if np.isfinite(bq_stats['sharpe']) else "—", f"OMXS30 {omx_stats['sharpe']:.2f}" if np.isfinite(omx_stats['sharpe']) else None, help=beginner_term("Sharpe"))
+                            bm1.metric("Borsify total", f"{bq_stats['return']:+.1%}" if np.isfinite(bq_stats['return']) else "—", f"{benchmark_name} {omx_stats['return']:+.1%}" if np.isfinite(omx_stats['return']) else None)
+                            bm2.metric("Årstakt (CAGR)", f"{bq_stats['cagr']:+.1%}" if np.isfinite(bq_stats['cagr']) else "—", f"{benchmark_name} {omx_stats['cagr']:+.1%}" if np.isfinite(omx_stats['cagr']) else None, help="Ungefär vilken årlig tillväxttakt som skulle ge samma totalresultat över perioden.")
+                            bm3.metric("Max fall från topp", f"{bq_stats['max_drawdown']:.1%}" if np.isfinite(bq_stats['max_drawdown']) else "—", f"{benchmark_name} {omx_stats['max_drawdown']:.1%}" if np.isfinite(omx_stats['max_drawdown']) else None, help=beginner_term("drawdown"))
+                            bm4.metric("Riskjusterad kvot", f"{bq_stats['sharpe']:.2f}" if np.isfinite(bq_stats['sharpe']) else "—", f"{benchmark_name} {omx_stats['sharpe']:.2f}" if np.isfinite(omx_stats['sharpe']) else None, help=beginner_term("Sharpe"))
                             excess = bq_stats["return"] - omx_stats["return"] if np.isfinite(bq_stats["return"]) and np.isfinite(omx_stats["return"]) else np.nan
                             if np.isfinite(excess):
                                 if excess > .02:
-                                    st.success(f"Enkelt uttryckt: i den här historiska simuleringen slog Borsify OMXS30 med cirka {excess:+.1%} totalt. Kontrollera också drawdown och riskjusterad kvot – högre avkastning är mindre imponerande om vägen dit varit mycket mer riskfylld.")
+                                    st.success(f"Enkelt uttryckt: i den här historiska simuleringen slog Borsify jämförelseindexet med cirka {excess:+.1%} totalt. Kontrollera också drawdown och riskjusterad kvot – högre avkastning är mindre imponerande om vägen dit varit mycket mer riskfylld.")
                                 elif excess < -.02:
-                                    st.warning(f"Enkelt uttryckt: i den här historiska simuleringen gav Borsify cirka {abs(excess):.1%} sämre total avkastning än OMXS30. Då hade ett enkelt indexalternativ varit bättre under samma period.")
+                                    st.warning(f"Enkelt uttryckt: i den här historiska simuleringen gav Borsify cirka {abs(excess):.1%} sämre total avkastning än {benchmark_name}. Då hade ett enkelt indexalternativ varit bättre under samma period.")
                                 else:
-                                    st.info("Enkelt uttryckt: Borsify och OMXS30 gav ungefär samma totalresultat i den här perioden. Då blir risk, drawdown och handelskostnader extra viktiga i jämförelsen.")
-                            st.caption("Jämförelsen normaliserar båda till 100 vid start. OMXS30 är ett jämförelseindex, inte ett investerbart totalavkastningsindex här; utdelningar i indexet kan därför göra jämförelsen ofullständig.")
+                                    st.info(f"Enkelt uttryckt: Borsify och {benchmark_name} gav ungefär samma totalresultat i den här perioden. Då blir risk, drawdown och handelskostnader extra viktiga i jämförelsen.")
+                            st.caption(f"Jämförelsen normaliserar båda till 100 vid start. {benchmark_name} används som jämförelseindex och är inte nödvändigtvis ett investerbart totalavkastningsindex här; utdelningar kan därför göra jämförelsen ofullständig.")
                     else:
-                        st.info("OMXS30-data kunde inte hämtas för exakt samma period, så benchmarkjämförelsen visas inte i denna körning.")
+                        st.info("Jämförelseindexdata kunde inte hämtas för exakt samma period, så benchmarkjämförelsen visas inte i denna körning.")
 
                 rejected = int(portfolio.get("rejected_capacity", 0))
                 if rejected > 0:
@@ -2288,7 +2404,7 @@ def render_edge_lab(default_symbol: str) -> None:
 
             st.markdown("#### Universumtest uppdelat på marknadsregim")
             try:
-                benchmark_uni = yf.download("^OMXS30", period=period, interval="1d", auto_adjust=False, progress=False, threads=False)
+                benchmark_uni = yf.download(benchmark_symbol, period=period, interval="1d", auto_adjust=False, progress=False, threads=False) if benchmark_symbol else pd.DataFrame()
             except Exception:
                 benchmark_uni = pd.DataFrame()
             regime_uni_hist = build_market_regime_history(benchmark_uni)
@@ -2358,15 +2474,23 @@ def main() -> None:
         )
         st.caption(intent_plain_text(discovery_intent))
 
-        universe = st.radio("Universum", ["OMXS30", "Sverige bred", "Egen lista"], index=1)
-        custom = st.text_area("Tickers", value="INVE-B.ST, VOLV-B.ST, SAND.ST, EVO.ST", height=100) if universe == "Egen lista" else ""
-        if universe == "Sverige bred":
-            st.caption(f"{len(file_universe_symbols)} svenska aktier i nuvarande universum.")
+        market = st.selectbox("Marknad", list(MARKET_CONFIGS), index=0, help="Byt land/region. Borsify använder samma grundmodell men jämför bolag inom det valda universumet.")
+        if market == "Sverige":
+            universe = st.radio("Universum", ["OMXS30", "Sverige bred", "Egen lista"], index=1)
+            custom = st.text_area("Tickers", value="INVE-B.ST, VOLV-B.ST, SAND.ST, EVO.ST", height=100) if universe == "Egen lista" else ""
+            if universe == "Sverige bred":
+                st.caption(f"{len(file_universe_symbols)} svenska aktier i nuvarande universum.")
+        else:
+            universe = f"{market} urval"
+            custom = ""
+            st.caption(f"{len(MARKET_UNIVERSES[market])} stora/likvida bolag i Borsifys kuraterade startuniversum. Inte en komplett officiell indexlista.")
 
         with st.expander("Fler filter", expanded=False):
             profile = st.selectbox("Borsify-strategi", list(PROFILE_WEIGHTS), index=0, help="Påverkar grundscoren. Om du är osäker kan Balanserad vara kvar.")
-            min_market_cap = st.number_input("Min börsvärde (mdr SEK)", 0.0, value=5.0, step=1.0)
-            min_turnover = st.number_input("Min omsättning/dag (MSEK)", 0.0, value=5.0, step=1.0)
+            default_cap = 5.0 if market == "Sverige" else 0.0
+            default_turnover = 5.0 if market == "Sverige" else 0.0
+            min_market_cap = st.number_input("Min börsvärde (mdr SEK)", 0.0, value=default_cap, step=1.0, help="Utländska börsvärden räknas om till SEK med senaste tillgängliga valutakurs. Lämna 0 om du inte vill filtrera på storlek.")
+            min_turnover = st.number_input("Min omsättning/dag (miljoner SEK)", 0.0, value=default_turnover, step=1.0, help="Även utländsk handel räknas om till SEK så att filtret blir jämförbart mellan marknader.")
             require_positive = st.checkbox("Kräv positiv P/E", value=True)
             dividend_only = st.checkbox(
                 "Bara aktier med direktavkastning",
@@ -2405,7 +2529,7 @@ def main() -> None:
                     st.caption("Bevakning och scorehistorik sparas i molnet.")
             else:
                 st.caption("Lokalt läge · konfigurera Supabase för konto och molnsynk.")
-    symbols = OMXS30_TICKERS if universe == "OMXS30" else (file_universe_symbols if universe == "Sverige bred" else parse_symbols(custom))
+    symbols = (OMXS30_TICKERS if universe == "OMXS30" else (file_universe_symbols if universe == "Sverige bred" else parse_symbols(custom))) if market == "Sverige" else MARKET_UNIVERSES[market]
     if refresh: st.cache_data.clear()
     if not symbols: st.warning("Ange minst en ticker."); st.stop()
     start = time.perf_counter()
@@ -2415,6 +2539,10 @@ def main() -> None:
         st.error("Ingen marknadsdata kunde hämtas. Yahoo Finance kan tillfälligt begränsa anrop.")
         if errors: st.code("\n".join(errors[:12]))
         st.stop()
+
+    raw_df, fx_rates, missing_fx = add_sek_conversions(raw_df)
+    if missing_fx:
+        errors.append("Valutaomräkning saknas för: " + ", ".join(missing_fx))
 
     scored = add_scores(raw_df, profile)
     save_score_history(scored, profile)
@@ -2433,12 +2561,19 @@ def main() -> None:
         min_yield = float(min_dividend_yield) / 100.0
         filtered = filtered[dy.notna() & (dy > 0) & (dy >= min_yield)]
     filtered = apply_discovery_intent(filtered, discovery_intent)
-    top = filtered.head(top_n).copy(); daily_shortlist = build_daily_shortlist(filtered, profile, limit=min(5, len(filtered))); idx = fetch_index_snapshot(); elapsed = time.perf_counter() - start
+    top = filtered.head(top_n).copy(); daily_shortlist = build_daily_shortlist(filtered, profile, limit=min(5, len(filtered))); market_cfg = MARKET_CONFIGS[market]
+    benchmark_symbol = market_cfg["benchmark"]
+    benchmark_name = market_cfg["benchmark_name"]
+    idx = fetch_index_snapshot(benchmark_symbol) if benchmark_symbol else {}; elapsed = time.perf_counter() - start
 
     price_dates = sorted({str(x) for x in raw_df.get("Prisdatum", pd.Series(dtype=str)).dropna().tolist() if str(x) != "—"})
     latest_price_date = price_dates[-1] if price_dates else "—"
-    market_note = f" · OMXS30 {idx['index']:.0f} ({fmt_pct(idx.get('daily'))})" if idx else ""
-    st.caption(f"{len(raw_df)} aktier analyserade · {len(filtered)} kvar efter dina val · kursdata {latest_price_date}{market_note}")
+    market_note = f" · {benchmark_name} {idx['index']:.0f} ({fmt_pct(idx.get('daily'))})" if idx else ""
+    fx_note = ""
+    if market != "Sverige":
+        converted = int(pd.to_numeric(raw_df.get("Pris SEK", pd.Series(dtype=float)), errors="coerce").notna().sum())
+        fx_note = f" · SEK-omräkning {converted}/{len(raw_df)} aktier"
+    st.caption(f"{len(raw_df)} aktier analyserade · {len(filtered)} kvar efter dina val · kursdata {latest_price_date}{market_note}{fx_note}")
     if errors:
         with st.expander(f"Datakällan saknade {len(errors)} ticker(s) — övriga analyserades"):
             st.caption("Detta beror oftast på tillfälliga Yahoo-problem, ändrad ticker eller otillräcklig kurshistorik. Det påverkar inte aktier som redan har lästs in.")
@@ -2501,7 +2636,7 @@ def main() -> None:
                         delta = _num(case.get("Score Δ"))
                         h2.metric("Borsify", f"{_num(case['Borsify Score']):.0f}/100", f"{delta:+.1f}" if np.isfinite(delta) else None)
                         case_price = _num(case.get("Pris"))
-                        h3.metric("Aktuell kurs", f"{case_price:.2f} {case.get('Valuta', '')}" if np.isfinite(case_price) else "—", fmt_pct(case.get("Dagsförändring")))
+                        h3.metric("Aktuell kurs", fmt_price_with_sek(case), fmt_pct(case.get("Dagsförändring")))
                         h4.metric("Dagens relevans", f"{_num(case['Dagens relevans']):.0f}/100")
                         h5.metric("Prioritet", str(case["Prioritet"]))
                         c1, c2, c3 = st.columns(3)
@@ -2514,7 +2649,7 @@ def main() -> None:
 
                 st.divider()
                 st.subheader("Jämför dagens kortlista")
-                quick_cols = ["Ticker", "Namn", "Pris", "Valuta", "Dagsförändring", "Prisdatum", "Borsify Score", "INVEST Score", "SWING Score", "REVERSAL Score", "Dagens relevans", "Prioritet", "Score Δ", "Värdering", "Kvalitet", "Marknadsläge", "Risk", "Riskflaggor"]
+                quick_cols = ["Ticker", "Namn", "Pris", "Valuta", "Pris SEK", "Dagsförändring", "Prisdatum", "Borsify Score", "INVEST Score", "SWING Score", "REVERSAL Score", "Dagens relevans", "Prioritet", "Score Δ", "Värdering", "Kvalitet", "Marknadsläge", "Risk", "Riskflaggor"]
                 quick = daily_shortlist[quick_cols].copy()
                 st.dataframe(quick, use_container_width=True, hide_index=True, column_config={
                     "Borsify Score": st.column_config.ProgressColumn("Borsify", min_value=0, max_value=100, format="%.0f"),
@@ -2642,7 +2777,7 @@ def main() -> None:
                         wr = current_row.iloc[0]
                         st.markdown(f"**Borsifys skäl just nu:** {wr.get('Varför','—')}")
                         cp = _num(wr.get("Pris"))
-                        if np.isfinite(cp): st.caption(f"Aktuell hämtad kurs: {cp:.2f} {wr.get('Valuta','')} · kursdag {wr.get('Prisdatum','—')}")
+                        if np.isfinite(cp): st.caption(f"Aktuell hämtad kurs: {fmt_price_with_sek(wr)} · kursdag {wr.get('Prisdatum','—')}")
                     note = st.text_area("Min anledning att bevaka", value=current_note, key=f"note_{sym}", placeholder="Exempel: Bra bolag men jag vill vänta på lägre pris.")
                     target = st.number_input(
                         "Mitt intressepris (0 = inget)", min_value=0.0, value=float(current_target) if np.isfinite(current_target) and current_target > 0 else 0.0, step=1.0, key=f"target_{sym}"
@@ -2672,7 +2807,7 @@ def main() -> None:
             st.dataframe(dataframe_for_display(scored), use_container_width=True, hide_index=True)
         with analyse_edge:
             default_edge_symbol = str(filtered.iloc[0]["Ticker"]) if not filtered.empty else "INVE-B.ST"
-            render_edge_lab(default_edge_symbol)
+            render_edge_lab(default_edge_symbol, list(symbols), benchmark_symbol, benchmark_name)
     with nav_method:
         w = PROFILE_WEIGHTS[profile]
         st.subheader("Så räknas Borsify Score")
@@ -2698,7 +2833,7 @@ Borsify försöker därför visa både **varför något ser intressant ut** och 
     **Bevakningssignaler** jämför aktuell körning med tidigare dagssnapshots, din målkurs och dina egna tröskelvärden per aktie. Signalhistorik sparas med läst/oläst-status. Inloggade användare kan välja vilka signaltyper som ska skickas som e-post efter den schemalagda scanningen. De är regelbaserade informationshändelser, inte automatiska affärsförslag.
     """)
 
-    st.caption("Konton/molnsynk: Supabase när konfigurerat. Datakälla: Yahoo Finance via yfinance. Sverige bred läses från universe.csv och är inte garanterat en officiell komplett Nasdaq-lista. Kontrollera alltid rapporter, nyheter, kassaflöde, skuldsättning och bolagsspecifika händelser före investeringsbeslut.")
+    st.caption("Konton/molnsynk: Supabase när konfigurerat. Datakälla: Yahoo Finance via yfinance. Sverige bred läses från universe.csv. Utländska marknader använder kuraterade startuniversum. Listorna är inte garanterat kompletta officiella indexlistor. Kontrollera alltid rapporter, nyheter, kassaflöde, skuldsättning och bolagsspecifika händelser före investeringsbeslut.")
 
 
 

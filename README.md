@@ -247,3 +247,25 @@ I v2.7 bokfördes öppna positioner till insatt kapital mellan entry och exit. *
 - Portföljvyn visar max öppen stop-risk, stop-andel och signaler som nekats av risktaket.
 - Trade-loggen visar stop-avstånd och om positionen stoppades.
 - Stop-simuleringen antar fill på stopnivån och modellerar inte gap-through; resultatet ska därför ses som diagnostik, inte exekveringsgaranti.
+
+## v2.14.0 – Utländska marknader
+
+- Ny marknadsväljare i sidopanelen: Sverige, USA, Norden exkl. Sverige, Tyskland och Storbritannien.
+- Kuraterade startuniversum med stora/likvida aktier för varje utländsk marknad.
+- Marknadsspecifika jämförelseindex där ett tydligt index används: OMXS30, S&P 500, DAX och FTSE 100.
+- Norden exkl. Sverige blandar DKK/NOK/EUR och visar därför ingen förenklad benchmark i Edge Lab ännu i stället för en missvisande jämförelse.
+- v2.14 använde lokala valutor i filtertexterna. Den begränsningen är löst från v2.15 genom SEK-omräkning före filtrering.
+- Edge Labs universumtest använder nu det valda marknadsuniversumet i stället för att alltid använda Sverige bred.
+- Marknadsregim och portföljbenchmark i Edge Lab följer valt marknadsindex där benchmark finns.
+- Idéflödet har kompletterats med internationell ekonomimedia och Reddit r/stocks. Extern uppmärksamhet påverkar fortfarande inte Borsify Score utan används bara för uppslag som sedan granskas av Borsifys nyckeltalsmodell.
+
+Listorna är kuraterade startuniversum och ska inte tolkas som fullständiga eller officiella indexmedlemslistor. Yahoo Finance kan ändra symboler, datatillgänglighet och fundamental täckning över tid.
+
+## v2.15.0 – Valutaomräkning till SEK
+
+- Utländska aktiekurser visas både i handelsvalutan och ungefärligt omräknade till SEK.
+- Börsvärde och genomsnittlig dagsomsättning räknas om till SEK före filtrering, så storleks- och likviditetsfilter blir jämförbara mellan marknader.
+- Valutakurser hämtas via Yahoo Finance och cachas i 15 minuter tillsammans med prisdata.
+- Stöd för USD, EUR, GBP, DKK, NOK samt förberett stöd för CHF, CAD och JPY.
+- Londonnoteringar som anges i pence (GBp/GBX) konverteras först till GBP och därefter till SEK.
+- Originalkurs och originalvaluta bevaras alltid. SEK-värdet markeras som ungefärligt eftersom aktiekurs och valutakurs inte nödvändigtvis har exakt samma tidsstämpel.
