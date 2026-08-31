@@ -16,6 +16,8 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
+from idea_radar import fetch_public_idea_flow, map_mentions, build_verified_ideas
+
 from edge_lab import (
     build_technical_history, summarize_backtest, summarize_universe_backtest,
     build_market_regime_history, summarize_backtest_by_regime, summarize_universe_backtest_by_regime,
@@ -28,7 +30,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.10.0"
+APP_VERSION = "2.12.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -1345,6 +1347,11 @@ def beginner_term(term: str) -> str:
         "Sharpe": "ett förenklat mått på hur mycket avkastning strategin gett i förhållande till hur mycket den svängt. Högre är normalt bättre",
         "risk-on": "ett marknadsläge där börsen generellt är starkare och investerare oftare vågar ta mer risk",
         "risk-off": "ett försiktigare marknadsläge där börsen generellt är svagare och investerare söker mindre risk",
+        "volatilitet": "hur mycket priset svänger. Hög volatilitet betyder större rörelser både upp och ned – inte automatiskt högre framtida avkastning",
+        "likviditet": "hur lätt en aktie normalt går att köpa eller sälja utan att priset påverkas mycket. Låg likviditet kan ge sämre köp- och säljpris",
+        "stop-loss": "en förutbestämd nivå där man planerar att sälja för att begränsa en förlust. Den garanterar inte exakt säljpris om kursen gapar",
+        "hävstång": "att få större marknadsexponering än det kapital man satt in. Det förstorar både vinster och förluster och innebär högre risk",
+        "diversifiering": "att sprida kapitalet på flera innehav så att ett enskilt bolag inte får lika stor påverkan på hela portföljen",
     }
     return explanations.get(term, term)
 
@@ -1361,9 +1368,208 @@ def render_beginner_glossary(key: str = "guide") -> None:
 **Direktavkastning:** {beginner_term("direktavkastning")}.  
 **Drawdown:** {beginner_term("drawdown")}.  
 **Profit factor:** {beginner_term("profit factor")}.  
-**ATR:** {beginner_term("ATR")}.
+**ATR:** {beginner_term("ATR")}.  
+**Volatilitet:** {beginner_term("volatilitet")}.  
+**Likviditet:** {beginner_term("likviditet")}.  
+**Stop-loss:** {beginner_term("stop-loss")}.
 """)
 
+
+
+DISCOVERY_INTENTS = [
+    "Bästa möjligheter just nu",
+    "Bra långsiktig investering",
+    "Utdelningsaktier",
+    "Billiga kvalitetsbolag",
+    "Aktier som fallit mycket",
+    "Kortsiktigt köpläge",
+    "Stabilare aktier",
+]
+
+
+def apply_discovery_intent(df: pd.DataFrame, intent: str) -> pd.DataFrame:
+    """Rank the already screened universe by a beginner-friendly goal without changing core scores."""
+    out = df.copy()
+    def c(name: str, default: float = 50.0) -> pd.Series:
+        if name not in out.columns:
+            return pd.Series(default, index=out.index, dtype=float)
+        return pd.to_numeric(out[name], errors="coerce").fillna(default)
+    if intent == "Bra långsiktig investering":
+        match = c("INVEST Score")
+    elif intent == "Utdelningsaktier":
+        match = .55*c("Utdelning") + .20*c("Kvalitet") + .15*c("Risk") + .10*c("Värdering")
+        dy = pd.to_numeric(out.get("Direktavkastning"), errors="coerce")
+        out = out[dy.notna() & (dy > 0)].copy(); match = match.loc[out.index]
+    elif intent == "Billiga kvalitetsbolag":
+        match = .45*c("Värdering") + .35*c("Kvalitet") + .20*c("Risk")
+    elif intent == "Aktier som fallit mycket":
+        match = c("REVERSAL Score")
+    elif intent == "Kortsiktigt köpläge":
+        match = c("SWING Score")
+    elif intent == "Stabilare aktier":
+        match = .55*c("Risk") + .30*c("Kvalitet") + .15*c("Värdering")
+    else:
+        match = c("Borsify Score")
+    out["Match Score"] = pd.to_numeric(match, errors="coerce").reindex(out.index).fillna(0).round(1)
+    return out.sort_values(["Match Score", "Datatäckning"], ascending=[False, False])
+
+
+def intent_plain_text(intent: str) -> str:
+    texts = {
+        "Bästa möjligheter just nu": "En bred ranking av aktier som sammantaget ser mest intressanta ut enligt din valda Borsify-strategi.",
+        "Bra långsiktig investering": "Prioriterar bolag som kombinerar kvalitet, rimlig värdering och risk för ett längre ägande.",
+        "Utdelningsaktier": "Visar bara bolag med registrerad utdelning och prioriterar både direktavkastning och hur hållbar utdelningen verkar vara.",
+        "Billiga kvalitetsbolag": "Letar efter en kombination av attraktiv värdering och starkare bolagskvalitet – inte bara lågt P/E.",
+        "Aktier som fallit mycket": "Letar efter möjliga överreaktioner efter kursfall, men väger samtidigt in kvalitet och risk för att undvika rena fallande knivar.",
+        "Kortsiktigt köpläge": "Prioriterar kursläge, trend och momentum för dagar till veckor. Det är mer timing än bolagsvärdering.",
+        "Stabilare aktier": "Prioriterar högre riskbetyg och kvalitet. Stabilare betyder inte riskfritt – aktier kan alltid falla.",
+    }
+    return texts.get(intent, "")
+
+
+def dividend_safety_label(row: pd.Series) -> tuple[str, str]:
+    payout = _num(row.get("Utdelningsandel")); quality = _num(row.get("Kvalitet")); dy = _num(row.get("Direktavkastning"))
+    if not np.isfinite(dy) or dy <= 0:
+        return "Ingen registrerad utdelning", "Datakällan visar ingen positiv direktavkastning just nu."
+    if not np.isfinite(payout):
+        return "Oklar", "Utdelningsandelen saknas, så Borsify kan inte bedöma hur stor del av vinsten som delas ut."
+    if payout > 1:
+        return "Förhöjd risk", "Bolaget delar enligt aktuell data ut mer än hela vinsten. Det kan vara tillfälligt men bör kontrolleras."
+    if payout > .80:
+        return "Bevaka", "En stor del av vinsten delas ut. Det lämnar mindre marginal om vinsten försvagas."
+    if .25 <= payout <= .75 and np.isfinite(quality) and quality >= 60:
+        return "Ser rimlig ut", "Utdelningen tar en måttlig del av vinsten och bolagets kvalitetsbetyg är samtidigt relativt starkt."
+    return "Neutral", "Utdelningen ser inte uppenbart ansträngd ut i de få mått Borsify har, men historiken behöver fortfarande kontrolleras."
+
+
+def quality_at_fair_price_snapshot(row: pd.Series) -> tuple[float, list[str], list[str]]:
+    """Current-snapshot quality/value check inspired by long-term quality-at-a-fair-price thinking.
+
+    This deliberately does not pretend to measure multi-year durability because the current
+    Yahoo snapshot does not provide point-in-time 5-10 year fundamentals in the screener.
+    """
+    quality = _num(row.get("Kvalitet")); valuation = _num(row.get("Värdering")); risk = _num(row.get("Risk"))
+    roe = _num(row.get("ROE")); margin = _num(row.get("Vinstmarginal")); debt = _num(row.get("Skuld/eget kapital"))
+    fcf = _num(row.get("FCF-yield")); growth = _num(row.get("Vinsttillväxt"))
+    parts = [x for x in [quality, valuation, risk] if np.isfinite(x)]
+    base = np.mean(parts) if parts else 50.0
+    score = .45*(quality if np.isfinite(quality) else base) + .35*(valuation if np.isfinite(valuation) else base) + .20*(risk if np.isfinite(risk) else base)
+    positives, cautions = [], []
+    if np.isfinite(roe):
+        (positives if roe >= .15 else cautions).append(f"ROE {fmt_pct(roe)}: " + ("bolaget använder ägarnas kapital effektivt i dagens data." if roe >= .15 else "lönsamheten är inte särskilt hög i dagens data."))
+    if np.isfinite(margin):
+        (positives if margin >= .10 else cautions).append(f"Vinstmarginal {fmt_pct(margin)}: " + ("en hygglig del av försäljningen blir vinst." if margin >= .10 else "marginalen är tunnare och ger mindre felmarginal."))
+    if np.isfinite(debt):
+        (positives if debt <= 100 else cautions).append(f"Skuld/eget kapital {debt:.0f}: " + ("skuldsättningen ser måttlig ut i den här grova kontrollen." if debt <= 100 else "skuldsättningen är högre och behöver granskas närmare."))
+    if np.isfinite(fcf):
+        (positives if fcf > .03 else cautions).append(f"Fritt kassaflöde/börsvärde {fmt_pct(fcf)}: " + ("bolaget genererar kontanter i förhållande till priset." if fcf > .03 else "kassaflödesavkastningen är låg eller svag just nu."))
+    if np.isfinite(growth) and growth < 0:
+        cautions.append(f"Vinsttillväxt {fmt_pct(growth)}: vinsten minskar enligt senaste tillgängliga uppgift.")
+    return round(float(np.clip(score, 0, 100)), 1), positives[:4], cautions[:4]
+
+
+def render_quality_at_fair_price(df: pd.DataFrame) -> None:
+    if df.empty:
+        return
+    rows=[]
+    for _, r in df.iterrows():
+        score, positives, cautions = quality_at_fair_price_snapshot(r)
+        rr=r.copy(); rr["QRP Score"]=score; rr["QRP Positives"]=positives; rr["QRP Cautions"]=cautions; rows.append(rr)
+    q=pd.DataFrame(rows).sort_values(["QRP Score", "Datatäckning"], ascending=[False, False]).head(5)
+    st.subheader("Kvalitet till rätt pris · långsiktig kontroll")
+    st.caption("Inspirerad av principen att hellre leta efter bra bolag till rimliga priser än enbart billiga aktier. Detta är en nulägeskontroll – Borsify saknar ännu 5–10 års point-in-time fundamentahistorik för att bevisa uthålligheten.")
+    for rank, (_, r) in enumerate(q.iterrows(), 1):
+        with st.container(border=True):
+            c1,c2,c3,c4=st.columns([2.7,1,1,1])
+            c1.markdown(f"**{rank}. {r.get('Namn','')} · {r.get('Ticker','')}**")
+            c1.caption("Bra företag + rimligt pris + hanterbar risk väger tyngst i den här kontrollen.")
+            c2.metric("Kvalitet/pris", f"{_num(r.get('QRP Score')):.0f}/100")
+            c3.metric("Kvalitet", f"{_num(r.get('Kvalitet')):.0f}/100")
+            c4.metric("Värdering", f"{_num(r.get('Värdering')):.0f}/100")
+            pos=r.get("QRP Positives") or []; caut=r.get("QRP Cautions") or []
+            if pos: st.write("**Det som talar för:** " + " ".join(pos))
+            if caut: st.write("**Det som behöver kollas:** " + " ".join(caut))
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_idea_flow_cached() -> tuple[pd.DataFrame, list[str]]:
+    return fetch_public_idea_flow()
+
+
+def render_idea_flow(scored: pd.DataFrame) -> None:
+    st.subheader("Idéflöde · forum och ekonomimedia")
+    st.caption("Tanken här är inte att tro på ett tips bara för att det diskuteras. Externa källor används enbart för att hitta uppslag. Därefter kör Borsify samma kontroll av kvalitet, värdering, risk och övriga nyckeltal som för alla andra aktier.")
+    st.info("En aktie kan alltså vara omtalad och ändå få **Uppslag, inte fynd**. Forum- eller medieintresse höjer inte Borsify Score.")
+    if st.button("Hämta senaste externa uppslag", key="idea_flow_fetch", type="primary"):
+        with st.spinner("Hämtar publika rubriker från ekonomimedia och forum…"):
+            feed, errors = fetch_idea_flow_cached()
+            st.session_state["idea_flow_feed"] = feed
+            st.session_state["idea_flow_errors"] = errors
+    feed = st.session_state.get("idea_flow_feed")
+    errors = st.session_state.get("idea_flow_errors", [])
+    if feed is None:
+        st.write("Tryck på knappen för att hämta ett färskt idéflöde. Borsify läser publika RSS/Atom-flöden och sparar inte hela artiklar.")
+        return
+    if errors:
+        with st.expander("Några källor kunde inte läsas"):
+            st.write("Det kan bero på tillfälliga nätproblem eller att en publik feed ändrats. Övriga källor används ändå.")
+            for e in errors: st.write(f"• {e}")
+    if feed.empty:
+        st.warning("Inga externa rubriker kunde hämtas just nu.")
+        return
+    mentions = map_mentions(feed, scored)
+    ideas = build_verified_ideas(mentions, scored)
+    m1,m2,m3=st.columns(3)
+    m1.metric("Rubriker hämtade", len(feed))
+    m2.metric("Aktier som matchades", len(ideas))
+    passed=int((ideas.get("Borsify-granskning", pd.Series(dtype=str)) == "Klarar första kontrollen").sum()) if not ideas.empty else 0
+    m3.metric("Klarar första kontrollen", passed)
+    if ideas.empty:
+        st.info("Rubriker hämtades, men inget bolag kunde matchas säkert mot aktierna i ditt nuvarande universum.")
+        return
+    for _, r in ideas.head(12).iterrows():
+        status=str(r.get("Borsify-granskning", ""))
+        with st.container(border=True):
+            a,b,c,d=st.columns([2.7,1,1,1.3])
+            a.markdown(f"### {r.get('Namn','')} · {r.get('Ticker','')}")
+            a.caption(f"{int(r.get('Antal omnämnanden',0))} omnämnande(n) · {int(r.get('Källor',0))} källa/källor · media {int(r.get('Media',0))} · forum {int(r.get('Forum',0))}")
+            b.metric("Borsify", f"{_num(r.get('Borsify Score')):.0f}/100" if np.isfinite(_num(r.get('Borsify Score'))) else "—")
+            c.metric("Upptäcktsstyrka", f"{_num(r.get('Upptäcktsstyrka')):.0f}/100")
+            d.metric("Kontroll", status)
+            st.write(str(r.get("Förklaring", "")))
+            flags=str(r.get("Riskflaggor", ""))
+            if flags and flags not in {"—", "nan"}: st.caption(f"Riskflaggor: {flags}")
+            headlines=r.get("Rubriker") or []
+            if headlines:
+                with st.expander("Visa uppslagen som ledde hit"):
+                    for h in headlines:
+                        title=str(h.get("title", "")).replace("[", "(").replace("]", ")")
+                        link=str(h.get("link", ""))
+                        source=str(h.get("source", ""))
+                        if link.startswith("http"):
+                            st.markdown(f"- [{title}]({link}) · {source}")
+                        else:
+                            st.write(f"• {title} · {source}")
+    st.caption("Källor i v2.12: publika ekonomimedierubriker via Google News RSS samt Reddit r/Aktiemarknaden via publik Atom-feed. Borsify återger rubriker/länkar och använder dem som uppslag – inte som fakta om bolaget.")
+
+
+def render_dividend_discovery(df: pd.DataFrame) -> None:
+    if df.empty: return
+    div = apply_discovery_intent(df, "Utdelningsaktier").head(5)
+    if div.empty: return
+    st.subheader("Utdelningsläge · topp 5")
+    st.caption("Hög direktavkastning är inte automatiskt bra. Borsify väger även in utdelningsandel, kvalitet och risk.")
+    for rank, (_, r) in enumerate(div.iterrows(), 1):
+        dy = _num(r.get("Direktavkastning")); payout = _num(r.get("Utdelningsandel")); label, why = dividend_safety_label(r)
+        with st.container(border=True):
+            a,b,c,d = st.columns([2.5,1,1,1.2])
+            a.markdown(f"**{rank}. {r.get('Namn','')} · {r.get('Ticker','')}**")
+            a.caption(why)
+            b.metric("Direktavkastning", fmt_pct(dy))
+            annual = dy*10000 if np.isfinite(dy) else np.nan
+            c.metric("På 10 000 kr/år*", f"{annual:,.0f} kr".replace(",", " ") if np.isfinite(annual) else "—")
+            d.metric("Utdelning", label)
+            st.caption(f"Utdelningsandel: {fmt_pct(payout)} · *ungefärligt belopp före skatt om utdelningen ligger kvar och kurs/utdelning motsvarar dagens uppgifter.")
 
 def _download_close_series(frame: pd.DataFrame, ticker: str = "^OMXS30") -> pd.Series:
     if frame is None or frame.empty:
@@ -1411,12 +1617,31 @@ def parse_symbols(text: str) -> list[str]:
 
 
 def dataframe_for_display(df: pd.DataFrame) -> pd.DataFrame:
-    cols = ["Ticker", "Namn", "Sektor", "Borsify Score", "Signal", "Pris", "Prisdatum", "Dagsförändring", "P/E", "Direktavkastning", "52v från topp", "RSI14", "Värdering", "Kvalitet", "Marknadsläge", "Risk", "Riskflaggor", "Varför"]
+    cols = ["Ticker", "Namn", "Sektor", "Match Score", "Borsify Score", "Signal", "Pris", "Prisdatum", "Dagsförändring", "P/E", "Direktavkastning", "52v från topp", "RSI14", "Värdering", "Kvalitet", "Marknadsläge", "Risk", "Riskflaggor", "Varför"]
     display = df[[c for c in cols if c in df.columns]].copy()
     for col in ["Dagsförändring", "Direktavkastning", "52v från topp"]:
         if col in display: display[col] = pd.to_numeric(display[col], errors="coerce") * 100
     return display
 
+
+
+def render_discovery_shortlist(df: pd.DataFrame, intent: str) -> None:
+    st.subheader("Upptäck · bäst match för ditt mål")
+    st.caption(intent_plain_text(intent))
+    picks = df.head(5)
+    if picks.empty:
+        st.info("Inga aktier matchar ditt mål tillsammans med de övriga filtren.")
+        return
+    for rank, (_, r) in enumerate(picks.iterrows(), 1):
+        with st.container(border=True):
+            a,b,c,d = st.columns([2.7,1,1,1])
+            a.markdown(f"**{rank}. {r.get('Namn','')} · {r.get('Ticker','')}**")
+            a.caption(str(r.get("Varför", "Borsify har rankat aktien högt utifrån ditt val.")))
+            b.metric("Match", f"{_num(r.get('Match Score')):.0f}/100")
+            c.metric("Borsify", f"{_num(r.get('Borsify Score')):.0f}/100")
+            price = _num(r.get("Pris")); ccy = str(r.get("Valuta") or "")
+            d.metric("Kurs", f"{price:.2f} {ccy}" if np.isfinite(price) else "—", fmt_pct(r.get("Dagsförändring")))
+    st.caption("Match visar hur väl aktien passar just det mål du valt. Borsify Score finns kvar som den bredare grundbedömningen.")
 
 def investment_analysis_text(row: pd.Series, horizon: str = "INVEST") -> str:
     """Grounded explanation in plain Swedish for users without finance background."""
@@ -1487,6 +1712,12 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail") -> N
     c3.metric("Värdering", f"{row['Värdering']:.0f}")
     st.markdown("### Varför kan detta vara en bra investering?")
     st.write(investment_analysis_text(row, "INVEST"))
+    qrp_score, qrp_pos, qrp_cautions = quality_at_fair_price_snapshot(row)
+    with st.expander("Kvalitet till rätt pris · enkel långsiktig kontroll"):
+        st.metric("Kvalitet/pris", f"{qrp_score:.0f}/100")
+        st.write("**Vad betyder det?** Borsify tittar på om bolaget verkar lönsamt och finansiellt rimligt samtidigt som aktien inte ser för dyr ut. Det är en nulägeskontroll, inte ett bevis på att kvaliteten hållit i många år.")
+        if qrp_pos: st.write("**Talar för:** " + " ".join(qrp_pos))
+        if qrp_cautions: st.write("**Behöver kollas:** " + " ".join(qrp_cautions))
     render_beginner_glossary(f"{key_prefix}_terms")
     e1, e2, e3 = st.columns(3)
     e1.metric("INVEST", f"{_num(row.get('INVEST Score')):.0f}/100")
@@ -2127,7 +2358,10 @@ def main() -> None:
         universe = st.radio("Universum", ["OMXS30", "Sverige bred", "Egen lista"], index=1)
         custom = st.text_area("Tickers", value="INVE-B.ST, VOLV-B.ST, SAND.ST, EVO.ST", height=110) if universe == "Egen lista" else ""
         if universe == "Sverige bred": st.caption(f"Universumsfil: {len(file_universe_symbols)} svenska tickers. Listan ligger i universe.csv och kan underhållas utan kodändring.")
-        profile = st.selectbox("Strategi", list(PROFILE_WEIGHTS), index=0)
+        st.markdown("### Vad letar du efter?")
+        discovery_intent = st.selectbox("Mitt mål", DISCOVERY_INTENTS, index=0, help="Välj med vanliga ord. Borsify översätter målet till en ranking bakom kulisserna.")
+        st.caption(intent_plain_text(discovery_intent))
+        profile = st.selectbox("Fördjupning · Borsify-strategi", list(PROFILE_WEIGHTS), index=0, help="Påverkar grundscoren. Om du är osäker kan du låta Balanserad vara kvar.")
         min_market_cap = st.number_input("Min börsvärde (mdr SEK)", 0.0, value=5.0, step=1.0)
         min_turnover = st.number_input("Min omsättning/dag (MSEK)", 0.0, value=5.0, step=1.0)
         require_positive = st.checkbox("Kräv positiv P/E", value=True)
@@ -2173,6 +2407,7 @@ def main() -> None:
         dy = pd.to_numeric(filtered["Direktavkastning"], errors="coerce")
         min_yield = float(min_dividend_yield) / 100.0
         filtered = filtered[dy.notna() & (dy > 0) & (dy >= min_yield)]
+    filtered = apply_discovery_intent(filtered, discovery_intent)
     top = filtered.head(top_n).copy(); daily_shortlist = build_daily_shortlist(filtered, profile, limit=min(5, len(filtered))); idx = fetch_index_snapshot(); elapsed = time.perf_counter() - start
 
     price_dates = sorted({str(x) for x in raw_df.get("Prisdatum", pd.Series(dtype=str)).dropna().tolist() if str(x) != "—"})
@@ -2203,10 +2438,19 @@ def main() -> None:
     unread_signals = int((~signal_history_global["is_read"].astype(bool)).sum()) if not signal_history_global.empty else 0
     save_radar_history(filtered.head(max(20, top_n)), profile)
 
-    tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Överblick", "Dagens fynd", f"Radar ({unread_signals})", "Bevakning", "Marknad", "Metod", "Edge Lab"])
+    tab0, tab1, tab_ideas, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Överblick", "Dagens fynd", "Idéflöde", f"Radar ({unread_signals})", "Bevakning", "Marknad", "Metod", "Edge Lab"])
     with tab0:
         render_overview(daily_shortlist, filtered, scored, watch_df_global, signal_history_global, unread_signals, profile, idx, elapsed, latest_price_date)
     with tab1:
+        st.info(f"Du letar efter: **{discovery_intent}**. {intent_plain_text(discovery_intent)}")
+        render_discovery_shortlist(filtered, discovery_intent)
+        st.divider()
+        if discovery_intent in {"Bra långsiktig investering", "Billiga kvalitetsbolag", "Bästa möjligheter just nu"}:
+            render_quality_at_fair_price(filtered)
+            st.divider()
+        if discovery_intent == "Utdelningsaktier" or dividend_only:
+            render_dividend_discovery(filtered)
+            st.divider()
         render_engine_board(filtered)
         st.divider()
         st.subheader("Dagens fynd · snabbaste beslutsunderlaget")
@@ -2253,9 +2497,10 @@ def main() -> None:
                 "Risk": st.column_config.ProgressColumn("Risk", min_value=0, max_value=100, format="%.0f"),
             })
 
-        st.divider(); st.subheader("Topplista enligt ren Borsify Score")
+        st.divider(); st.subheader("Topplista enligt ditt val")
         display = dataframe_for_display(top)
         st.dataframe(display, use_container_width=True, hide_index=True, column_config={
+            "Match Score": st.column_config.ProgressColumn("Match", min_value=0, max_value=100, format="%.0f"),
             "Borsify Score": st.column_config.ProgressColumn("Borsify Score", min_value=0, max_value=100, format="%.0f"),
             "Pris": st.column_config.NumberColumn("Pris", format="%.2f"), "Dagsförändring": st.column_config.NumberColumn("Idag", format="%.2f%%"),
             "P/E": st.column_config.NumberColumn("P/E", format="%.1f"), "Direktavkastning": st.column_config.NumberColumn("DA", format="%.1f%%"),
@@ -2271,6 +2516,9 @@ def main() -> None:
         st.subheader("Marknad · hela analysuniversumet")
         st.caption("Här finns rålistan för jämförelser och egen analys. Överblick och Dagens fynd är de rekommenderade startpunkterna.")
         st.dataframe(dataframe_for_display(scored), use_container_width=True, hide_index=True)
+    with tab_ideas:
+        render_idea_flow(scored)
+
     with tab2:
         st.subheader("Borsify Radar · dagens förändringar")
         today_str = datetime.now().date().isoformat()
@@ -2357,15 +2605,22 @@ def main() -> None:
                 st.dataframe(watch_display, use_container_width=True, hide_index=True, column_config={"Score Δ": st.column_config.NumberColumn("Score Δ", format="%+.1f")})
                 st.download_button("Exportera bevakningslista", data="Ticker\n" + "\n".join(watched), file_name="borsify_bevakning.csv", mime="text/csv")
 
-            st.markdown("#### Anteckningar och målkurser")
+            st.markdown("#### Varför bevakar jag den? · intressepris och signaler")
+            st.caption("Skriv med egna ord varför du följer aktien. Borsify visar samtidigt sitt eget skäl så att du senare kan se om caset har förändrats.")
             for _, meta in watch_meta.iterrows():
                 sym = str(meta["symbol"])
                 current_note = str(meta.get("note") or "")
                 current_target = _num(meta.get("target_price"))
                 with st.expander(sym, expanded=False):
-                    note = st.text_area("Anteckning", value=current_note, key=f"note_{sym}")
+                    current_row = watch_df_global[watch_df_global["Ticker"].astype(str) == sym].head(1) if not watch_df_global.empty else pd.DataFrame()
+                    if not current_row.empty:
+                        wr = current_row.iloc[0]
+                        st.markdown(f"**Borsifys skäl just nu:** {wr.get('Varför','—')}")
+                        cp = _num(wr.get("Pris"))
+                        if np.isfinite(cp): st.caption(f"Aktuell hämtad kurs: {cp:.2f} {wr.get('Valuta','')} · kursdag {wr.get('Prisdatum','—')}")
+                    note = st.text_area("Min anledning att bevaka", value=current_note, key=f"note_{sym}", placeholder="Exempel: Bra bolag men jag vill vänta på lägre pris.")
                     target = st.number_input(
-                        "Målkurs (0 = ingen)", min_value=0.0, value=float(current_target) if np.isfinite(current_target) and current_target > 0 else 0.0, step=1.0, key=f"target_{sym}"
+                        "Mitt intressepris (0 = inget)", min_value=0.0, value=float(current_target) if np.isfinite(current_target) and current_target > 0 else 0.0, step=1.0, key=f"target_{sym}"
                     )
                     current_threshold = _num(meta.get("signal_score_threshold")); current_move = _num(meta.get("signal_score_move")); current_drop = _num(meta.get("signal_daily_drop"))
                     st.markdown("**Signalgränser**")
@@ -2387,6 +2642,16 @@ def main() -> None:
     with tab5:
         w = PROFILE_WEIGHTS[profile]
         st.subheader("Så räknas Borsify Score")
+        with st.expander("Risk på vanlig svenska · det viktigaste före ett köp", expanded=False):
+            st.markdown(f"""
+- **Volatilitet:** {beginner_term('volatilitet')}.
+- **Likviditet:** {beginner_term('likviditet')}.
+- **Stop-loss:** {beginner_term('stop-loss')}.
+- **Diversifiering:** {beginner_term('diversifiering')}.
+- **Hävstång:** {beginner_term('hävstång')}. Borsify fokuserar i första hand på vanliga aktier och uppmuntrar inte användaren att ta hävstång för att förstora en signal.
+
+Borsify försöker därför visa både **varför något ser intressant ut** och **vad som kan gå fel**. Ett högt score är ett analysurval, inte en garanti.
+""")
         st.markdown(f"""
     **Vald strategi: {profile}.** Vikter: värdering {w['valuation']:.0%}, kvalitet {w['quality']:.0%}, marknadsläge {w['setup']:.0%}, utdelning {w['income']:.0%}, risk {w['risk']:.0%}.
 

@@ -1,4 +1,27 @@
-# Borsify v2.10.0
+# Borsify v2.12.0
+
+## Nytt i v2.12.0 – Kvalitet till rätt pris + Idéflöde
+
+- Ny **Kvalitet till rätt pris**-kontroll för långsiktiga case. Den kombinerar aktuell kvalitet, värdering och risk och förklarar på vanlig svenska vad som talar för och vad som behöver granskas.
+- Kontrollen är medvetet märkt som en **nulägesbild**. Borsify låtsas inte att dagens fundamenta bevisar 5–10 års uthållighet; point-in-time historiska fundamenta saknas fortfarande.
+- Ny flik **Idéflöde**. Borsify kan hämta publika rubriker från ekonomimedia via Google News RSS och forumuppslag från Reddit r/Aktiemarknaden via publik Atom-feed.
+- Externa omnämnanden används **endast för att hitta uppslag**. De ändrar inte Borsify Score, INVEST, SWING eller REVERSAL.
+- Rubriker matchas mot bolagen i det analyserade universumet och varje match körs sedan genom Borsifys befintliga nyckeltal. Resultatet blir bland annat **Klarar första kontrollen**, **Värd att undersöka** eller **Uppslag, inte fynd**.
+- Idéflödet visar separat **Upptäcktsstyrka** (hur tydligt/färskt bolaget dyker upp externt) och **Borsify-granskning** (vad siffrorna säger). På så sätt kan hype inte maskeras som fundamental kvalitet.
+- Borsify återger rubrik och länk, inte hela artiklar. Källor kan tillfälligt sluta fungera eller ändra sina publika feeds; appen fortsätter då med övriga källor och visar en tydlig varning.
+- Nya tester för feed-parsning, bolagsmatchning och kontrollen att hög extern uppmärksamhet **inte** kan ge ett svagt bolag grönt ljus.
+
+## Nytt i v2.11.0 – målbaserad upptäckt, utdelningsläge och bättre bevakning
+
+- Nytt val **Vad letar du efter?** med vanliga mål i stället för finansjargong: bästa möjligheter, långsiktigt, utdelning, billiga kvalitetsbolag, stora fall/återhämtning, kortsiktigt läge och stabilare aktier.
+- Ny **Match Score** som rankar aktier efter det valda målet utan att ersätta den ordinarie Borsify Score.
+- Ny sektion **Upptäck · bäst match för ditt mål** med fem lättlästa kandidater.
+- Fördjupat **Utdelningsläge** med topp 5, direktavkastning, ungefärlig årlig utdelning på 10 000 kr och en försiktig bedömning av utdelningens hållbarhet utifrån utdelningsandel, kvalitet och risk.
+- Bevakningslistan visar nu **Borsifys skäl just nu**, aktuell hämtad kurs, användarens egen anledning att bevaka och **Mitt intressepris** i stället för den mer tvetydiga etiketten målkurs.
+- Nybörjarordlistan har utökats med volatilitet, likviditet, stop-loss, diversifiering och hävstång.
+- Metodfliken har fått en enkel riskgenomgång. Borsify fokuserar fortsatt på vanliga aktier och använder inte hävstång som ett sätt att förstora modellens signaler.
+- Ingen förändring av kärnformlerna för Borsify Score, INVEST, SWING eller REVERSAL i denna release.
+
 
 
 ## Nytt i v2.10.0 – enklare språk, utdelningsfilter och OMXS30-benchmark
