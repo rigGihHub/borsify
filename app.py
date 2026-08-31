@@ -28,7 +28,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.9.0"
+APP_VERSION = "2.10.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -485,11 +485,11 @@ def _daily_case(row: pd.Series, profile: str) -> dict[str, Any]:
     if np.isfinite(setup) and setup >= 70:
         why_today.append(f"marknadsläget är starkt i modellen ({setup:.0f}/100)")
     if np.isfinite(rsi) and 32 <= rsi <= 48:
-        why_today.append(f"RSI {rsi:.0f} ligger i modellens rekylzon")
+        why_today.append(f"RSI {rsi:.0f} visar att kursen nyligen pressats ned till ett område där modellen ibland hittar återhämtningar")
     if np.isfinite(draw) and -.35 <= draw <= -.08:
         why_today.append(f"kursen ligger {abs(draw):.0%} under 52-veckorstopp")
     if np.isfinite(m3) and m3 >= .08:
-        why_today.append(f"3-månadersmomentum är {m3:+.0%}")
+        why_today.append(f"kursen har utvecklats {m3:+.0%} de senaste tre månaderna, vilket ger stöd åt den kortsiktiga trenden")
     if np.isfinite(daily) and daily <= -.04:
         why_today.append(f"aktien är ned {abs(daily):.1%} idag – kontrollera om fallet är nyhetsdrivet")
     if not why_today:
@@ -1080,21 +1080,21 @@ def _score_explanation(row: pd.Series, profile: str) -> tuple[pd.DataFrame, list
     roe, margin, growth, debt = _num(row.get("ROE")), _num(row.get("Vinstmarginal")), _num(row.get("Omsättningstillväxt")), _num(row.get("Skuld/eget kapital"))
     rsi, m3, dist = _num(row.get("RSI14")), _num(row.get("3 mån")), _num(row.get("Avstånd SMA200"))
     dy, payout, coverage = _num(row.get("Direktavkastning")), _num(row.get("Utdelningsandel")), _num(row.get("Datatäckning"))
-    if np.isfinite(pe) and 0 < pe <= 15: strengths.append(f"P/E {pe:.1f} är relativt låg i absoluta tal.")
+    if np.isfinite(pe) and 0 < pe <= 15: strengths.append(f"P/E {pe:.1f} är relativt låg. Förenklat betalar marknaden inte lika många årsvinster för aktien som vid ett högt P/E.")
     if np.isfinite(fpe) and 0 < fpe < pe: strengths.append(f"Forward P/E {fpe:.1f} är lägre än historisk P/E {pe:.1f}.")
     if np.isfinite(fcfy) and fcfy >= .05: strengths.append(f"FCF-yield {fcfy:.1%} ger stöd åt värderingen.")
-    if np.isfinite(roe) and roe >= .15: strengths.append(f"ROE {roe:.1%} visar god kapitalavkastning.")
+    if np.isfinite(roe) and roe >= .15: strengths.append(f"ROE {roe:.1%} visar att bolaget hittills varit bra på att skapa vinst med ägarnas kapital.")
     if np.isfinite(margin) and margin >= .10: strengths.append(f"Vinstmarginal {margin:.1%} är stark.")
     if np.isfinite(growth) and growth >= .08: strengths.append(f"Omsättningen växer {growth:.1%} enligt tillgänglig data.")
-    if np.isfinite(rsi) and 32 <= rsi <= 48: strengths.append(f"RSI {rsi:.0f} ligger i ett rekylområde modellen gillar.")
+    if np.isfinite(rsi) and 32 <= rsi <= 48: strengths.append(f"RSI {rsi:.0f} visar att kursen nyligen pressats ned till ett område där modellen ibland hittar återhämtningslägen.")
     if np.isfinite(dy) and .025 <= dy <= .08: strengths.append(f"Direktavkastning {dy:.1%} bidrar positivt.")
 
-    if np.isfinite(pe) and pe >= 30: weaknesses.append(f"P/E {pe:.1f} innebär en hög vinstmultipel.")
+    if np.isfinite(pe) and pe >= 30: weaknesses.append(f"P/E {pe:.1f} är högt. Det betyder att marknaden betalar mycket för varje krona i nuvarande vinst, vilket ökar kraven på framtida tillväxt.")
     if np.isfinite(roe) and roe < 0: weaknesses.append(f"ROE {roe:.1%} är negativ.")
     if np.isfinite(margin) and margin < 0: weaknesses.append(f"Vinstmarginal {margin:.1%} är negativ.")
     if np.isfinite(debt) and debt > 200: weaknesses.append(f"Skuld/eget kapital {debt:.0f} är hög och ger riskavdrag.")
     if np.isfinite(m3) and m3 <= -.15: weaknesses.append(f"Tremånadersmomentum {m3:.1%} är tydligt negativt.")
-    if np.isfinite(dist) and dist <= -.10: weaknesses.append(f"Kursen ligger {abs(dist):.1%} under SMA200.")
+    if np.isfinite(dist) and dist <= -.10: weaknesses.append(f"Kursen ligger {abs(dist):.1%} under sitt 200-dagarssnitt (SMA200), vilket tyder på en svagare långsiktig kurstrend.")
     if np.isfinite(payout) and payout > 1: weaknesses.append(f"Utdelningsandelen {payout:.0%} är över 100 %.")
     if np.isfinite(coverage) and coverage < .60: weaknesses.append(f"Datatäckningen är bara {coverage:.0%}; totalpoängen rabatteras.")
 
@@ -1330,6 +1330,76 @@ def fmt_num(v: Any, digits: int = 1) -> str:
     x = _num(v); return "—" if not np.isfinite(x) else f"{x:.{digits}f}"
 
 
+
+
+def beginner_term(term: str) -> str:
+    explanations = {
+        "P/E": "hur många kronor marknaden betalar för varje krona i bolagets årsvinst. Lägre kan vara billigare, men bara om vinsten är hållbar",
+        "ROE": "avkastning på eget kapital – ungefär hur effektivt bolaget använder ägarnas pengar för att skapa vinst",
+        "RSI": "ett kortsiktigt temperaturmått för kursen. Lågt värde kan betyda att aktien nyligen pressats ned, högt värde att den gått starkt",
+        "SMA200": "aktiekursens genomsnitt under ungefär 200 handelsdagar. Över snittet brukar tolkas som starkare lång trend, under som svagare",
+        "ATR": "ett mått på hur mycket aktien normalt rör sig från dag till dag. Borsify använder det för att anpassa stop-avstånd efter aktiens normala svängningar",
+        "direktavkastning": "årlig utdelning i förhållande till aktiekursen. 4 % betyder ungefär 4 kr i årlig utdelning per 100 kr investerat, om utdelningen ligger kvar",
+        "drawdown": "hur mycket värdet som mest har fallit från en tidigare topp. −20 % betyder att 100 000 kr som mest tillfälligt hade varit nere kring 80 000 kr",
+        "profit factor": "summan av vinster delad med summan av förluster. Över 1 betyder att vinsterna varit större än förlusterna i testet",
+        "Sharpe": "ett förenklat mått på hur mycket avkastning strategin gett i förhållande till hur mycket den svängt. Högre är normalt bättre",
+        "risk-on": "ett marknadsläge där börsen generellt är starkare och investerare oftare vågar ta mer risk",
+        "risk-off": "ett försiktigare marknadsläge där börsen generellt är svagare och investerare söker mindre risk",
+    }
+    return explanations.get(term, term)
+
+
+def render_beginner_glossary(key: str = "guide") -> None:
+    labels = {"overview_terms": "Överblick", "daily_terms": "Dagens fynd", "edge_terms": "Edge Lab"}
+    suffix = labels.get(key, key.replace("_", " ").strip().title())
+    with st.expander(f"Förklara börsorden enkelt · {suffix}", expanded=False):
+        st.markdown(f"""
+**P/E:** {beginner_term("P/E")}.  
+**ROE:** {beginner_term("ROE")}.  
+**RSI:** {beginner_term("RSI")}.  
+**SMA200:** {beginner_term("SMA200")}.  
+**Direktavkastning:** {beginner_term("direktavkastning")}.  
+**Drawdown:** {beginner_term("drawdown")}.  
+**Profit factor:** {beginner_term("profit factor")}.  
+**ATR:** {beginner_term("ATR")}.
+""")
+
+
+def _download_close_series(frame: pd.DataFrame, ticker: str = "^OMXS30") -> pd.Series:
+    if frame is None or frame.empty:
+        return pd.Series(dtype=float)
+    data = frame.copy()
+    if isinstance(data.columns, pd.MultiIndex):
+        level0 = set(map(str, data.columns.get_level_values(0)))
+        level1 = set(map(str, data.columns.get_level_values(1)))
+        try:
+            if ticker in level0:
+                data = data[ticker]
+            elif ticker in level1:
+                data = data.xs(ticker, axis=1, level=1, drop_level=True)
+        except Exception:
+            return pd.Series(dtype=float)
+    if "Close" not in data.columns:
+        return pd.Series(dtype=float)
+    close = pd.to_numeric(data["Close"], errors="coerce").dropna()
+    close.index = pd.to_datetime(close.index).tz_localize(None) if getattr(pd.to_datetime(close.index), "tz", None) is not None else pd.to_datetime(close.index)
+    return close.sort_index()
+
+
+def _performance_stats(index_series: pd.Series) -> dict[str, float]:
+    s = pd.to_numeric(index_series, errors="coerce").dropna()
+    if len(s) < 2 or _num(s.iloc[0]) <= 0:
+        return {"return": np.nan, "cagr": np.nan, "volatility": np.nan, "sharpe": np.nan, "max_drawdown": np.nan}
+    total = _num(s.iloc[-1] / s.iloc[0] - 1)
+    days = max((pd.Timestamp(s.index[-1]) - pd.Timestamp(s.index[0])).days, 1)
+    cagr = (s.iloc[-1] / s.iloc[0]) ** (365.25 / days) - 1 if s.iloc[-1] > 0 else np.nan
+    rets = s.pct_change().dropna()
+    vol = _num(rets.std(ddof=1) * np.sqrt(252)) if len(rets) >= 2 else np.nan
+    sharpe = _num(rets.mean() / rets.std(ddof=1) * np.sqrt(252)) if len(rets) >= 2 and _num(rets.std(ddof=1)) > 0 else np.nan
+    dd = s / s.cummax() - 1
+    return {"return": total, "cagr": _num(cagr), "volatility": vol, "sharpe": sharpe, "max_drawdown": _num(dd.min())}
+
+
 def parse_symbols(text: str) -> list[str]:
     symbols = []
     for item in text.replace(";", ",").replace("\n", ",").split(","):
@@ -1349,36 +1419,39 @@ def dataframe_for_display(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def investment_analysis_text(row: pd.Series, horizon: str = "INVEST") -> str:
-    """Deterministic explanation grounded only in fields already shown by Borsify."""
+    """Grounded explanation in plain Swedish for users without finance background."""
     name = str(row.get("Namn") or row.get("Ticker") or "Aktien")
     score_col = {"INVEST": "INVEST Score", "SWING": "SWING Score", "REVERSAL": "REVERSAL Score"}.get(horizon, "INVEST Score")
-    score = _num(row.get(score_col)); val = _num(row.get("Värdering")); qual = _num(row.get("Kvalitet")); risk = _num(row.get("Risk"))
-    pe = _num(row.get("P/E")); roe = _num(row.get("ROE")); growth = _num(row.get("Vinsttillväxt")); m3 = _num(row.get("3 mån")); rsi = _num(row.get("RSI14")); vol = _num(row.get("Volymkvot")); draw = _num(row.get("52v från topp")); daily = _num(row.get("Dagsförändring")); dist = _num(row.get("Avstånd SMA200"))
+    score = _num(row.get(score_col)); val = _num(row.get("Värdering")); qual = _num(row.get("Kvalitet"))
+    pe = _num(row.get("P/E")); roe = _num(row.get("ROE")); growth = _num(row.get("Vinsttillväxt")); m3 = _num(row.get("3 mån")); rsi = _num(row.get("RSI14")); vol = _num(row.get("Volymkvot")); draw = _num(row.get("52v från topp")); daily = _num(row.get("Dagsförändring")); dist = _num(row.get("Avstånd SMA200")); dy = _num(row.get("Direktavkastning"))
     flags = str(row.get("Riskflaggor", "—"))
+    intro = f"{name} får {score:.0f}/100" if np.isfinite(score) else name
     if horizon == "INVEST":
-        parts = [f"{name} får {score:.0f}/100 i INVEST-modellen." if np.isfinite(score) else f"{name} analyseras för lång sikt."]
-        if np.isfinite(val) and val >= 65: parts.append("Värderingen är attraktiv relativt jämförelsegruppen")
-        if np.isfinite(qual) and qual >= 65: parts.append("lönsamhet, tillväxt och balansräkning ger en stark kvalitetsprofil")
-        if np.isfinite(roe): parts.append(f"ROE är {roe:.1%}")
-        if np.isfinite(growth): parts.append(f"rapporterad vinsttillväxt är {growth:+.1%}")
-        if np.isfinite(pe): parts.append(f"P/E är {pe:.1f}")
-        thesis = ". ".join(parts) + "."
+        parts = [f"{intro} för långsiktigt ägande."]
+        if np.isfinite(val) and val >= 65: parts.append("Priset ser relativt rimligt ut jämfört med liknande bolag.")
+        if np.isfinite(qual) and qual >= 65: parts.append("Bolagets lönsamhet, tillväxt och ekonomi ser sammantaget starka ut i modellen.")
+        if np.isfinite(pe): parts.append(f"P/E är {pe:.1f}; det betyder förenklat att marknaden betalar cirka {pe:.1f} gånger ett års nuvarande vinst.")
+        if np.isfinite(roe): parts.append(f"ROE är {roe:.1%}; det visar hur effektivt bolaget använder ägarnas kapital.")
+        if np.isfinite(growth): parts.append(f"Den registrerade vinsttillväxten är {growth:+.1%}.")
+        if np.isfinite(dy) and dy > 0: parts.append(f"Direktavkastningen är cirka {dy:.1%}, alltså ungefär {dy*100:.1f} kr i årlig utdelning per 100 kr investerat om utdelningen ligger kvar.")
     elif horizon == "SWING":
-        parts=[f"{name} får {score:.0f}/100 i SWING-modellen." if np.isfinite(score) else f"{name} analyseras som swingcase."]
-        if np.isfinite(dist): parts.append("kursen ligger över SMA200" if dist >= 0 else "kursen ligger under SMA200")
-        if np.isfinite(m3): parts.append(f"3-månadersmomentum är {m3:+.1%}")
-        if np.isfinite(rsi): parts.append(f"RSI är {rsi:.0f}")
-        if np.isfinite(vol): parts.append(f"volymen är {vol:.1f}× 20-dagarssnittet")
-        thesis=" ".join(parts)
+        parts = [f"{intro} för ett kortare kursläge på dagar till veckor."]
+        if np.isfinite(dist): parts.append("Kursen ligger över sitt 200-dagarssnitt, vilket brukar ses som en starkare lång trend." if dist >= 0 else "Kursen ligger under sitt 200-dagarssnitt, vilket betyder att den längre trenden är svagare.")
+        if np.isfinite(m3): parts.append(f"På tre månader har kursen rört sig {m3:+.1%}.")
+        if np.isfinite(rsi): parts.append(f"RSI är {rsi:.0f}; det är ett temperaturmått på den senaste kursrörelsen, där lägre nivåer ofta betyder att aktien pressats ned.")
+        if np.isfinite(vol): parts.append(f"Handelsvolymen är {vol:.1f} gånger normalnivån för de senaste 20 dagarna.")
     else:
-        parts=[f"{name} får {score:.0f}/100 i REVERSAL-modellen." if np.isfinite(score) else f"{name} analyseras som möjlig överreaktion."]
-        if np.isfinite(daily): parts.append(f"Dagens rörelse är {daily:+.1%}")
-        if np.isfinite(draw): parts.append(f"aktien ligger {abs(draw):.1%} från 52-veckorstoppen")
-        if np.isfinite(rsi): parts.append(f"RSI är {rsi:.0f}")
-        if np.isfinite(qual): parts.append(f"kvalitetspoängen är {qual:.0f}/100")
-        thesis=" ".join(parts)
-    caution = "Inga grova modellflaggor är registrerade" if flags == "—" else f"Viktigaste modellrisker: {flags}"
-    return f"{thesis} {caution}. Bedömningen bygger på tillgänglig marknads- och fundamentaldata och ska användas som underlag för vidare analys, inte som köpbeslut."
+        parts = [f"{intro} som möjlig återhämtning efter en nedgång."]
+        if np.isfinite(daily): parts.append(f"Aktien har rört sig {daily:+.1%} idag.")
+        if np.isfinite(draw): parts.append(f"Den ligger cirka {abs(draw):.1%} under sin högsta nivå det senaste året.")
+        if np.isfinite(rsi): parts.append(f"RSI är {rsi:.0f}; ett lågt värde kan betyda att säljtrycket varit ovanligt stort, men det garanterar inte en uppgång.")
+        if np.isfinite(qual): parts.append(f"Bolagets kvalitetsbetyg är {qual:.0f}/100, vilket hjälper modellen att skilja en möjlig överreaktion från ett bolag med tydliga grundproblem.")
+    if flags == "—":
+        parts.append("Modellen hittar inga av sina grövre riskflaggor just nu.")
+    else:
+        parts.append(f"Det viktigaste att vara försiktig med är: {flags}.")
+    parts.append("Se detta som en förklaring till varför aktien hamnat högt i Borsify – inte som ett löfte om att kursen kommer stiga.")
+    return " ".join(parts)
 
 
 def render_engine_board(df: pd.DataFrame) -> None:
@@ -1414,6 +1487,7 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail") -> N
     c3.metric("Värdering", f"{row['Värdering']:.0f}")
     st.markdown("### Varför kan detta vara en bra investering?")
     st.write(investment_analysis_text(row, "INVEST"))
+    render_beginner_glossary(f"{key_prefix}_terms")
     e1, e2, e3 = st.columns(3)
     e1.metric("INVEST", f"{_num(row.get('INVEST Score')):.0f}/100")
     e2.metric("SWING", f"{_num(row.get('SWING Score')):.0f}/100")
@@ -1429,7 +1503,7 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail") -> N
 
     factor_df, strengths, weaknesses = _score_explanation(row, profile)
     st.markdown("#### Varför får aktien den här poängen?")
-    st.caption(f"Strategin {profile} väger delpoängen olika. 'Påverkan mot neutral' visar hur mycket varje del ungefär lyfter eller sänker modellen jämfört med en neutral delpoäng på 50.")
+    st.caption(f"Strategin {profile} väger delarna olika. Tänk på 50 som ett neutralt utgångsläge: en del över 50 hjälper aktien upp i rankingen och en del under 50 drar ned den. Tabellen visar ungefär hur stor påverkan varje del har.")
     st.dataframe(
         factor_df, use_container_width=True, hide_index=True,
         column_config={
@@ -1447,7 +1521,7 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail") -> N
     q1.metric("Viktad grundscore", f"{base_score:.1f}")
     q2.metric("Datatäckningsfaktor", f"{coverage_factor:.3f}")
     q3.metric("Beräknad slutscore", f"{calc_final:.1f}")
-    st.caption("Formel: viktad grundscore × (0,80 + 0,20 × datatäckning). Små avrundningsskillnader kan förekomma eftersom delpoängen visas avrundade.")
+    st.caption("Enkelt uttryckt: Borsify väger ihop delbetygen och sänker sedan slutbetyget lite om viktig information saknas. Därför kan en aktie med bra delbetyg ändå få en försiktigare totalscore när datatäckningen är låg.")
     sx, wx = st.columns(2)
     with sx:
         st.markdown("**Styrkor modellen ser**")
@@ -1614,6 +1688,8 @@ def render_overview(
 
 def render_edge_lab(default_symbol: str) -> None:
     st.subheader("Edge Lab · historiskt signaltest")
+    st.caption("Edge Lab försöker svara på en enkel fråga: om Borsify hade gett samma signaler tidigare, hur hade de gått då? Historik bevisar inte vad som händer framåt, men hjälper oss att upptäcka svaga modeller.")
+    render_beginner_glossary("edge_terms")
     st.caption("Testar tekniska signaler historiskt utan att använda dagens fundamentaldata. Det är medvetet: dagens fundamenta på gamla datum skulle skapa look-ahead bias. Grundtestet visar bruttoresultat. Längre ned kan du lägga på courtage, spread/slippage och positionsstorlek för ett mer ekonomiskt realistiskt stresstest.")
     c1, c2, c3, c4 = st.columns([1.5, 1, 1, 1])
     symbol = c1.text_input("Ticker", value=default_symbol or "INVE-B.ST", key="edge_symbol").strip().upper()
@@ -1647,7 +1723,7 @@ def render_edge_lab(default_symbol: str) -> None:
     m3.metric("Medianavkastning", f"{summary['median_return']:.2%}", f"vs {summary['baseline_median_return']:.2%}")
     m4.metric("Snittavkastning", f"{summary['mean_return']:.2%}")
     pf = summary.get("profit_factor", np.nan)
-    m5.metric("Profit factor", f"{pf:.2f}" if np.isfinite(pf) else "—")
+    m5.metric("Profit factor", f"{pf:.2f}" if np.isfinite(pf) else "—", help=beginner_term("profit factor"))
 
     edge_win = summary["win_rate"] - summary["baseline_win_rate"]
     edge_med = summary["median_return"] - summary["baseline_median_return"]
@@ -1725,7 +1801,7 @@ def render_edge_lab(default_symbol: str) -> None:
         w2.metric("OOS-signaler", int(wf["signals"]))
         w3.metric("OOS träffsäkerhet", f"{wf['win_rate']:.1%}", f"vs {wf['baseline_win_rate']:.1%}")
         w4.metric("OOS median", f"{wf['median_return']:.2%}", f"edge {wf['median_excess']:+.2%}")
-        w5.metric("Profit factor", f"{wf['profit_factor']:.2f}" if np.isfinite(wf['profit_factor']) else "—")
+        w5.metric("Profit factor", f"{wf['profit_factor']:.2f}" if np.isfinite(wf['profit_factor']) else "—", help=beginner_term("profit factor"))
         w6.metric("Positiva testfönster", f"{wf['positive_fold_share']:.0%}" if np.isfinite(wf['positive_fold_share']) else "—")
         if wf["signals"] < 20 or int(wf.get("eligible_folds", 0)) < 3:
             st.warning("Out-of-sample-stickprovet är fortfarande tunt. Resultatet ska inte användas för att höja produktionsvikten ännu.")
@@ -1765,7 +1841,7 @@ def render_edge_lab(default_symbol: str) -> None:
             f2.metric("Netto median/trade", f"{friction['net_median_return']:.2%}", f"kostnad −{friction['cost_drag_per_trade']:.2%}")
             f3.metric("Netto profit factor", f"{friction['net_profit_factor']:.2f}" if np.isfinite(friction['net_profit_factor']) else "—")
             f4.metric("Sekventiell kapitalutveckling", f"{friction['compounded_return']:+.1%}")
-            f5.metric("Max drawdown", f"{friction['max_drawdown']:.1%}")
+            f5.metric("Max drawdown", f"{friction['max_drawdown']:.1%}", help=beginner_term("drawdown"))
             if friction["net_median_return"] <= 0 or (np.isfinite(friction["net_profit_factor"]) and friction["net_profit_factor"] < 1.0):
                 st.error("Efter valda handelsfriktioner försvinner den ekonomiska edgen i detta walk-forward-test. Bruttoresultatet bör då inte användas som argument för att höja modellvikten.")
             elif friction["net_median_return"] > 0 and (not np.isfinite(friction["net_profit_factor"]) or friction["net_profit_factor"] >= 1.2):
@@ -1877,9 +1953,9 @@ def render_edge_lab(default_symbol: str) -> None:
                 pp1.metric("Trades", int(portfolio["trades"]), f"{int(portfolio.get('symbols_traded', 0))} aktier")
                 pp2.metric("Netto träffsäkerhet", f"{portfolio['win_rate']:.1%}")
                 pp3.metric("Total kapitalutveckling", f"{portfolio['total_return']:+.1%}")
-                pp4.metric("Daglig max drawdown", f"{portfolio['max_drawdown']:.1%}")
+                pp4.metric("Daglig max drawdown", f"{portfolio['max_drawdown']:.1%}", help=beginner_term("drawdown"))
                 pp5.metric("Snittexponering", f"{portfolio['avg_exposure']:.0%}")
-                pp6.metric("Profit factor", f"{portfolio['profit_factor']:.2f}" if np.isfinite(portfolio['profit_factor']) else "—")
+                pp6.metric("Profit factor", f"{portfolio['profit_factor']:.2f}" if np.isfinite(portfolio['profit_factor']) else "—", help=beginner_term("profit factor"))
                 if use_risk_sizing:
                     rr1, rr2, rr3 = st.columns(3)
                     rr1.metric("Max risk vid nyöppning", f"{portfolio.get('max_entry_risk', 0.0):.1%}")
@@ -1895,6 +1971,39 @@ def render_edge_lab(default_symbol: str) -> None:
                     exposure_cols = ["exposure"] + (["open_risk"] if "open_risk" in eq.columns else [])
                     exposure_chart = eq[exposure_cols].rename(columns={"exposure": "Exponering", "open_risk": "Öppen stop-risk"}) * 100
                     st.area_chart(exposure_chart, use_container_width=True)
+
+                    st.markdown("#### Borsify mot OMXS30 · samma tidsperiod")
+                    try:
+                        bench_raw = yf.download("^OMXS30", start=pd.Timestamp(eq.index.min()).date().isoformat(), end=(pd.Timestamp(eq.index.max()) + pd.Timedelta(days=2)).date().isoformat(), interval="1d", auto_adjust=False, progress=False, threads=False)
+                    except Exception:
+                        bench_raw = pd.DataFrame()
+                    bench_close = _download_close_series(bench_raw, "^OMXS30")
+                    if not bench_close.empty:
+                        compare_index = pd.DatetimeIndex(pd.to_datetime(eq.index)).tz_localize(None)
+                        bench_aligned = bench_close.reindex(compare_index).ffill().bfill()
+                        if bench_aligned.notna().sum() >= 2 and _num(bench_aligned.iloc[0]) > 0:
+                            bq_index = pd.to_numeric(eq["equity"], errors="coerce") / _num(eq["equity"].iloc[0]) * 100
+                            omx_index = bench_aligned / _num(bench_aligned.iloc[0]) * 100
+                            comparison = pd.DataFrame({"Borsify": bq_index.values, "OMXS30": omx_index.values}, index=compare_index)
+                            st.line_chart(comparison, use_container_width=True)
+                            bq_stats = _performance_stats(pd.Series(bq_index.values, index=compare_index))
+                            omx_stats = _performance_stats(pd.Series(omx_index.values, index=compare_index))
+                            bm1, bm2, bm3, bm4 = st.columns(4)
+                            bm1.metric("Borsify total", f"{bq_stats['return']:+.1%}" if np.isfinite(bq_stats['return']) else "—", f"OMXS30 {omx_stats['return']:+.1%}" if np.isfinite(omx_stats['return']) else None)
+                            bm2.metric("Årstakt (CAGR)", f"{bq_stats['cagr']:+.1%}" if np.isfinite(bq_stats['cagr']) else "—", f"OMXS30 {omx_stats['cagr']:+.1%}" if np.isfinite(omx_stats['cagr']) else None, help="Ungefär vilken årlig tillväxttakt som skulle ge samma totalresultat över perioden.")
+                            bm3.metric("Max fall från topp", f"{bq_stats['max_drawdown']:.1%}" if np.isfinite(bq_stats['max_drawdown']) else "—", f"OMXS30 {omx_stats['max_drawdown']:.1%}" if np.isfinite(omx_stats['max_drawdown']) else None, help=beginner_term("drawdown"))
+                            bm4.metric("Riskjusterad kvot", f"{bq_stats['sharpe']:.2f}" if np.isfinite(bq_stats['sharpe']) else "—", f"OMXS30 {omx_stats['sharpe']:.2f}" if np.isfinite(omx_stats['sharpe']) else None, help=beginner_term("Sharpe"))
+                            excess = bq_stats["return"] - omx_stats["return"] if np.isfinite(bq_stats["return"]) and np.isfinite(omx_stats["return"]) else np.nan
+                            if np.isfinite(excess):
+                                if excess > .02:
+                                    st.success(f"Enkelt uttryckt: i den här historiska simuleringen slog Borsify OMXS30 med cirka {excess:+.1%} totalt. Kontrollera också drawdown och riskjusterad kvot – högre avkastning är mindre imponerande om vägen dit varit mycket mer riskfylld.")
+                                elif excess < -.02:
+                                    st.warning(f"Enkelt uttryckt: i den här historiska simuleringen gav Borsify cirka {abs(excess):.1%} sämre total avkastning än OMXS30. Då hade ett enkelt indexalternativ varit bättre under samma period.")
+                                else:
+                                    st.info("Enkelt uttryckt: Borsify och OMXS30 gav ungefär samma totalresultat i den här perioden. Då blir risk, drawdown och handelskostnader extra viktiga i jämförelsen.")
+                            st.caption("Jämförelsen normaliserar båda till 100 vid start. OMXS30 är ett jämförelseindex, inte ett investerbart totalavkastningsindex här; utdelningar i indexet kan därför göra jämförelsen ofullständig.")
+                    else:
+                        st.info("OMXS30-data kunde inte hämtas för exakt samma period, så benchmarkjämförelsen visas inte i denna körning.")
 
                 rejected = int(portfolio.get("rejected_capacity", 0))
                 if rejected > 0:
@@ -2022,6 +2131,16 @@ def main() -> None:
         min_market_cap = st.number_input("Min börsvärde (mdr SEK)", 0.0, value=5.0, step=1.0)
         min_turnover = st.number_input("Min omsättning/dag (MSEK)", 0.0, value=5.0, step=1.0)
         require_positive = st.checkbox("Kräv positiv P/E", value=True)
+        dividend_only = st.checkbox(
+            "Bara aktier med direktavkastning",
+            value=False,
+            help="Bocka i om du bara vill se bolag som enligt aktuell datakälla har en positiv direktavkastning (utdelning i förhållande till aktiekursen).",
+        )
+        min_dividend_yield = st.number_input(
+            "Min direktavkastning (%)", 0.0, 20.0, value=0.0, step=0.5,
+            disabled=not dividend_only,
+            help="Exempel: 3 betyder att aktiens registrerade årliga utdelning motsvarar minst cirka 3 % av aktiekursen. Utdelningar kan ändras eller slopas.",
+        )
         allow_missing_filter_data = st.checkbox("Tillåt saknade filtervärden", value=False, help="Om avstängd måste börsvärde och omsättning finnas när respektive minimifilter är större än 0.")
         top_n = st.slider("Visa topp", 3, 20, 10)
         refresh = st.button("Uppdatera marknadsdata", type="primary", use_container_width=True)
@@ -2050,6 +2169,10 @@ def main() -> None:
         if allow_missing_filter_data: turnover_ok = turnover_ok | filtered["Omsättning MSEK/dag"].isna()
         filtered = filtered[turnover_ok]
     if require_positive: filtered = filtered[filtered["P/E"].notna() & (filtered["P/E"] > 0)]
+    if dividend_only:
+        dy = pd.to_numeric(filtered["Direktavkastning"], errors="coerce")
+        min_yield = float(min_dividend_yield) / 100.0
+        filtered = filtered[dy.notna() & (dy > 0) & (dy >= min_yield)]
     top = filtered.head(top_n).copy(); daily_shortlist = build_daily_shortlist(filtered, profile, limit=min(5, len(filtered))); idx = fetch_index_snapshot(); elapsed = time.perf_counter() - start
 
     price_dates = sorted({str(x) for x in raw_df.get("Prisdatum", pd.Series(dtype=str)).dropna().tolist() if str(x) != "—"})
@@ -2269,7 +2392,7 @@ def main() -> None:
 
     **Värdering** jämför P/E, forward P/E, P/B, EV/EBITDA och FCF-yield i första hand relativt andra bolag i samma sektor när underlaget är tillräckligt. Det minskar problemet att exempelvis bank och industri behandlas som identiska.
 
-    **Kvalitet** väger ROE, marginaler, tillväxt och skuld. **Marknadsläge** kombinerar rekyl från 52-veckorstopp, RSI, tremånadersmomentum och SMA200. **Utdelning** väger direktavkastning tillsammans med utdelningsandel. **Risk** drar ned bolag med negativ lönsamhet, hög skuld eller kraftigt fallande trend.
+    **Kvalitet** försöker svara på: ”Är det här ett välskött och lönsamt bolag?” Den väger bland annat ROE (hur effektivt bolaget använder ägarnas pengar), marginaler, tillväxt och skuld. **Marknadsläge** försöker svara på: ”Är kursläget intressant just nu?” och använder bland annat RSI och 200-dagarssnittet. **Utdelning** tittar både på direktavkastningen och hur stor del av vinsten som går till utdelning. **Risk** drar ned bolag med exempelvis förluster, hög skuld eller en tydligt fallande kursutveckling.
 
     Aktier med låg datatäckning får en försiktig rabatt. En hög score är en prioriteringssignal för vidare analys, inte en prognos om framtida avkastning.
 

@@ -1,4 +1,15 @@
-# Borsify v2.9.0
+# Borsify v2.10.0
+
+
+## Nytt i v2.10.0 – enklare språk, utdelningsfilter och OMXS30-benchmark
+
+- Ny kryssruta **Bara aktier med direktavkastning** i sidopanelen. När den är aktiv visas bara aktier med registrerad positiv direktavkastning. Det går även att ange en miniminivå i procent.
+- Aktieanalyserna är omskrivna till enklare svenska. P/E, ROE, RSI, SMA200, direktavkastning, drawdown, profit factor och ATR förklaras så att användaren inte behöver kunna finansjargong i förväg.
+- Ny utfällbar **Förklara börsorden enkelt** i detaljanalys och Edge Lab.
+- Edge Labs portföljtest jämför nu Borsifys historiska kapitalutveckling med **OMXS30 under samma tidsperiod**, normaliserat till 100 vid start.
+- Benchmarkdelen visar total avkastning, ungefärlig årstakt (CAGR), max fall från topp och en förenklad riskjusterad kvot, tillsammans med en vanlig-svenska-tolkning.
+- Benchmarktexten varnar för att OMXS30-serien här inte är ett totalavkastningsindex med utdelningar, så jämförelsen är diagnostisk och inte perfekt.
+- Ingen ändring av själva Borsify-, INVEST-, SWING- eller REVERSAL-scoremodellerna i denna release.
 
 ## Nytt i v2.6.0 – handelsfriktion och positionsstorlek
 
