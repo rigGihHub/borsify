@@ -16,13 +16,19 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
+from edge_lab import (
+    build_technical_history, summarize_backtest, summarize_universe_backtest,
+    build_market_regime_history, summarize_backtest_by_regime, summarize_universe_backtest_by_regime,
+    walk_forward_backtest, summarize_trading_friction, simulate_portfolio_backtest,
+)
+
 try:
     from supabase import Client, create_client
 except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.9.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -1397,7 +1403,7 @@ def render_engine_board(df: pd.DataFrame) -> None:
                     st.write(investment_analysis_text(r,label))
 
 
-def render_detail(row: pd.Series, profile: str) -> None:
+def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail") -> None:
     st.subheader(f"{row['Namn']} · {row['Ticker']}")
     c1, c2, c3, c4, c5 = st.columns(5)
     prev = previous_score_snapshot(str(row["Ticker"]), profile)
@@ -1479,7 +1485,7 @@ def render_detail(row: pd.Series, profile: str) -> None:
     st.caption(f"Datastämpel · senaste kursdag: {price_date} · fundamentaldata hämtad: {fundamental_at}. Detta är hämtningstid, inte nödvändigtvis rapportperiod för varje fundamental datapunkt.")
 
     watched = is_watched(str(row["Ticker"]))
-    if st.button("Ta bort från bevakning" if watched else "Lägg till i bevakning", key=f"watch_{row['Ticker']}"):
+    if st.button("Ta bort från bevakning" if watched else "Lägg till i bevakning", key=f"{key_prefix}_watch_{row['Ticker']}"):
         toggle_watchlist(str(row["Ticker"])); st.rerun()
     hist = row.get("_history")
     if isinstance(hist, pd.DataFrame) and not hist.empty:
@@ -1604,7 +1610,345 @@ def render_overview(
     if choices:
         selected = st.selectbox("Välj kandidat för full analys", list(choices), key="overview_detail_choice")
         with st.expander("Öppna full analys", expanded=False):
-            render_detail(candidates.loc[choices[selected]], profile)
+            render_detail(candidates.loc[choices[selected]], profile, key_prefix="overview")
+
+def render_edge_lab(default_symbol: str) -> None:
+    st.subheader("Edge Lab · historiskt signaltest")
+    st.caption("Testar tekniska signaler historiskt utan att använda dagens fundamentaldata. Det är medvetet: dagens fundamenta på gamla datum skulle skapa look-ahead bias. Grundtestet visar bruttoresultat. Längre ned kan du lägga på courtage, spread/slippage och positionsstorlek för ett mer ekonomiskt realistiskt stresstest.")
+    c1, c2, c3, c4 = st.columns([1.5, 1, 1, 1])
+    symbol = c1.text_input("Ticker", value=default_symbol or "INVE-B.ST", key="edge_symbol").strip().upper()
+    engine = c2.selectbox("Motor", ["SWING", "REVERSAL"], key="edge_engine")
+    threshold = c3.slider("Min score", 40, 90, 70, 5, key="edge_threshold")
+    horizon = c4.selectbox("Utfall efter", [5, 10, 20], index=1, format_func=lambda x: f"{x} börsdagar", key="edge_horizon")
+    years = st.slider("Historik", 2, 10, 5, key="edge_years")
+
+    if not symbol:
+        st.info("Ange en ticker.")
+        return
+    period = f"{years}y"
+    try:
+        hist = yf.download(symbol, period=period, interval="1d", auto_adjust=False, progress=False, threads=False)
+    except Exception as exc:
+        st.error(f"Kunde inte hämta historik för {symbol}: {exc}")
+        return
+    tech = build_technical_history(hist)
+    if tech.empty:
+        st.warning("Det finns inte tillräcklig historik för att köra testet.")
+        return
+    score_col = "swing_proxy" if engine == "SWING" else "reversal_proxy"
+    summary = summarize_backtest(tech, score_col, threshold, horizon)
+    if int(summary.get("signals", 0)) == 0:
+        st.warning("Inga historiska signaler hittades med vald tröskel. Sänk scoregränsen eller öka historiken.")
+        return
+
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Historiska signaler", int(summary["signals"]))
+    m2.metric("Träffsäkerhet", f"{summary['win_rate']:.1%}", f"vs {summary['baseline_win_rate']:.1%}")
+    m3.metric("Medianavkastning", f"{summary['median_return']:.2%}", f"vs {summary['baseline_median_return']:.2%}")
+    m4.metric("Snittavkastning", f"{summary['mean_return']:.2%}")
+    pf = summary.get("profit_factor", np.nan)
+    m5.metric("Profit factor", f"{pf:.2f}" if np.isfinite(pf) else "—")
+
+    edge_win = summary["win_rate"] - summary["baseline_win_rate"]
+    edge_med = summary["median_return"] - summary["baseline_median_return"]
+    if int(summary["signals"]) < 30:
+        st.warning("Litet stickprov. Under 30 signaler är för tunt för att dra starka slutsatser.")
+    elif edge_win > .05 and edge_med > 0:
+        st.success(f"Den här proxy-signalen har historiskt slagit baslinjen för {symbol} i valt test: +{edge_win:.1%} högre träffsäkerhet och {edge_med:+.2%} bättre medianutfall. Det är inte bevis för framtida edge.")
+    elif edge_win < 0 and edge_med <= 0:
+        st.error("Den valda signalen har inte visat historisk edge mot baslinjen i detta test. Det är ett skäl att inte höja modellvikten utan vidare.")
+    else:
+        st.info("Resultatet är blandat. Signalen bör inte betraktas som verifierad edge utan bredare test över fler aktier och marknadsregimer.")
+
+    fwd_col = f"fwd_{horizon}d"
+    hits = tech[tech[score_col] >= threshold].dropna(subset=[fwd_col]).copy().tail(100)
+    if not hits.empty:
+        shown = pd.DataFrame({
+            "Datum": hits.index.astype(str).str[:10],
+            "Score": hits[score_col].round(1).values,
+            f"Utfall {horizon}d": (hits[fwd_col] * 100).round(2).values,
+            "RSI14": hits["rsi14"].round(1).values,
+            "Volymkvot": hits["volume_ratio"].round(2).values,
+            "Avstånd SMA200 %": (hits["dist_sma200"] * 100).round(1).values,
+        })
+        st.dataframe(shown.iloc[::-1], use_container_width=True, hide_index=True)
+
+    st.markdown("**Vad Edge Lab inte testar ännu:** full INVEST-modell, historiska fundamenta, estimatrevideringar, sektorrotation, skatt, likviditetsbegränsningar och verkliga orderfyllnader. Portföljdelen längre ned modellerar samtidig exponering och kapitalbindning, men är fortfarande ett diagnostiskt backtest – inte verklig exekvering.")
+
+    st.divider()
+    st.subheader("Marknadsregim · när fungerar signalen?")
+    st.caption("Samma signal delas upp efter OMXS30-regim. Regimen använder bara information som fanns den dagen: index mot SMA200, SMA50 mot SMA200 och 60-dagars momentum. Risk-on, Neutral och Risk-off testas separat.")
+    try:
+        benchmark_hist = yf.download("^OMXS30", period=period, interval="1d", auto_adjust=False, progress=False, threads=False)
+    except Exception:
+        benchmark_hist = pd.DataFrame()
+    regime_hist = build_market_regime_history(benchmark_hist)
+    regime_summary = summarize_backtest_by_regime(tech, regime_hist, score_col, threshold, horizon)
+    if regime_summary.empty:
+        st.info("Kunde inte bygga tillräcklig OMXS30-historik för regimtestet just nu.")
+    else:
+        display_regime = regime_summary.copy()
+        display_regime["Träffsäkerhet %"] = (display_regime["win_rate"] * 100).round(1)
+        display_regime["Baslinje %"] = (display_regime["baseline_win_rate"] * 100).round(1)
+        display_regime["Median %"] = (display_regime["median_return"] * 100).round(2)
+        display_regime["Median edge %"] = (display_regime["median_excess"] * 100).round(2)
+        display_regime = display_regime.rename(columns={"regime":"Regim","signals":"Signaler","profit_factor":"Profit factor"})
+        st.dataframe(display_regime[["Regim","Signaler","Träffsäkerhet %","Baslinje %","Median %","Median edge %","Profit factor"]], use_container_width=True, hide_index=True)
+        enough = regime_summary[regime_summary["signals"] >= 20].copy()
+        if not enough.empty:
+            best_regime = enough.sort_values(["median_excess","win_rate"], ascending=False).iloc[0]
+            worst_regime = enough.sort_values(["median_excess","win_rate"], ascending=True).iloc[0]
+            st.info(f"Starkast historiskt i detta test: **{best_regime['regime']}** med median-edge {best_regime['median_excess']:+.2%}. Svagast: **{worst_regime['regime']}** med {worst_regime['median_excess']:+.2%}. Detta är diagnostik, inte ett bevis på framtida edge.")
+        else:
+            st.warning("För få signaler per regim för att jämförelsen ska vara robust.")
+
+    st.divider()
+    st.subheader("Walk-forward · fungerar signalen på osedd historik?")
+    st.caption("Det här testet väljer scoretröskel enbart på en äldre träningsperiod och fryser sedan valet under nästa, osedda testperiod. Signaler som överlappar samma framtida utfallsfönster räknas inte som oberoende trades.")
+    wf1, wf2, wf3 = st.columns(3)
+    train_months = wf1.selectbox("Träningsfönster", [12, 18, 24, 36], index=2, format_func=lambda x: f"{x} månader", key="edge_wf_train")
+    test_months = wf2.selectbox("Testfönster", [3, 6, 9, 12], index=1, format_func=lambda x: f"{x} månader", key="edge_wf_test")
+    threshold_floor = wf3.slider("Lägsta tröskel att optimera", 40, 75, 50, 5, key="edge_wf_floor")
+    threshold_grid = list(range(int(threshold_floor), 91, 5))
+    wf = walk_forward_backtest(
+        tech, score_col, threshold_grid, horizon,
+        train_days=int(train_months * 21), test_days=int(test_months * 21),
+        min_train_signals=8, min_test_signals=2,
+    )
+    if int(wf.get("folds", 0)) == 0:
+        st.info("Historiken räcker inte till för vald walk-forward-konfiguration. Öka historiken eller korta tränings-/testfönstret.")
+    elif int(wf.get("signals", 0)) == 0:
+        st.warning("Walk-forward-testet kunde välja trösklar men hittade inga out-of-sample-signaler. Det är i sig ett tecken på att signalen är för selektiv eller instabil.")
+    else:
+        w1, w2, w3, w4, w5, w6 = st.columns(6)
+        w1.metric("Testfönster", int(wf["folds"]))
+        w2.metric("OOS-signaler", int(wf["signals"]))
+        w3.metric("OOS träffsäkerhet", f"{wf['win_rate']:.1%}", f"vs {wf['baseline_win_rate']:.1%}")
+        w4.metric("OOS median", f"{wf['median_return']:.2%}", f"edge {wf['median_excess']:+.2%}")
+        w5.metric("Profit factor", f"{wf['profit_factor']:.2f}" if np.isfinite(wf['profit_factor']) else "—")
+        w6.metric("Positiva testfönster", f"{wf['positive_fold_share']:.0%}" if np.isfinite(wf['positive_fold_share']) else "—")
+        if wf["signals"] < 20 or int(wf.get("eligible_folds", 0)) < 3:
+            st.warning("Out-of-sample-stickprovet är fortfarande tunt. Resultatet ska inte användas för att höja produktionsvikten ännu.")
+        elif wf["median_excess"] > 0 and wf["win_rate"] > wf["baseline_win_rate"] and wf["positive_fold_share"] >= .60:
+            st.success("Signalen har klarat ett första walk-forward-test: positiv median-edge, högre träffsäkerhet än baslinjen och positiv edge i en majoritet av de testfönster som hade tillräckligt med signaler. Det är ett robusthetstecken, inte ett löfte om framtida avkastning.")
+        elif wf["median_excess"] <= 0 and wf["win_rate"] <= wf["baseline_win_rate"]:
+            st.error("Signalen tappar sin edge på osedd historik. Det talar för överanpassning eller en för svag signal och är ett skäl att inte optimera produktionsmodellen mot fullhistorik-resultatet.")
+        else:
+            st.info("Walk-forward-resultatet är blandat. Strategin bör betraktas som oprövad tills fler out-of-sample-fönster visar samma beteende.")
+        if float(wf.get("threshold_std", 0.0)) >= 10:
+            st.warning(f"Den valda tröskeln är instabil mellan träningsfönstren (standardavvikelse {wf['threshold_std']:.1f} scorepoäng). Det är ett möjligt tecken på parameterkänslighet.")
+        folds = wf.get("fold_table")
+        if isinstance(folds, pd.DataFrame) and not folds.empty:
+            st.markdown("#### Walk-forward per testfönster")
+            fw = folds.copy()
+            fw["OOS träff %"] = (fw["test_win_rate"] * 100).round(1)
+            fw["Baslinje %"] = (fw["test_baseline_win_rate"] * 100).round(1)
+            fw["OOS median %"] = (fw["test_median_return"] * 100).round(2)
+            fw["OOS edge %"] = (fw["test_median_excess"] * 100).round(2)
+            fw = fw.rename(columns={"test_start":"Test från","test_end":"Test till","threshold":"Vald tröskel","test_signals":"Signaler"})
+            st.dataframe(fw[["Test från","Test till","Vald tröskel","Signaler","OOS träff %","Baslinje %","OOS median %","OOS edge %"]], use_container_width=True, hide_index=True)
+
+        st.markdown("#### Handelsfriktion · överlever signalen verkliga kostnader?")
+        st.caption("Stresstestet använder endast de out-of-sample-trades som walk-forward-testet faktiskt tog. Kostnader dras från varje trade före beräkning av nettoresultat. Det är fortfarande en förenklad sekventiell simulering – inte en full portföljmotor.")
+        fc1, fc2, fc3 = st.columns(3)
+        commission_bps = fc1.number_input("Courtage tur/retur (bps)", min_value=0.0, max_value=200.0, value=10.0, step=5.0, key="edge_cost_commission")
+        execution_bps = fc2.number_input("Spread + slippage tur/retur (bps)", min_value=0.0, max_value=300.0, value=20.0, step=5.0, key="edge_cost_execution")
+        position_pct = fc3.slider("Kapital per trade", 5, 100, 25, 5, key="edge_position_pct")
+        friction = summarize_trading_friction(
+            wf.get("trade_returns", []),
+            roundtrip_cost_bps=float(commission_bps + execution_bps),
+            position_fraction=float(position_pct) / 100.0,
+        )
+        if int(friction.get("trades", 0)) > 0:
+            f1, f2, f3, f4, f5 = st.columns(5)
+            f1.metric("Netto träffsäkerhet", f"{friction['net_win_rate']:.1%}")
+            f2.metric("Netto median/trade", f"{friction['net_median_return']:.2%}", f"kostnad −{friction['cost_drag_per_trade']:.2%}")
+            f3.metric("Netto profit factor", f"{friction['net_profit_factor']:.2f}" if np.isfinite(friction['net_profit_factor']) else "—")
+            f4.metric("Sekventiell kapitalutveckling", f"{friction['compounded_return']:+.1%}")
+            f5.metric("Max drawdown", f"{friction['max_drawdown']:.1%}")
+            if friction["net_median_return"] <= 0 or (np.isfinite(friction["net_profit_factor"]) and friction["net_profit_factor"] < 1.0):
+                st.error("Efter valda handelsfriktioner försvinner den ekonomiska edgen i detta walk-forward-test. Bruttoresultatet bör då inte användas som argument för att höja modellvikten.")
+            elif friction["net_median_return"] > 0 and (not np.isfinite(friction["net_profit_factor"]) or friction["net_profit_factor"] >= 1.2):
+                st.success("Signalen behåller positivt nettoresultat efter valda kostnader i detta out-of-sample-test. Det är ett bättre robusthetstecken än bruttoresultatet, men fortfarande inte ett live-validerat handelsresultat.")
+            else:
+                st.info("Signalen överlever kostnaderna, men marginalen är tunn. Små förändringar i spread, slippage eller exekvering kan fortfarande äta upp resultatet.")
+
+    st.divider()
+    st.subheader("Universumtest · fungerar signalen över många svenska aktier?")
+    st.caption("Det här är ett hårdare test än en enda ticker. Samma tekniska signal körs över Sverige bred och jämförs med respektive akties normala framtida avkastning. Fundamenta används fortfarande inte historiskt.")
+    uc1, uc2, uc3 = st.columns(3)
+    uni_threshold = uc1.slider("Min score · universum", 40, 90, threshold, 5, key="edge_uni_threshold")
+    uni_horizon = uc2.selectbox("Utfall · universum", [5, 10, 20], index=[5,10,20].index(horizon), format_func=lambda x: f"{x} börsdagar", key="edge_uni_horizon")
+    uni_years = uc3.slider("Historik · universum", 2, 10, min(years, 5), key="edge_uni_years")
+    max_symbols = st.slider("Antal aktier i universumtest", 10, min(81, len(load_universe_file())), min(50, len(load_universe_file())), 5, key="edge_uni_count")
+    run_universe = st.button("Kör universumtest", type="primary", key="run_universe_edge")
+    if run_universe:
+        universe_df = load_universe_file().head(max_symbols)
+        symbols = universe_df["Ticker"].dropna().astype(str).str.upper().tolist()
+        period = f"{uni_years}y"
+        with st.spinner(f"Testar {len(symbols)} aktier över {uni_years} års historik …"):
+            try:
+                bulk = yf.download(tickers=symbols, period=period, interval="1d", auto_adjust=False, actions=False, group_by="ticker", threads=True, progress=False)
+            except Exception as exc:
+                st.error(f"Kunde inte hämta universumhistorik: {exc}")
+                bulk = pd.DataFrame()
+            histories = {}
+            if isinstance(bulk, pd.DataFrame) and not bulk.empty:
+                if len(symbols) == 1:
+                    histories[symbols[0]] = bulk.copy()
+                elif isinstance(bulk.columns, pd.MultiIndex):
+                    l0 = set(map(str, bulk.columns.get_level_values(0)))
+                    l1 = set(map(str, bulk.columns.get_level_values(1)))
+                    for sym in symbols:
+                        try:
+                            if sym in l0:
+                                histories[sym] = bulk[sym].copy()
+                            elif sym in l1:
+                                histories[sym] = bulk.xs(sym, axis=1, level=1, drop_level=True).copy()
+                        except Exception:
+                            pass
+            score_col_uni = "swing_proxy" if engine == "SWING" else "reversal_proxy"
+            uni = summarize_universe_backtest(histories, score_col_uni, uni_threshold, uni_horizon)
+        if int(uni.get("symbols_tested", 0)) == 0:
+            st.warning("Universumtestet fick inte tillräcklig historik från datakällan.")
+        else:
+            q1, q2, q3, q4, q5, q6 = st.columns(6)
+            q1.metric("Aktier testade", int(uni["symbols_tested"]))
+            q2.metric("Signaler", int(uni["signals"]))
+            q3.metric("Träffsäkerhet", f"{uni['win_rate']:.1%}", f"vs {uni['baseline_win_rate']:.1%}")
+            q4.metric("Median", f"{uni['median_return']:.2%}", f"edge {uni['median_excess']:+.2%}")
+            q5.metric("Profit factor", f"{uni['profit_factor']:.2f}" if np.isfinite(uni['profit_factor']) else "—")
+            q6.metric("Aktier med positiv edge", f"{uni['positive_edge_share']:.0%}")
+            if uni["signals"] < 100 or uni["symbols_with_signals"] < 10:
+                st.warning("Stickprovet är fortfarande begränsat. Jag skulle inte ändra produktionsmodellen på detta resultat ensamt.")
+            elif uni["median_excess"] > 0 and uni["win_rate"] > uni["baseline_win_rate"] and uni["positive_edge_share"] >= .55:
+                st.success("Signalen visar bred positiv historisk edge i detta universumtest. Det är ett bättre tecken än ett bra resultat på en enskild aktie, men fortfarande inte ett komplett handelsbacktest.")
+            elif uni["median_excess"] <= 0 and uni["win_rate"] <= uni["baseline_win_rate"]:
+                st.error("Signalen misslyckas med att slå baslinjen brett. Det talar emot att ge den högre vikt i modellen utan omdesign.")
+            else:
+                st.info("Resultatet är blandat mellan aktier. Det tyder på att signalen kan vara regim- eller bolagsberoende snarare än robust över hela marknaden.")
+            per_symbol = uni.get("per_symbol")
+            if isinstance(per_symbol, pd.DataFrame) and not per_symbol.empty:
+                st.markdown("#### Resultat per aktie")
+                shown_uni = per_symbol.copy()
+                shown_uni["Träffsäkerhet"] = (shown_uni["win_rate"] * 100).round(1)
+                shown_uni["Baslinje %"] = (shown_uni["baseline_win_rate"] * 100).round(1)
+                shown_uni["Median %"] = (shown_uni["median_return"] * 100).round(2)
+                shown_uni["Median edge %"] = (shown_uni["median_excess"] * 100).round(2)
+                shown_uni = shown_uni.rename(columns={"symbol":"Ticker","signals":"Signaler"})
+                st.dataframe(shown_uni[["Ticker","Signaler","Träffsäkerhet","Baslinje %","Median %","Median edge %"]].sort_values(["Median edge %","Signaler"], ascending=[False,False]), use_container_width=True, hide_index=True)
+
+            st.markdown("#### Portföljtest · flera samtidiga positioner")
+            st.caption("Här behandlas signalerna som en faktisk gemensam kapitalpool. Borsify prioriterar högst score när flera signaler kommer samma dag, blockerar dubbla samtidiga positioner i samma aktie och binder kapital tills den valda horisonten löper ut. Equity-kurvan mark-to-market-värderar varje öppen position dagligen med historisk stängningskurs, så drawdown och exponering även fångar rörelser mellan in- och utgång.")
+            pc1, pc2, pc3, pc4 = st.columns(4)
+            portfolio_max_positions = pc1.slider("Max samtidiga positioner", 1, 15, 5, 1, key="edge_portfolio_max_positions")
+            portfolio_position_pct = pc2.slider("Max allokering per position", 5, 100, 20, 5, key="edge_portfolio_position_pct")
+            portfolio_commission = pc3.number_input("Portfölj · courtage t/r (bps)", min_value=0.0, max_value=200.0, value=10.0, step=5.0, key="edge_portfolio_commission")
+            portfolio_execution = pc4.number_input("Portfölj · spread/slippage t/r (bps)", min_value=0.0, max_value=300.0, value=20.0, step=5.0, key="edge_portfolio_execution")
+
+            use_risk_sizing = st.toggle("Riskstyrd positionsstorlek + ATR-stop", value=True, key="edge_portfolio_risk_sizing")
+            risk_per_trade = 1.0
+            max_portfolio_risk = 5.0
+            atr_stop_multiple = 2.0
+            if use_risk_sizing:
+                rc1, rc2, rc3 = st.columns(3)
+                risk_per_trade = rc1.slider("Risk per trade (% av kapital)", 0.25, 5.0, 1.0, 0.25, key="edge_portfolio_risk_per_trade")
+                max_portfolio_risk = rc2.slider("Max total öppen risk (%)", 1.0, 20.0, 5.0, 0.5, key="edge_portfolio_max_risk")
+                atr_stop_multiple = rc3.slider("ATR-multipel för stop", 0.5, 5.0, 2.0, 0.25, key="edge_portfolio_atr_stop")
+                st.caption("Positionsstorleken begränsas av både maxallokeringen och vald risk per trade. Stop-avståndet baseras på trailing ATR och klampas till 2–15 %. Modellen antar stop-fill på stopnivån; gap-through och verklig orderfyllnad kan ge sämre utfall i verkligheten.")
+
+            portfolio = simulate_portfolio_backtest(
+                histories,
+                score_col_uni,
+                uni_threshold,
+                uni_horizon,
+                max_positions=portfolio_max_positions,
+                position_fraction=float(portfolio_position_pct) / 100.0,
+                roundtrip_cost_bps=float(portfolio_commission + portfolio_execution),
+                use_risk_sizing=use_risk_sizing,
+                risk_per_trade=float(risk_per_trade) / 100.0,
+                max_portfolio_risk=float(max_portfolio_risk) / 100.0,
+                atr_stop_multiple=float(atr_stop_multiple),
+            )
+            if int(portfolio.get("trades", 0)) == 0:
+                st.info("Portföljtestet fick inga genomförbara trades med nuvarande signaltröskel och historik.")
+            else:
+                pp1, pp2, pp3, pp4, pp5, pp6 = st.columns(6)
+                pp1.metric("Trades", int(portfolio["trades"]), f"{int(portfolio.get('symbols_traded', 0))} aktier")
+                pp2.metric("Netto träffsäkerhet", f"{portfolio['win_rate']:.1%}")
+                pp3.metric("Total kapitalutveckling", f"{portfolio['total_return']:+.1%}")
+                pp4.metric("Daglig max drawdown", f"{portfolio['max_drawdown']:.1%}")
+                pp5.metric("Snittexponering", f"{portfolio['avg_exposure']:.0%}")
+                pp6.metric("Profit factor", f"{portfolio['profit_factor']:.2f}" if np.isfinite(portfolio['profit_factor']) else "—")
+                if use_risk_sizing:
+                    rr1, rr2, rr3 = st.columns(3)
+                    rr1.metric("Max risk vid nyöppning", f"{portfolio.get('max_entry_risk', 0.0):.1%}")
+                    rr2.metric("Max risk / MTM-kapital", f"{portfolio.get('max_open_risk', 0.0):.1%}", help="Kan stiga över valt risktak efter att portföljen fallit. Risktaket används när nya positioner öppnas; backtestet tvångsminskar inte redan öppna positioner.")
+                    rr3.metric("Nekade av risktak", int(portfolio.get("rejected_risk", 0)))
+                    st.caption(f"Stop-andel: {portfolio.get('stop_rate', 0.0):.1%}. Risktaket kontrolleras vid entry. Därefter kan stop-risk som andel av aktuell MTM-equity förändras när marknaden rör sig.")
+
+                eq = portfolio.get("equity_curve")
+                if isinstance(eq, pd.DataFrame) and not eq.empty:
+                    chart = eq[["equity"]].rename(columns={"equity": "Kapitalindex (MTM)"}) * 100
+                    st.line_chart(chart, use_container_width=True)
+                    st.caption("Kapitalindexet värderar öppna innehav med respektive dags stängningskurs. Full t/r-friktion bokförs när traden stängs; framtida exitkostnad periodiseras inte i den öppna MTM-kurvan.")
+                    exposure_cols = ["exposure"] + (["open_risk"] if "open_risk" in eq.columns else [])
+                    exposure_chart = eq[exposure_cols].rename(columns={"exposure": "Exponering", "open_risk": "Öppen stop-risk"}) * 100
+                    st.area_chart(exposure_chart, use_container_width=True)
+
+                rejected = int(portfolio.get("rejected_capacity", 0))
+                if rejected > 0:
+                    st.caption(f"{rejected} signaler kunde inte öppnas eftersom portföljen redan var full eller saknade ledigt kapital. Det är avsiktligt: universumsignaler får inte låtsas använda samma kapital flera gånger samtidigt.")
+                if portfolio["total_return"] <= 0 or (np.isfinite(portfolio["profit_factor"]) and portfolio["profit_factor"] < 1.0):
+                    st.error("När signalerna konkurrerar om samma kapitalpool håller strategin inte ihop med dessa antaganden. Ett bra signaltest är alltså inte tillräckligt för att motivera modellen.")
+                elif portfolio["max_drawdown"] <= -.25:
+                    st.warning("Portföljen är historiskt lönsam i denna simulering men drawdown är hög. Riskkontroll och positionsstorlek behöver förbättras innan resultatet kan betraktas som robust.")
+                else:
+                    st.success("Strategin behåller positivt resultat när samtidiga positioner och kapitalbindning modelleras. Det är ett starkare diagnostiskt test, men fortfarande inte live-validerad avkastning.")
+
+                trades = portfolio.get("trade_log")
+                if isinstance(trades, pd.DataFrame) and not trades.empty:
+                    with st.expander("Visa portföljens trade-logg"):
+                        shown_trades = trades.copy()
+                        shown_trades["entry_date"] = pd.to_datetime(shown_trades["entry_date"]).dt.strftime("%Y-%m-%d")
+                        shown_trades["exit_date"] = pd.to_datetime(shown_trades["exit_date"]).dt.strftime("%Y-%m-%d")
+                        shown_trades["score"] = shown_trades["score"].round(1)
+                        shown_trades["gross_return"] = (shown_trades["gross_return"] * 100).round(2)
+                        shown_trades["net_return"] = (shown_trades["net_return"] * 100).round(2)
+                        shown_trades["pnl"] = shown_trades["pnl"].round(4)
+                        if "stop_pct" in shown_trades.columns:
+                            shown_trades["stop_pct"] = (shown_trades["stop_pct"] * 100).round(2)
+                        shown_trades = shown_trades.rename(columns={"symbol":"Ticker","entry_date":"In","exit_date":"Ut","score":"Score","gross_return":"Brutto %","net_return":"Netto %","capital":"Kapitalandel","pnl":"P/L","stop_pct":"Stop %","stopped":"Stoppad"})
+                        trade_cols = ["Ticker","In","Ut","Score","Brutto %","Netto %","Kapitalandel"]
+                        if "Stop %" in shown_trades.columns: trade_cols += ["Stop %","Stoppad"]
+                        trade_cols += ["P/L"]
+                        st.dataframe(shown_trades[trade_cols], use_container_width=True, hide_index=True)
+
+            st.markdown("#### Universumtest uppdelat på marknadsregim")
+            try:
+                benchmark_uni = yf.download("^OMXS30", period=period, interval="1d", auto_adjust=False, progress=False, threads=False)
+            except Exception:
+                benchmark_uni = pd.DataFrame()
+            regime_uni_hist = build_market_regime_history(benchmark_uni)
+            regime_uni = summarize_universe_backtest_by_regime(histories, regime_uni_hist, score_col_uni, uni_threshold, uni_horizon)
+            if regime_uni.empty:
+                st.info("Ingen tillräcklig regimdata kunde byggas för universumtestet.")
+            else:
+                ru = regime_uni.copy()
+                ru["Träffsäkerhet %"] = (ru["win_rate"] * 100).round(1)
+                ru["Baslinje %"] = (ru["baseline_win_rate"] * 100).round(1)
+                ru["Median %"] = (ru["median_return"] * 100).round(2)
+                ru["Median edge %"] = (ru["median_excess"] * 100).round(2)
+                ru = ru.rename(columns={"regime":"Regim","symbols_with_signals":"Aktier","signals":"Signaler","profit_factor":"Profit factor"})
+                st.dataframe(ru[["Regim","Aktier","Signaler","Träffsäkerhet %","Baslinje %","Median %","Median edge %","Profit factor"]], use_container_width=True, hide_index=True)
+                robust = regime_uni[(regime_uni["signals"] >= 100) & (regime_uni["symbols_with_signals"] >= 10)]
+                if len(robust) >= 2:
+                    spread = float(robust["median_excess"].max() - robust["median_excess"].min())
+                    if spread >= .02:
+                        st.warning("Signalen är tydligt regimberoende i universumtestet. Det talar för att Borsify senare bör justera SWING/REVERSAL-kraven efter marknadsläget i stället för att använda samma tröskel hela tiden.")
+                    else:
+                        st.success("Signalen ser relativt stabil ut mellan de regimer som har tillräckligt stort stickprov. Det är ett positivt robusthetstecken, men handelsfriktioner och walk-forward-test återstår.")
+
 
 def main() -> None:
     st.set_page_config(page_title=f"{APP_NAME} · Dagens fynd", page_icon="◈", layout="wide")
@@ -1736,7 +2080,7 @@ def main() -> None:
     unread_signals = int((~signal_history_global["is_read"].astype(bool)).sum()) if not signal_history_global.empty else 0
     save_radar_history(filtered.head(max(20, top_n)), profile)
 
-    tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs(["Överblick", "Dagens fynd", f"Radar ({unread_signals})", "Bevakning", "Marknad", "Metod"])
+    tab0, tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Överblick", "Dagens fynd", f"Radar ({unread_signals})", "Bevakning", "Marknad", "Metod", "Edge Lab"])
     with tab0:
         render_overview(daily_shortlist, filtered, scored, watch_df_global, signal_history_global, unread_signals, profile, idx, elapsed, latest_price_date)
     with tab1:
@@ -1799,7 +2143,7 @@ def main() -> None:
         st.download_button("Ladda ner topplistan som CSV", data=display.to_csv(index=False).encode("utf-8-sig"), file_name=f"borsify_{datetime.now():%Y-%m-%d}.csv", mime="text/csv")
         st.divider(); st.subheader("Detaljanalys")
         choices = {f"{r['Ticker']} · {r['Namn']} · {r['Borsify Score']:.0f}/100": i for i,r in top.iterrows()}
-        selected = st.selectbox("Välj aktie", list(choices)); render_detail(top.loc[choices[selected]], profile)
+        selected = st.selectbox("Välj aktie", list(choices)); render_detail(top.loc[choices[selected]], profile, key_prefix="daily")
     with tab4:
         st.subheader("Marknad · hela analysuniversumet")
         st.caption("Här finns rålistan för jämförelser och egen analys. Överblick och Dagens fynd är de rekommenderade startpunkterna.")
@@ -1933,6 +2277,10 @@ def main() -> None:
     """)
 
     st.caption("Konton/molnsynk: Supabase när konfigurerat. Datakälla: Yahoo Finance via yfinance. Sverige bred läses från universe.csv och är inte garanterat en officiell komplett Nasdaq-lista. Kontrollera alltid rapporter, nyheter, kassaflöde, skuldsättning och bolagsspecifika händelser före investeringsbeslut.")
+
+    with tab6:
+        default_edge_symbol = str(filtered.iloc[0]["Ticker"]) if not filtered.empty else "INVE-B.ST"
+        render_edge_lab(default_edge_symbol)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,30 @@
-# Borsify v2.1.1
+# Borsify v2.9.0
+
+## Nytt i v2.6.0 – handelsfriktion och positionsstorlek
+
+Edge Lab har fått ett ekonomiskt stresstest ovanpå walk-forward-resultatet. Det använder endast de out-of-sample-trades som redan valts av walk-forward-testet och låter användaren lägga på courtage tur/retur, spread + slippage tur/retur samt vald andel kapital per trade.
+
+Resultatet visar netto-träffsäkerhet, netto-median per trade, netto-profit factor, sekventiell kapitalutveckling och max drawdown. Om den historiska edgen försvinner efter rimliga handelsfriktioner flaggar appen detta tydligt i stället för att lyfta bruttoresultatet.
+
+Simuleringen är avsiktligt konservativ och enkel. Den modellerar inte skatt, samtidig portföljexponering, likviditet, orderdjup, partiella fills eller verklig exekvering. Den ska användas för att sålla bort ekonomiskt svaga signaler, inte för att lova live-resultat.
+
+
+## v2.5.0 – Edge Lab
+
+- Ny flik **Edge Lab** för historiskt test av tekniska SWING- och REVERSAL-proxys på valfri ticker.
+- Visar antal signaler, träffsäkerhet, median-/snittavkastning, profit factor och jämförelse mot alla giltiga handelsdagar som baslinje.
+- Testet använder endast bakåtblickande pris- och volymdata för att undvika look-ahead bias.
+- INVEST backtestas medvetet inte ännu eftersom Borsify saknar point-in-time historiska fundamenta; att använda dagens fundamenta historiskt skulle ge missvisande resultat.
+- Varning vid små stickprov och tydlig markering när signalen inte visar edge mot baslinjen.
+- Ny modul `edge_lab.py` och grundtester i `tests/test_edge_lab.py`.
+
+Edge Lab är ett signaltest, inte ett komplett portföljbacktest. Courtage, spread, slippage, skatt, survivorship bias och historiska indexmedlemskap ingår ännu inte.
+
+## v2.1.2 – Streamlit duplicate-key hotfix
+
+- Rättar `StreamlitDuplicateElementKey` som kunde uppstå när samma aktie renderades både på Överblick och Dagens fynd i samma Streamlit-körning.
+- Bevakningsknappar får nu kontextunika nycklar per vy (`overview`/`daily`).
+- Ingen ändring av INVEST-, SWING-, REVERSAL- eller Borsify Score-modellerna.
 
 ## v2.1.1 – aktuell kurs i lyfta case
 - Visar aktuell hämtad kurs, valuta och dagsförändring direkt på INVEST-, SWING- och REVERSAL-kandidater.
@@ -137,3 +163,53 @@ Detta skyddar **appen**, inte källkoden: ett publikt GitHub-repo kan fortfarand
 - Dagens fynd visar tre separata topplistor så lång och kort sikt inte blandas ihop.
 
 Modellerna är screeningverktyg, inte prognoser eller köp-/säljråd. v2.1 använder befintlig Yahoo/yfinance-data; historisk värdering, estimatrevideringar och backtesting återstår innan modellen kan sägas ha verifierad edge.
+## Nytt i v2.5.0 – Edge Lab Universumtest
+
+- Kör samma SWING- eller REVERSAL-proxy över många svenska aktier samtidigt.
+- Visar antal testade aktier, antal signaler, träffsäkerhet mot baslinje, median-edge, profit factor och andel aktier med positiv edge.
+- Visar resultat per ticker för att upptäcka om en strategi bara råkar fungera på några få bolag.
+- Kräver bredare stickprov innan appen beskriver en signal som lovande.
+- Fortsatt inget historiskt INVEST-backtest utan point-in-time fundamenta; det skulle skapa look-ahead bias.
+
+
+## v2.5.0 · Marknadsregimer i Edge Lab
+
+Edge Lab kan nu dela upp historiska SWING- och REVERSAL-resultat efter OMXS30-regim: **Risk-on**, **Neutral** och **Risk-off**. Regimen byggs enbart av information som fanns vid respektive datum (index mot SMA200, SMA50 mot SMA200 och 60-dagars momentum), vilket undviker framtidsinformation i klassificeringen.
+
+Både enskild ticker och universumtest visar träffsäkerhet, medianutfall, edge mot baslinje och profit factor per regim. Universumtestet varnar dessutom när en signal verkar tydligt regimberoende. Det är ett diagnostiskt lager för att senare kunna anpassa signaltrösklar efter marknadsklimat; produktionsmodellen ändras inte automatiskt i denna version.
+
+## Nytt i v2.5.0 – walk-forward / out-of-sample
+
+Edge Lab kan nu göra ett första **walk-forward-test** för SWING och REVERSAL. I varje fold optimeras scoretröskeln endast på en äldre träningsperiod och fryses sedan under nästa, osedda testperiod. Träningsobservationer vars framtida utfall korsar testgränsen tas bort för att minska läckage.
+
+Walk-forward-resultatet visar bland annat out-of-sample-träffsäkerhet, medianavkastning, edge mot baslinje, profit factor, andelen positiva testfönster och hur stabil den valda scoretröskeln är. Upprepade signaler som ligger i samma framtida utfallsfönster de-klustras så att flera dagar i samma setup inte räknas som oberoende trades.
+
+Detta är fortfarande ett **signaltest**, inte ett fullständigt handelsbacktest. Courtage, spread, slippage, skatt, position sizing och portföljkapital modelleras inte. INVEST-motorn backtestas inte med dagens fundamenta eftersom det skulle skapa look-ahead bias.
+
+## v2.7.0 – Portföljnivå i Edge Lab
+
+Edge Lab kan nu simulera ett gemensamt kapital över många aktier med max antal samtidiga positioner, målallokering per position, courtage och spread/slippage. Kandidater samma dag prioriteras efter högst score, samma aktie kan inte öppnas dubbelt samtidigt och kapital binds tills den valda signalhorisonten löper ut. Resultatet visar bland annat equity curve, exponering över tid, max drawdown, profit factor och signaler som avvisades på grund av kapacitetsbrist.
+
+I v2.7 bokfördes öppna positioner till insatt kapital mellan entry och exit. **Detta har ersatts i v2.9.0 av daglig mark-to-market med historiska stängningskurser.** Skatt, utdelningar, orderdjup, partial fills och verklig live-exekvering ingår fortfarande inte.
+
+
+
+## v2.9.0 – Daglig mark-to-market i portföljtestet
+
+- Öppna positioner värderas nu varje handelsdag med historisk stängningskurs i stället för att ligga kvar på anskaffningsvärdet fram till exit.
+- Equity curve, exponering och max drawdown fångar därmed orealiserade rörelser under innehavstiden.
+- Positionsstorlek vid nya signaler utgår från aktuell mark-to-market-equity, inte enbart bokfört kapital.
+- Equity-datan innehåller även investerat marknadsvärde, investerat anskaffningsvärde, realiserad P/L och orealiserad P/L.
+- ATR-stop och riskbudget fungerar tillsammans med den dagliga MTM-värderingen.
+- Full vald tur/retur-friktion bokförs vid exit. Framtida exitkostnad periodiseras inte i öppna positioners dagliga MTM, vilket anges tydligt i gränssnittet.
+- Fortfarande diagnostiskt backtest: gap-through, orderdjup, skatt och verkliga fills modelleras inte.
+
+## v2.8.0 – Riskstyrning i Edge Lab
+
+- Riskstyrd positionsstorlek utifrån vald risk per trade.
+- ATR(14)-baserat stop-avstånd med trailing-only data och försiktiga min/max-gränser.
+- Tak för sammanlagd öppen stop-risk i portföljen.
+- Historiska stops kontrolleras mot efterföljande dagslägsta fram till normal horisontexit.
+- Portföljvyn visar max öppen stop-risk, stop-andel och signaler som nekats av risktaket.
+- Trade-loggen visar stop-avstånd och om positionen stoppades.
+- Stop-simuleringen antar fill på stopnivån och modellerar inte gap-through; resultatet ska därför ses som diagnostik, inte exekveringsgaranti.
