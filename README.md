@@ -528,3 +528,8 @@ inte några modellvikter automatiskt från ledgern; små samples ska inte övero
 SQLite fungerar direkt. För Supabase krävs de nya tabellerna `recommendation_ledger` och
 `recommendation_outcomes` i `supabase_schema.sql`. Om migrationen saknas fortsätter appen
 utan ledger i molnet och visar migration-needed-status internt i stället för att krascha.
+
+
+## v2.35.1 – Hotfix för djupanalys
+
+Byter scalar cell-assignments i deep/short finalist pipelines från `DataFrame.loc` till `DataFrame.at`. Detta gör att list-/dictvärden som Catalyst Candidates och stöd/veto-listor lagras som ett objekt i en cell i stället för att Pandas försöker tolka värdet som en kolumniterabel. Fixar kraschen `Must have equal len keys and value when setting with an iterable`.

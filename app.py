@@ -51,7 +51,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.35.0"
+APP_VERSION = "2.35.1"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -888,7 +888,7 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
                 }
     for idx, assessment in records.items():
         for key, value in assessment.items():
-            pool.loc[idx, key] = value
+            pool.at[idx, key] = value
     # Final ordering is evidence-gate first. INVEST only breaks ties after the
     # independent quality, inflection, mispricing and scenario checks.
     order = sorted(pool.index, key=lambda idx: case_gate_rank_key(pool.loc[idx]), reverse=True)
@@ -911,7 +911,7 @@ def build_short_term_longlist(df: pd.DataFrame, benchmark: dict[str, Any] | None
         prelim_records[idx] = assess_short_term_case(row, benchmark)
     for idx, assessment in prelim_records.items():
         for key, value in assessment.items():
-            prelim.loc[idx, key] = value
+            prelim.at[idx, key] = value
 
     prelim_order = sorted(prelim.index, key=lambda idx: short_term_rank_key(prelim.loc[idx]), reverse=True)
     pool = prelim.loc[prelim_order].head(pool_size).copy()
@@ -954,7 +954,7 @@ def build_short_term_longlist(df: pd.DataFrame, benchmark: dict[str, Any] | None
 
     for idx, assessment in records.items():
         for key, value in assessment.items():
-            pool.loc[idx, key] = value
+            pool.at[idx, key] = value
 
     order = sorted(pool.index, key=lambda idx: short_term_rank_key(pool.loc[idx]), reverse=True)
     return pool.loc[order].head(limit).copy()
