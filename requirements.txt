@@ -3,3 +3,4 @@ pandas>=2.0
 numpy>=1.26
 yfinance>=0.2.54
 supabase>=2.6,<3
+openai>=1.68,<3

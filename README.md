@@ -530,12 +530,12 @@ SQLite fungerar direkt. För Supabase krävs de nya tabellerna `recommendation_l
 utan ledger i molnet och visar migration-needed-status internt i stället för att krascha.
 
 
-## v2.35.3 – Hotfix för djupanalys
+## v2.36.1 – Hotfix för djupanalys
 
 Byter scalar cell-assignments i deep/short finalist pipelines från `DataFrame.loc` till `DataFrame.at`. Detta gör att list-/dictvärden som Catalyst Candidates och stöd/veto-listor lagras som ett objekt i en cell i stället för att Pandas försöker tolka värdet som en kolumniterabel. Fixar kraschen `Must have equal len keys and value when setting with an iterable`.
 
 
-## v2.35.3 – Pandas iterable assignment hotfix
+## v2.36.1 – Pandas iterable assignment hotfix
 
 Hotfix for Streamlit/Pandas runtime crash in deep and short finalist builders.
 `.at` alone was insufficient when a new column did not yet exist because Pandas
@@ -544,9 +544,51 @@ created first as object dtype, then populated cell-by-cell. This safely supports
 lists and dictionaries such as Case Supports, Catalyst Candidates and similar
 structured evidence fields.
 
-## v2.35.3 – Runtime hotfix for structured assessment fields
+## v2.36.1 – Runtime hotfix for structured assessment fields
 
 Replaced all cell-by-cell writes of deep/short assessment dictionaries with a separate
 object-typed DataFrame followed by index join. This completely avoids Pandas scalar
 assignment for list/dict fields and fixes the Streamlit Cloud crash path shown at
 build_deep_longlist line 891.
+
+
+## v2.36.1 – Fråga Borsify AI på varje rekommendation
+
+Varje kort- och långsiktig rekommendation har nu en egen fråga/svar-yta:
+`Fråga Borsify AI om rekommendationen`.
+
+Användaren kan ställa fria frågor, exempelvis:
+- Varför rekommenderar du Alleima när den redan ligger så högt?
+- Vad är det starkaste argumentet emot caset?
+- Vad skulle få Borsify att ändra uppfattning?
+- Är det här ett värderingscase eller ett momentumcase?
+- Vilket antagande i Base-scenariot är mest känsligt?
+
+AI:n får en begränsad, strukturerad kontext med just den rekommendationens faktiska
+Borsify-data. För kortsiktiga case omfattar den bland annat Short Alpha, relativ styrka,
+trend, momentum, revisionsbild, katalysatorer, varningar och motargument. För långsiktiga
+case omfattar den bland annat Case Gate, evidens, value-trap-risk, inflektion, mispricing,
+Bear/Base/Bull-scenarier, katalysatorer och Devil's Advocate.
+
+Systeminstruktionen förbjuder AI:n att hitta på bolagsfakta som saknas i caset. Den måste
+skilja på absolut aktiekurs, tidigare kursuppgång, relativ styrka och faktisk värdering,
+lyfta starkaste motargumentet och förklara vad som skulle kunna ändra Borsifys bedömning.
+
+Aktivering i Streamlit Secrets:
+`OPENAI_API_KEY = "..."`
+Valfritt:
+`OPENAI_MODEL = "gpt-5.6-luna"`
+
+Om nyckeln saknas kraschar inte appen. Då visas ett tydligt regelbaserat reservsvar och
+gränssnittet förklarar att extern AI inte är aktiverad. API-nyckeln skickas aldrig till
+webbläsaren eller lagras i GitHub.
+
+
+## v2.36.1 – Aktuell kurs på alla rekommendationer
+
+Alla rekommendationskort visar nu senaste tillgängliga kurs tydligt direkt i headern,
+tillsammans med dagsförändring där den finns. Detta gäller både Short Alpha 1–6 månader,
+långsiktiga djupcase och Dagens fynd. Senaste kursdag visas när Prisdatum finns.
+
+Syftet är att användaren direkt ska kunna bedöma om ett case fortfarande är relevant
+och undvika att behöva öppna detaljanalysen bara för att se priset.

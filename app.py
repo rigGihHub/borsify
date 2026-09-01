@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 import hmac
 import sqlite3
 import time
@@ -38,6 +39,7 @@ from recommendation_ledger import (
     build_recommendation_records, evaluate_record_from_history,
     outcome_summary, calibration_by_gate,
 )
+from case_ai import build_case_ai_input, build_case_ai_instructions, local_case_explanation
 
 from edge_lab import (
     build_technical_history, summarize_backtest, summarize_universe_backtest,
@@ -46,12 +48,17 @@ from edge_lab import (
 )
 
 try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None  # type: ignore
+
+try:
     from supabase import Client, create_client
 except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.35.3"
+APP_VERSION = "2.36.1"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -2933,6 +2940,117 @@ def render_overview(
         st.caption(f"Borsify v{APP_VERSION}. Kurs- och fundamentaldata kan vara fördröjd eller ofullständig.")
 
 
+
+def _case_ai_api_key() -> str:
+    try:
+        return str(st.secrets.get("OPENAI_API_KEY", "") or "").strip()
+    except Exception:
+        return ""
+
+
+def _case_ai_model() -> str:
+    try:
+        return str(st.secrets.get("OPENAI_MODEL", "gpt-5.6-luna") or "gpt-5.6-luna").strip()
+    except Exception:
+        return "gpt-5.6-luna"
+
+
+def ask_borsify_ai(case: pd.Series | dict[str, Any], horizon: str, question: str) -> tuple[str, str]:
+    """Ask the configured OpenAI model using only the structured Borsify case context."""
+    key = _case_ai_api_key()
+    if not key or OpenAI is None:
+        return local_case_explanation(case, horizon), "local"
+
+    try:
+        client = OpenAI(api_key=key)
+        response = client.responses.create(
+            model=_case_ai_model(),
+            instructions=build_case_ai_instructions(),
+            input=build_case_ai_input(case, horizon, question),
+            max_output_tokens=700,
+        )
+        text = str(getattr(response, "output_text", "") or "").strip()
+        if not text:
+            return local_case_explanation(case, horizon), "local"
+        return text, "ai"
+    except Exception as exc:
+        # Never crash a recommendation card because the AI provider is unavailable.
+        fallback = local_case_explanation(case, horizon)
+        return fallback + f"\n\n_AI-tjänsten kunde inte nås ({type(exc).__name__})._", "local"
+
+
+
+def render_recommendation_price(case: pd.Series | dict[str, Any]) -> None:
+    """Show the latest available market price prominently on every recommendation."""
+    price = _num(case.get("Pris"))
+    daily = _num(case.get("Dagsförändring"))
+    currency = str(case.get("Valuta", "") or "")
+    price_date = str(case.get("Prisdatum", "") or "")
+
+    if np.isfinite(price):
+        label = "Aktuell kurs"
+        value = f"{price:.2f} {currency}".strip()
+        delta = f"{daily:+.1%}" if np.isfinite(daily) else None
+        st.metric(label, value, delta)
+        if price_date and price_date != "—":
+            st.caption(f"Senaste kursdag: {price_date}")
+    else:
+        st.metric("Aktuell kurs", "—")
+        st.caption("Aktuell kurs saknas i tillgänglig data.")
+
+
+def render_case_ai_qa(case: pd.Series | dict[str, Any], horizon: str, rank: int) -> None:
+    ticker = str(case.get("Ticker", "case"))
+    safe_ticker = re.sub(r"[^A-Za-z0-9_-]+", "_", ticker)
+    scope = f"{horizon}_{safe_ticker}_{rank}"
+    history_key = f"case_ai_history_{scope}"
+
+    with st.expander("💬 Fråga Borsify AI om rekommendationen", expanded=False):
+        st.caption(
+            "Fråga varför caset lyfts, vad som talar emot det eller vad som skulle få Borsify att ändra uppfattning. "
+            "AI:n får den faktiska Borsify-datan för just detta case – inte en fri instruktion att hitta på nya bolagsfakta."
+        )
+
+        if not _case_ai_api_key():
+            st.info(
+                "AI-frågor är förberedda men OpenAI är inte aktiverat i denna deployment. "
+                "Lägg `OPENAI_API_KEY` i Streamlit Secrets. Utan nyckel visas bara ett regelbaserat reservsvar."
+            )
+
+        history = st.session_state.setdefault(history_key, [])
+        for item in history[-4:]:
+            st.markdown(f"**Du:** {item['q']}")
+            st.markdown(f"**Borsify AI:** {item['a']}")
+
+        default_example = (
+            "Varför rekommenderar du den här aktien när den redan ligger så högt?"
+            if horizon == "long"
+            else "Varför är detta ett kortsiktigt case trots att aktien redan har gått starkt?"
+        )
+        with st.form(f"case_ai_form_{scope}", clear_on_submit=True):
+            question = st.text_input(
+                "Din fråga",
+                placeholder=default_example,
+                key=f"case_ai_question_{scope}",
+            )
+            submitted = st.form_submit_button("Fråga AI")
+
+        if submitted:
+            q = str(question or "").strip()
+            if not q:
+                st.warning("Skriv en fråga först.")
+            else:
+                with st.spinner("Borsify AI granskar caset…"):
+                    answer, mode = ask_borsify_ai(case, horizon, q)
+                history.append({"q": q, "a": answer, "mode": mode})
+                st.session_state[history_key] = history[-8:]
+                st.markdown(f"**Du:** {q}")
+                label = "Borsify AI" if mode == "ai" else "Borsify · reservsvar"
+                st.markdown(f"**{label}:** {answer}")
+                if mode != "ai":
+                    st.caption("Reservsvaret är regelbaserat och ska inte förväxlas med ett AI-svar.")
+
+
 def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_symbol: str | None = "^OMXS30", benchmark_name: str = "OMXS30") -> None:
     st.subheader("Edge Lab · historiskt signaltest")
     st.caption("Edge Lab försöker svara på en enkel fråga: om Borsify hade gett samma signaler tidigare, hur hade de gått då? Historik bevisar inte vad som händer framåt, men hjälper oss att upptäcka svaga modeller.")
@@ -3769,13 +3887,15 @@ def main() -> None:
             else:
                 for rank, (_, case) in enumerate(short_longlist.iterrows(), start=1):
                     with st.container(border=True):
-                        s1, s2, s3, s4, s5 = st.columns([2.6, .9, .9, .9, 1.1])
+                        s1, s2, s3, s4, s5, s6 = st.columns([2.45, 1.05, .82, .82, .82, 1.0])
                         s1.markdown(f"### {rank}. {case.get('Namn', case.get('Ticker'))} · {case.get('Ticker')}")
                         s1.caption(f"{case.get('Sektor','—')} · horisont cirka 1–6 månader")
-                        s2.metric("Short Alpha", f"{_num(case.get('Short Alpha Score')):.0f}/100")
-                        s3.metric("Confidence", f"{_num(case.get('Short Alpha Confidence')):.0f}/100", help="Datatäckning/evidens, inte sannolikheten att kursen stiger.")
-                        s4.metric("Relativ styrka", f"{_num(case.get('Short Relative Strength')):.0f}/100", help=f"Mot vald benchmark: {case.get('Short Relative Text','—')}")
-                        s5.metric("Bekräftelser", f"{int(_num(case.get('Short Confirmation Count')) if np.isfinite(_num(case.get('Short Confirmation Count'))) else 0)}/6")
+                        with s2:
+                            render_recommendation_price(case)
+                        s3.metric("Short Alpha", f"{_num(case.get('Short Alpha Score')):.0f}/100")
+                        s4.metric("Confidence", f"{_num(case.get('Short Alpha Confidence')):.0f}/100", help="Datatäckning/evidens, inte sannolikheten att kursen stiger.")
+                        s5.metric("Relativ styrka", f"{_num(case.get('Short Relative Strength')):.0f}/100", help=f"Mot vald benchmark: {case.get('Short Relative Text','—')}")
+                        s6.metric("Bekräftelser", f"{int(_num(case.get('Short Confirmation Count')) if np.isfinite(_num(case.get('Short Confirmation Count'))) else 0)}/6")
                         gate = str(case.get("Short Alpha Gate", "Svag kortsiktig signal"))
                         if gate == "Kortsiktigt toppcase":
                             st.success(gate)
@@ -3812,6 +3932,7 @@ def main() -> None:
                                 "Katalysator": case.get("Short Catalyst", "—"),
                                 "Katalysatorevidens": case.get("Catalyst Evidence", "—"),
                             })
+                        render_case_ai_qa(case, "short", rank)
 
             st.divider()
 
@@ -3822,16 +3943,18 @@ def main() -> None:
             else:
                 for rank, (_, case) in enumerate(deep_longlist.iterrows(), start=1):
                     with st.container(border=True):
-                        a, b, c, d, e, f = st.columns([2.65, .82, .95, .95, 1.05, .95])
+                        a, b, c, d, e, f, g = st.columns([2.35, 1.05, .72, .82, .82, .95, .82])
                         a.markdown(f"### {rank}. {case.get('Namn', case.get('Ticker'))} · {case.get('Ticker')}")
                         a.caption(f"{case.get('Sektor','—')} · flerårsdata t.o.m. {case.get('Rapportdatum','—')}")
-                        b.metric("INVEST", f"{_num(case.get('INVEST Score')):.0f}/100")
+                        with b:
+                            render_recommendation_price(case)
+                        c.metric("INVEST", f"{_num(case.get('INVEST Score')):.0f}/100")
                         trap = _num(case.get('Value Trap Risk')); conf = _num(case.get('Deep Confidence'))
                         infl = _num(case.get('Inflection Score'))
-                        c.metric("Value Trap", f"{trap:.0f}/100" if np.isfinite(trap) else "—", help="Högre = fler konkreta varningssignaler i tillgänglig flerårsdata. Inte en sannolikhet.")
-                        d.metric("Inflection", f"{infl:.0f}/100" if np.isfinite(infl) else "—", help="Förändringsindex för kvartalstrender och, där Yahoo har data, EPS-estimatrevideringar. Det är inte en prognos för kursavkastning.")
-                        e.metric("Mispricing", str(case.get("Mispricing Signal", "—")).replace("Tydlig möjlig ", "Tydlig ").replace("Marknaden kan vara mer rimlig än caset", "Krävande"), help="Jämför transparenta avkastnings-/värderingshurdlar med verifierad tillväxt. Detta är inte en sannolikhet eller DCF.")
-                        f.metric("Confidence", f"{conf:.0f}/100" if np.isfinite(conf) else "—", help="Mäter datatäckning och historiklängd, inte sannolikheten att kursen stiger.")
+                        d.metric("Value Trap", f"{trap:.0f}/100" if np.isfinite(trap) else "—", help="Högre = fler konkreta varningssignaler i tillgänglig flerårsdata. Inte en sannolikhet.")
+                        e.metric("Inflection", f"{infl:.0f}/100" if np.isfinite(infl) else "—", help="Förändringsindex för kvartalstrender och, där Yahoo har data, EPS-estimatrevideringar. Det är inte en prognos för kursavkastning.")
+                        f.metric("Mispricing", str(case.get("Mispricing Signal", "—")).replace("Tydlig möjlig ", "Tydlig ").replace("Marknaden kan vara mer rimlig än caset", "Krävande"), help="Jämför transparenta avkastnings-/värderingshurdlar med verifierad tillväxt. Detta är inte en sannolikhet eller DCF.")
+                        g.metric("Confidence", f"{conf:.0f}/100" if np.isfinite(conf) else "—", help="Mäter datatäckning och historiklängd, inte sannolikheten att kursen stiger.")
                         gate = str(case.get('Djupkontroll','Otillräcklig data'))
                         signal = str(case.get('Inflection Signal','Otillräcklig förändringsdata'))
                         if gate == "Klarar djupkontroll": st.success(f"{gate} · {signal}")
@@ -3937,6 +4060,7 @@ def main() -> None:
                                 "Scenarioasymmetri": case.get("Scenario Asymmetry", "—"),
                                 "Fleråriga varningar": case.get("Fleråriga varningar", "—"),
                             })
+                        render_case_ai_qa(case, "long", rank)
                 st.caption("Djupkontrollen kan sänka ett billigt bolag om kassaflöde, marginaler, omsättning, skuld, färska estimat eller prisets framtidskrav utvecklas fel. Case Gate kräver flera oberoende stöd och låter motbevis väga tungt. Bear/Base/Bull visar scenarioasymmetri med synliga antaganden; det är inte kursmål, sannolikheter eller en DCF. Saknade data lämnas som saknade.")
 
             st.divider()
@@ -3968,8 +4092,8 @@ def main() -> None:
                         h1.caption(f"{case['Signal']} · {case['Sektor']} · senaste kursdag {case.get('Prisdatum','—')}")
                         delta = _num(case.get("Score Δ"))
                         h2.metric("Borsify", f"{_num(case['Borsify Score']):.0f}/100", f"{delta:+.1f}" if np.isfinite(delta) else None)
-                        case_price = _num(case.get("Pris"))
-                        h3.metric("Aktuell kurs", fmt_price_with_sek(case), fmt_pct(case.get("Dagsförändring")))
+                        with h3:
+                            render_recommendation_price(case)
                         h4.metric("Dagens relevans", f"{_num(case['Dagens relevans']):.0f}/100")
                         h5.metric("Prioritet", str(case["Prioritet"]))
                         c1, c2, c3 = st.columns(3)
