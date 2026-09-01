@@ -119,6 +119,106 @@ DEFAULT_SOURCES = [
 ]
 
 
+
+
+EVENT_RULES: list[tuple[str, tuple[str, ...]]] = [
+    ("Vinstvarning / tydlig försämring", (
+        "vinstvarning", "vinstvarnar", "profit warning", "cuts guidance", "lowered guidance", "sänker prognos",
+        "sanker prognos", "svagare än väntat", "svagare an vantat", "missar förvänt", "misses estimates",
+    )),
+    ("Rapport / resultat", (
+        "rapport", "delårsrapport", "delarsrapport", "bokslut", "årsrapport", "arsrapport",
+        "earnings", "results", "quarter", "q1", "q2", "q3", "q4", "ebit", "ebita",
+    )),
+    ("Prognos / guidance", (
+        "prognos", "utsikter", "guidance", "outlook", "höjer prognos", "hojer prognos",
+        "raises guidance", "guides",
+    )),
+    ("Analys / riktkurs", (
+        "riktkurs", "köprekommendation", "koprekommendation", "säljrekommendation", "saljrekommendation",
+        "rekommendation", "analys", "upgrade", "downgrade", "price target", "target price",
+        "buy rating", "sell rating", "overweight", "underweight",
+    )),
+    ("Insiderhandel", (
+        "insynsköp", "insynskop", "insiderköp", "insiderkop", "insider purchase", "insider buying",
+        "insynsförsälj", "insynsforsalj", "insider sale",
+    )),
+    ("Order / kontrakt", (
+        "stororder", "order värd", "order vard", "order value", "kontrakt", "contract",
+        "ramavtal", "framework agreement", "upphandling",
+    )),
+    ("Förvärv / fusion / bud", (
+        "förvärv", "forvarv", "acquisition", "acquire", "köper", "koper", "takeover",
+        "bud på", "bud pa", "merger", "fusion", "m&a",
+    )),
+    ("Utdelning / återköp", (
+        "utdelning", "dividend", "återköp", "aterkop", "buyback", "share repurchase",
+    )),
+    ("Emission / finansiering", (
+        "nyemission", "företrädesemission", "foretradesemission", "emission", "rights issue",
+        "share issue", "kapitalanskaff", "finansiering", "refinancing",
+    )),
+    ("Ledning / styrelse", (
+        "vd avgår", "vd avgar", "ny vd", "ceo resign", "new ceo", "styrelse", "board",
+        "ordförande", "ordforande", "chairman",
+    )),
+    ("Regulatoriskt / juridiskt", (
+        "myndighet", "finansinspektionen", "konkurrensverket", "domstol", "stämning", "stamning",
+        "lawsuit", "regulator", "investigation", "böter", "boter", "fine", "approval", "godkännande", "godkannande",
+    )),
+    ("Produkt / lansering", (
+        "lanserar", "lansering", "launch", "new product", "produkt", "godkänd produkt", "approved product",
+    )),
+    ("Kursrörelse / marknadsreaktion", (
+        "rusar", "rasar", "stiger", "faller", "lyfter", "sjunker", "shares jump", "shares fall",
+        "stock jumps", "stock falls",
+    )),
+]
+
+EVENT_PRIORITY = {name: i for i, (name, _) in enumerate(EVENT_RULES)}
+EVENT_PRIORITY.update({"Forumdiskussion": 90, "Övrigt / oklart": 99})
+
+
+def classify_event(title: str, summary: str = "", kind: str = "media") -> list[str]:
+    """Klassificerar vad rubriken sannolikt handlar om – inte om nyheten är bra eller dålig.
+
+    Klassningen är avsiktligt enkel och deterministisk. Den ska hjälpa användaren att förstå
+    *varför* ett bolag syns i flödet, men originalkällan måste läsas för att verifiera händelsen.
+    """
+    hay = _normalize(f"{title} {summary}")
+    hits: list[str] = []
+    for label, terms in EVENT_RULES:
+        if any(_normalize(term) in hay for term in terms):
+            hits.append(label)
+    if not hits:
+        hits.append("Forumdiskussion" if kind == "forum" else "Övrigt / oklart")
+    return sorted(set(hits), key=lambda x: EVENT_PRIORITY.get(x, 99))
+
+
+def event_explanation(event_types: list[str]) -> str:
+    if not event_types:
+        return "Borsify kunde inte avgöra vad uppmärksamheten gäller enbart från rubrikerna."
+    main = event_types[0]
+    explanations = {
+        "Vinstvarning / tydlig försämring": "Rubrikerna tyder på en vinstvarning eller tydlig försämring. Det är en riskhändelse som bör läsas i original innan nyckeltalen tolkas.",
+        "Rapport / resultat": "Uppmärksamheten verkar främst bero på en rapport eller nya resultatsiffror. Kontrollera om vinsten, omsättningen och utsikterna faktiskt förändrats.",
+        "Prognos / guidance": "Bolagets framtidsutsikter eller prognos verkar stå i centrum. Jämför det nya beskedet med tidigare förväntningar.",
+        "Analys / riktkurs": "En eller flera externa analyser eller riktkurser verkar driva uppmärksamheten. Det är en åsikt från marknaden, inte ny fundamental fakta i sig.",
+        "Insiderhandel": "Uppmärksamheten verkar gälla köp eller försäljning från personer nära bolaget. Det kan vara intressant, men ska inte ensamt styra ett investeringsbeslut.",
+        "Order / kontrakt": "Bolaget verkar ha fått eller diskuterats kring en order eller ett kontrakt. Kontrollera storleken i förhållande till bolagets normala omsättning.",
+        "Förvärv / fusion / bud": "Uppmärksamheten verkar gälla ett förvärv, bud eller en fusion. Sådana händelser kan ändra både tillväxtmöjlighet och risk snabbt.",
+        "Utdelning / återköp": "Utdelning eller återköp verkar vara orsaken till uppmärksamheten. Kontrollera om utbetalningen är hållbar och hur den finansieras.",
+        "Emission / finansiering": "Bolaget verkar ta in eller omfördela kapital. Kontrollera utspädning, villkor och varför pengarna behövs.",
+        "Ledning / styrelse": "Förändringar i ledning eller styrelse verkar vara nyheten. Bedöm om förändringen påverkar bolagets strategi eller genomförandeförmåga.",
+        "Regulatoriskt / juridiskt": "Myndighets-, godkännande- eller juridiska frågor verkar ligga bakom uppmärksamheten. Här är originalkällan särskilt viktig.",
+        "Produkt / lansering": "En produkt, tjänst eller lansering verkar vara i fokus. Kontrollera om den är ekonomiskt betydelsefull för bolaget.",
+        "Kursrörelse / marknadsreaktion": "Rubrikerna beskriver främst en stor kursrörelse. Borsify försöker därför hitta den bakomliggande orsaken i övriga rubriker innan rörelsen tolkas.",
+        "Forumdiskussion": "Bolaget diskuteras i forum, men någon tydlig bolagshändelse går inte att fastställa från rubriken.",
+        "Övrigt / oklart": "Borsify ser uppmärksamhet men kan inte säkert avgöra orsaken från rubrikerna. Läs originalkällan innan du drar slutsatser.",
+    }
+    return explanations.get(main, explanations["Övrigt / oklart"])
+
+
 def _clean_html(text: str) -> str:
     text = re.sub(r"<[^>]+>", " ", text or "")
     return re.sub(r"\s+", " ", text).strip()
@@ -144,7 +244,7 @@ def _fetch_xml(url: str, timeout: int = 8) -> bytes:
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "Borsify/2.14 (+https://borsify.se; public-feed-reader)",
+            "User-Agent": "Borsify/2.18 (+https://borsify.se; public-feed-reader)",
             "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
         },
     )
@@ -261,6 +361,7 @@ def map_mentions(feed: pd.DataFrame, stocks: pd.DataFrame) -> pd.DataFrame:
     columns = [
         "Ticker", "Namn", "Antal omnämnanden", "Källor", "Forum", "Media", "Senast nämnd",
         "Rubriker", "Mediekällor", "Forumkällor", "Kategorier", "Viktade omnämnanden",
+        "Omnämnanden 24h", "Omnämnanden 7d", "Mediepuls", "Huvudhändelse", "Händelsetyper", "Händelseförklaring",
     ]
     if feed.empty or stocks.empty:
         return pd.DataFrame(columns=columns)
@@ -284,16 +385,39 @@ def map_mentions(feed: pd.DataFrame, stocks: pd.DataFrame) -> pd.DataFrame:
         forum_mask = m["kind"].eq("forum")
         headlines = []
         for _, r in m.sort_values("published", ascending=False, na_position="last").head(6).iterrows():
+            event_types = classify_event(str(r.get("title", "")), str(r.get("summary", "")), str(r.get("kind", "media")))
             headlines.append({
                 "title": str(r.get("title", "")),
                 "source": str(r.get("publisher", r.get("source", ""))),
                 "feed": str(r.get("source", "")),
                 "category": str(r.get("category", "")),
                 "kind": str(r.get("kind", "")),
+                "event_types": event_types,
                 "link": str(r.get("link", "")),
                 "published": r.get("published"),
             })
         weights = pd.to_numeric(m.get("source_weight", 1.0), errors="coerce").fillna(1.0)
+        now = pd.Timestamp.utcnow().tz_localize(None)
+        ages = (now - published).dt.total_seconds() / 86400.0
+        mentions_24h = int(((ages >= 0) & (ages <= 1)).sum())
+        mentions_7d = int(((ages >= 0) & (ages <= 7)).sum())
+        older_window = max(mentions_7d - mentions_24h, 0)
+        older_daily = older_window / 6.0
+        if mentions_24h >= 3 and mentions_24h >= max(older_daily * 2.0, 2.0):
+            pulse = "Ökad uppmärksamhet"
+        elif mentions_24h >= 2:
+            pulse = "Aktivt just nu"
+        elif mentions_24h == 1:
+            pulse = "Nytt omnämnande"
+        else:
+            pulse = "Ingen tydlig ny puls"
+
+        all_event_types: list[str] = []
+        for h in headlines:
+            all_event_types.extend(h.get("event_types", []))
+        # Välj den mest konkreta/angelägna händelsetypen enligt den fasta prioriteringen.
+        event_types = sorted(set(all_event_types), key=lambda x: EVENT_PRIORITY.get(x, 99))
+        main_event = event_types[0] if event_types else ("Forumdiskussion" if forum_mask.all() else "Övrigt / oklart")
         stock_rows.append({
             "Ticker": ticker,
             "Namn": name,
@@ -307,6 +431,12 @@ def map_mentions(feed: pd.DataFrame, stocks: pd.DataFrame) -> pd.DataFrame:
             "Forumkällor": int(publisher_series[forum_mask].nunique()),
             "Kategorier": int(m.get("category", pd.Series(dtype=str)).nunique()),
             "Viktade omnämnanden": float(weights.sum()),
+            "Omnämnanden 24h": mentions_24h,
+            "Omnämnanden 7d": mentions_7d,
+            "Mediepuls": pulse,
+            "Huvudhändelse": main_event,
+            "Händelsetyper": event_types,
+            "Händelseförklaring": event_explanation(event_types),
         })
     return pd.DataFrame(stock_rows)
 
@@ -331,6 +461,161 @@ def discovery_strength(row: pd.Series, now: pd.Timestamp | None = None) -> float
         score = min(score, 68.0)
     return round(min(score, 100.0), 1)
 
+
+def combination_signal(row: pd.Series) -> tuple[str, str, float]:
+    """Prioriterar externa uppslag som sammanfaller med stark intern data.
+
+    Detta är inte en ny investeringsscore. Extern uppmärksamhet får aldrig ändra
+    Borsify Score, INVEST, SWING eller REVERSAL. Prioriteten används bara för att
+    sortera vilka redan externt upptäckta case som är mest värda att läsa vidare om.
+    """
+    def n(key: str) -> float:
+        value = pd.to_numeric(row.get(key), errors="coerce")
+        return float(value) if pd.notna(value) else np.nan
+
+    b = n("Borsify Score")
+    invest = n("INVEST Score")
+    swing = n("SWING Score")
+    reversal = n("REVERSAL Score")
+    quality = n("Kvalitet")
+    valuation = n("Värdering")
+    risk = n("Risk")
+    discovery = n("Upptäcktsstyrka")
+    media_sources = n("Mediekällor")
+    mentions24 = n("Omnämnanden 24h")
+    pulse = str(row.get("Mediepuls", ""))
+
+    internal = b if np.isfinite(b) else 0.0
+    external = discovery if np.isfinite(discovery) else 0.0
+    # Endast en kö-prioritering för redan upptäckta idéer, aldrig en ändring av Borsify Score.
+    queue_priority = round(min(100.0, max(0.0, 0.72 * internal + 0.28 * external)), 1)
+
+    solid_risk = (not np.isfinite(risk)) or risk >= 50
+    solid_quality = np.isfinite(quality) and quality >= 60
+    reasonable_price = np.isfinite(valuation) and valuation >= 55
+    real_media_breadth = np.isfinite(media_sources) and media_sources >= 2
+    pulse_up = pulse in {"Ökad uppmärksamhet", "Aktivt just nu"} or (np.isfinite(mentions24) and mentions24 >= 2)
+
+    if np.isfinite(b) and b >= 72 and solid_quality and reasonable_price and solid_risk and pulse_up and real_media_breadth:
+        return (
+            "Ovanligt intressant kombination",
+            "Flera oberoende källor har börjat uppmärksamma bolaget samtidigt som Borsifys egen kontroll visar bra kvalitet, rimlig värdering och acceptabel risk. Det gör caset värt att läsa vidare om – men medieintresset är inte ett köpbevis.",
+            queue_priority,
+        )
+    if np.isfinite(invest) and invest >= 70 and solid_quality and solid_risk and pulse_up:
+        return (
+            "Kvalitetsbolag i fokus",
+            "Bolaget ser långsiktigt intressant ut i Borsifys data och får samtidigt mer extern uppmärksamhet. Kontrollera vad som utlöst intresset och om nyheten förändrar bolagets långsiktiga förutsättningar.",
+            queue_priority,
+        )
+    if np.isfinite(reversal) and reversal >= 72 and solid_risk and pulse == "Ökad uppmärksamhet":
+        return (
+            "Möjlig återhämtningsidé",
+            "Aktien har ett starkt återhämtningsläge enligt Borsifys prisdata och uppmärksamheten har ökat. Det kan vara ett intressant uppslag efter ett fall, men kontrollera först varför aktien föll.",
+            queue_priority,
+        )
+    if np.isfinite(swing) and swing >= 72 and solid_risk and pulse_up:
+        return (
+            "Kortsiktigt läge i fokus",
+            "Borsifys kortsiktiga signal är stark samtidigt som aktien syns mer i externa källor. Det är ett läge att analysera vidare, inte en automatisk köpsignal.",
+            queue_priority,
+        )
+    if np.isfinite(b) and b >= 60 and external >= 45:
+        return (
+            "Värt en närmare titt",
+            "Både Borsifys grunddata och den externa uppmärksamheten är tillräckligt intressanta för att motivera en närmare kontroll, men kombinationen är inte stark nog för en tydligare flagga.",
+            queue_priority,
+        )
+    return (
+        "Ingen särskild kombination",
+        "Det finns ett externt uppslag, men Borsify ser ännu ingen ovanligt stark kombination av uppmärksamhet och egna nyckeltal.",
+        queue_priority,
+    )
+
+
+
+def case_impact_assessment(row: pd.Series) -> tuple[str, str, int]:
+    """Bedömer hur mycket en extern händelse *kan* påverka investeringscaset.
+
+    Funktionen tolkar inte om en nyhet är positiv eller negativ när rubriken inte räcker
+    för det. Den skiljer i stället mellan händelser som ofta kan ändra fundamenta och
+    sådant som främst är marknadsbrus eller andrahandsåsikter.
+    """
+    event = str(row.get("Huvudhändelse", "Övrigt / oklart"))
+    event_types = row.get("Händelsetyper") or []
+    if not isinstance(event_types, (list, tuple, set)):
+        event_types = [str(event_types)]
+    event_set = {str(x) for x in event_types}
+
+    def n(key: str) -> float:
+        v = pd.to_numeric(row.get(key), errors="coerce")
+        return float(v) if pd.notna(v) else np.nan
+
+    risk = n("Risk")
+    quality = n("Kvalitet")
+    debt = n("Skuld/eget kapital")
+
+    if "Vinstvarning / tydlig försämring" in event_set or event == "Vinstvarning / tydlig försämring":
+        return (
+            "Ny risk – kontrollera direkt",
+            "En vinstvarning eller tydlig försämring kan ändra bolagets värde snabbt. Läs originalkällan och kontrollera vad som ändrats i vinst, omsättning och framtidsutsikter innan äldre nyckeltal får väga tungt.",
+            3,
+        )
+
+    if event in {"Rapport / resultat", "Prognos / guidance", "Förvärv / fusion / bud", "Regulatoriskt / juridiskt"}:
+        return (
+            "Kan ändra investeringscaset",
+            "Det här är en typ av händelse som kan påverka bolagets framtida vinst, risk eller värdering. Borsify väntar därför med att kalla den positiv eller negativ tills de faktiska siffrorna eller villkoren är verifierade.",
+            3,
+        )
+
+    if event == "Emission / finansiering":
+        extra = ""
+        if (np.isfinite(risk) and risk < 50) or (np.isfinite(debt) and debt > 150):
+            extra = " Bolaget har dessutom redan en svagare riskbild i Borsifys data, så finansieringen är extra viktig att förstå."
+        return (
+            "Kan ändra riskbilden",
+            "En emission eller ny finansiering kan ge bolaget mer kapital men också späda ut befintliga ägare eller signalera finansieringsbehov. Kontrollera villkor, belopp och varför pengarna behövs." + extra,
+            3,
+        )
+
+    if event in {"Order / kontrakt", "Produkt / lansering", "Insiderhandel", "Utdelning / återköp", "Ledning / styrelse"}:
+        context = ""
+        if event == "Order / kontrakt":
+            context = " Storleken i relation till bolagets årsomsättning avgör om ordern verkligen är betydelsefull."
+        elif event == "Insiderhandel":
+            context = " Ett insiderköp kan vara intressant men ska inte ses som bevis på framtida kursuppgång."
+        elif event == "Utdelning / återköp":
+            context = " Kontrollera om utbetalningen finansieras av ett hållbart kassaflöde."
+        elif event == "Ledning / styrelse":
+            context = " Effekten beror på vilken roll som ändras och varför."
+        elif event == "Produkt / lansering":
+            context = " Det viktiga är om satsningen kan bli ekonomiskt betydelsefull, inte bara att den lanseras."
+        return (
+            "Möjlig caseförändring – verifiera",
+            "Händelsen kan vara relevant för investeringscaset, men rubriken räcker inte för att avgöra hur stor effekten är." + context,
+            2,
+        )
+
+    if event == "Analys / riktkurs":
+        return (
+            "Troligen sekundär information",
+            "En riktkurs eller extern analys kan ge ett bra uppslag, men ändrar inte bolagets verksamhet i sig. Leta efter nya fakta bakom analysen innan du låter den påverka din syn på aktien.",
+            1,
+        )
+
+    if event in {"Kursrörelse / marknadsreaktion", "Forumdiskussion"}:
+        return (
+            "Brus tills orsaken är verifierad",
+            "En kursrörelse eller forumdiskussion visar att intresset har ökat, men säger inte varför bolagets verkliga värde skulle ha ändrats. Leta efter den bakomliggande bolagshändelsen först.",
+            0,
+        )
+
+    return (
+        "Oklart om caset förändrats",
+        "Borsify kan inte avgöra från rubrikerna om investeringscaset faktiskt har förändrats. Behandla uppslaget som något att läsa vidare om, inte som ny bekräftad fundamental information.",
+        1,
+    )
 
 def build_verified_ideas(mentions: pd.DataFrame, scored: pd.DataFrame) -> pd.DataFrame:
     if mentions.empty or scored.empty:
@@ -364,6 +649,23 @@ def build_verified_ideas(mentions: pd.DataFrame, scored: pd.DataFrame) -> pd.Dat
     verdicts = merged.apply(verdict, axis=1, result_type="expand")
     merged["Borsify-granskning"] = verdicts[0]
     merged["Förklaring"] = verdicts[1]
+    combos = merged.apply(combination_signal, axis=1, result_type="expand")
+    merged["Kombinationssignal"] = combos[0]
+    merged["Kombinationsförklaring"] = combos[1]
+    merged["Idéprioritet"] = pd.to_numeric(combos[2], errors="coerce").fillna(0.0)
+    impacts = merged.apply(case_impact_assessment, axis=1, result_type="expand")
+    merged["Case Impact"] = impacts[0]
+    merged["Case Impact Förklaring"] = impacts[1]
+    merged["Case Impact Nivå"] = pd.to_numeric(impacts[2], errors="coerce").fillna(0).astype(int)
+    combo_order = {
+        "Ovanligt intressant kombination": 0,
+        "Kvalitetsbolag i fokus": 1,
+        "Möjlig återhämtningsidé": 2,
+        "Kortsiktigt läge i fokus": 3,
+        "Värt en närmare titt": 4,
+        "Ingen särskild kombination": 5,
+    }
     order = {"Klarar första kontrollen": 0, "Värd att undersöka": 1, "För lite data": 2, "Uppslag, inte fynd": 3, "Kan inte verifieras": 4}
+    merged["_combo_order"] = merged["Kombinationssignal"].map(combo_order).fillna(9)
     merged["_order"] = merged["Borsify-granskning"].map(order).fillna(9)
-    return merged.sort_values(["_order", "Upptäcktsstyrka", "Borsify Score"], ascending=[True, False, False]).drop(columns=["_order"]).reset_index(drop=True)
+    return merged.sort_values(["_combo_order", "_order", "Idéprioritet", "Borsify Score"], ascending=[True, True, False, False]).drop(columns=["_combo_order", "_order"]).reset_index(drop=True)

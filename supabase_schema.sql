@@ -129,3 +129,101 @@ drop policy if exists "notification_preferences_update_own" on public.notificati
 create policy "notification_preferences_update_own" on public.notification_preferences for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 drop policy if exists "notification_preferences_delete_own" on public.notification_preferences;
 create policy "notification_preferences_delete_own" on public.notification_preferences for delete using (auth.uid() = user_id);
+
+-- v2.21.0 Case-breaker rules on watched shares.
+-- 0 means disabled. Safe to run repeatedly.
+alter table public.watchlist add column if not exists breaker_min_score double precision not null default 0;
+alter table public.watchlist add column if not exists breaker_min_quality double precision not null default 0;
+alter table public.watchlist add column if not exists breaker_min_risk double precision not null default 0;
+alter table public.watchlist add column if not exists breaker_max_score_drop double precision not null default 0;
+
+-- v2.25.0: persistent marker used by "Nytt sedan sist".
+-- Safe to run repeatedly. RLS keeps each user's visit marker private.
+create table if not exists public.visit_state (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  last_seen_at timestamptz not null default now()
+);
+alter table public.visit_state enable row level security;
+drop policy if exists "visit_state_select_own" on public.visit_state;
+create policy "visit_state_select_own" on public.visit_state for select using (auth.uid() = user_id);
+drop policy if exists "visit_state_insert_own" on public.visit_state;
+create policy "visit_state_insert_own" on public.visit_state for insert with check (auth.uid() = user_id);
+drop policy if exists "visit_state_update_own" on public.visit_state;
+create policy "visit_state_update_own" on public.visit_state for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- v2.26.0: explicit review state for "Nytt sedan sist".
+-- Safe to run repeatedly. Review state is private per authenticated user.
+create table if not exists public.reviewed_changes (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  change_key text not null,
+  reviewed_at timestamptz not null default now(),
+  primary key (user_id, change_key)
+);
+alter table public.reviewed_changes enable row level security;
+drop policy if exists "reviewed_changes_select_own" on public.reviewed_changes;
+create policy "reviewed_changes_select_own" on public.reviewed_changes for select using (auth.uid() = user_id);
+drop policy if exists "reviewed_changes_insert_own" on public.reviewed_changes;
+create policy "reviewed_changes_insert_own" on public.reviewed_changes for insert with check (auth.uid() = user_id);
+drop policy if exists "reviewed_changes_delete_own" on public.reviewed_changes;
+create policy "reviewed_changes_delete_own" on public.reviewed_changes for delete using (auth.uid() = user_id);
+
+
+-- v2.35.0: Recommendation Ledger + frozen point-in-time outcomes.
+-- All daily finalists are stored, not only promoted cases, to reduce selection bias.
+create table if not exists public.recommendation_ledger (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  record_id text not null,
+  symbol text not null,
+  name text not null default '',
+  horizon_type text not null check (horizon_type in ('short','long')),
+  model_version text not null,
+  profile text not null,
+  market text not null,
+  rank integer not null,
+  entry_price double precision not null,
+  gate text not null default '',
+  score double precision,
+  confidence double precision,
+  evidence_count integer,
+  why_now text not null default '',
+  primary_catalyst text not null default '',
+  captured_date date not null,
+  captured_at timestamptz not null,
+  snapshot_json text not null default '{}',
+  primary key (user_id, record_id)
+);
+alter table public.recommendation_ledger enable row level security;
+drop policy if exists "recommendation_ledger_select_own" on public.recommendation_ledger;
+create policy "recommendation_ledger_select_own" on public.recommendation_ledger for select using (auth.uid() = user_id);
+drop policy if exists "recommendation_ledger_insert_own" on public.recommendation_ledger;
+create policy "recommendation_ledger_insert_own" on public.recommendation_ledger for insert with check (auth.uid() = user_id);
+drop policy if exists "recommendation_ledger_update_own" on public.recommendation_ledger;
+create policy "recommendation_ledger_update_own" on public.recommendation_ledger for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create table if not exists public.recommendation_outcomes (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  record_id text not null,
+  symbol text not null,
+  horizon text not null,
+  trading_days integer not null,
+  evaluated_date date not null,
+  evaluated_price double precision not null,
+  return_pct double precision not null,
+  positive boolean not null default false,
+  gain_10 boolean not null default false,
+  loss_10 boolean not null default false,
+  evaluated_at timestamptz not null default now(),
+  primary key (user_id, record_id, horizon)
+);
+alter table public.recommendation_outcomes enable row level security;
+drop policy if exists "recommendation_outcomes_select_own" on public.recommendation_outcomes;
+create policy "recommendation_outcomes_select_own" on public.recommendation_outcomes for select using (auth.uid() = user_id);
+drop policy if exists "recommendation_outcomes_insert_own" on public.recommendation_outcomes;
+create policy "recommendation_outcomes_insert_own" on public.recommendation_outcomes for insert with check (auth.uid() = user_id);
+drop policy if exists "recommendation_outcomes_update_own" on public.recommendation_outcomes;
+create policy "recommendation_outcomes_update_own" on public.recommendation_outcomes for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create index if not exists recommendation_ledger_user_date_idx
+  on public.recommendation_ledger(user_id, captured_date desc);
+create index if not exists recommendation_outcomes_user_symbol_idx
+  on public.recommendation_outcomes(user_id, symbol, evaluated_date desc);

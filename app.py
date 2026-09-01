@@ -18,6 +18,26 @@ import yfinance as yf
 
 from idea_radar import fetch_public_idea_flow, map_mentions, build_verified_ideas
 from fx import FX_TO_SEK_SYMBOLS, major_currency, quote_amount_to_sek, major_amount_to_sek
+from case_journal import assess_case_change, journal_table
+from case_breaker import evaluate_case_breakers
+from case_alert import evaluate_case_alert
+from daily_focus import build_daily_focus, focus_context
+from since_last_visit import build_since_last_visit, visit_label
+from deep_case_engine import build_deep_metrics, assess_deep_case, deep_rank_key
+from inflection_engine import build_inflection_metrics, assess_inflection, apply_inflection_gate, inflection_rank_value
+from mispricing_engine import build_mispricing_assessment, apply_mispricing_gate, mispricing_rank_value
+from scenario_engine import build_scenarios
+from case_quality_gate import build_case_quality_gate, case_gate_rank_key
+from catalyst_engine import build_catalyst_assessment
+from short_term_engine import assess_short_term_case, short_term_rank_key
+from short_edge_lab import (
+    build_point_in_time_short_signals, add_forward_returns, evaluate_thresholds,
+    walk_forward_threshold_test, component_bucket_analysis, summarize_edge,
+)
+from recommendation_ledger import (
+    build_recommendation_records, evaluate_record_from_history,
+    outcome_summary, calibration_by_gate,
+)
 
 from edge_lab import (
     build_technical_history, summarize_backtest, summarize_universe_backtest,
@@ -31,7 +51,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.15.0"
+APP_VERSION = "2.35.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -94,12 +114,24 @@ UK_LARGE_TICKERS = [
     "IMB.L", "VOD.L", "STAN.L", "EXPN.L", "III.L", "ANTO.L", "SSE.L", "NWG.L"
 ]
 
+# Ett medvetet begränsat globalt radaruniversum. Syftet är att hitta kandidater över flera
+# marknader utan att göra varje Streamlit-körning orimligt tung. Varje region finns kvar
+# separat om användaren vill göra en bredare regional analys.
+GLOBAL_RADAR_TICKERS = list(dict.fromkeys(
+    OMXS30_TICKERS
+    + US_LARGE_TICKERS[:25]
+    + NORDIC_LARGE_TICKERS[:12]
+    + GERMANY_LARGE_TICKERS[:12]
+    + UK_LARGE_TICKERS[:12]
+))
+
 MARKET_CONFIGS = {
     "Sverige": {"currency": "SEK", "benchmark": "^OMXS30", "benchmark_name": "OMXS30"},
     "USA": {"currency": "USD", "benchmark": "^GSPC", "benchmark_name": "S&P 500"},
     "Norden exkl. Sverige": {"currency": "lokal valuta", "benchmark": None, "benchmark_name": "—"},
     "Tyskland": {"currency": "EUR", "benchmark": "^GDAXI", "benchmark_name": "DAX"},
     "Storbritannien": {"currency": "GBP", "benchmark": "^FTSE", "benchmark_name": "FTSE 100"},
+    "Alla marknader": {"currency": "blandat", "benchmark": "VT", "benchmark_name": "Globalt aktieindex (VT)"},
 }
 
 MARKET_UNIVERSES = {
@@ -108,6 +140,7 @@ MARKET_UNIVERSES = {
     "Norden exkl. Sverige": NORDIC_LARGE_TICKERS,
     "Tyskland": GERMANY_LARGE_TICKERS,
     "Storbritannien": UK_LARGE_TICKERS,
+    "Alla marknader": GLOBAL_RADAR_TICKERS,
 }
 
 
@@ -367,14 +400,23 @@ def fmt_price_with_sek(row: pd.Series | dict[str, Any]) -> str:
 
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_index_snapshot(symbol: str = "^OMXS30") -> dict[str, float]:
+    """Current benchmark plus trailing returns used for relative-strength checks."""
     if not symbol:
         return {}
     try:
-        hist = yf.Ticker(symbol).history(period="1mo", interval="1d", auto_adjust=True, actions=False)
+        hist = yf.Ticker(symbol).history(period="1y", interval="1d", auto_adjust=True, actions=False)
         if hist is None or hist.empty:
             return {}
         close = hist["Close"].dropna().astype(float)
-        return {"index": _num(close.iloc[-1]), "daily": _pct_change(close, 1), "month": _pct_change(close, min(21, max(len(close)-1, 1)))}
+        if close.empty:
+            return {}
+        return {
+            "index": _num(close.iloc[-1]),
+            "daily": _pct_change(close, 1),
+            "month": _pct_change(close, min(21, max(len(close)-1, 1))),
+            "3m": _pct_change(close, min(63, max(len(close)-1, 1))),
+            "6m": _pct_change(close, min(126, max(len(close)-1, 1))),
+        }
     except Exception:
         return {}
 
@@ -432,10 +474,12 @@ def add_scores(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     fcfy = out["FCF-yield"].where(out["FCF-yield"].between(-.5, .5))
     temp = out.assign(**{"P/E": pe, "Forward P/E": fpe, "P/B": pb, "EV/EBITDA": ev, "FCF-yield": fcfy})
 
+    # v2.27: analyst target potential is deliberately NOT part of Valuation.
+    # A stale/optimistic target price is an opinion, not evidence that the share is cheap.
     valuation = _mean_scores([
         _sector_percentile_score(temp, "P/E", False), _sector_percentile_score(temp, "Forward P/E", False),
         _sector_percentile_score(temp, "P/B", False), _sector_percentile_score(temp, "EV/EBITDA", False),
-        _sector_percentile_score(temp, "FCF-yield", True), _percentile_score(out["Analytikerpotential"].clip(-.5, 1.5), True),
+        _sector_percentile_score(temp, "FCF-yield", True),
     ])
     debt = out["Skuld/eget kapital"].where(out["Skuld/eget kapital"].between(0, 1000))
     quality = _mean_scores([
@@ -477,10 +521,11 @@ def add_scores(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     out["Varför"] = out.apply(_why_text, axis=1)
 
     # v2.1: three distinct horizons. These are screening scores, not forecasts.
+    # v2.27: growth no longer includes FCF-yield. FCF-yield is a valuation/cash-return
+    # measure and previously leaked the same information into both valuation and growth.
     growth = _mean_scores([
         _percentile_score(out["Omsättningstillväxt"].clip(-1, 2), True),
         _percentile_score(out["Vinsttillväxt"].clip(-1, 3), True),
-        _percentile_score(out["FCF-yield"].clip(-.5, .5), True),
     ])
     invest = .34 * valuation + .31 * quality + .18 * risk + .12 * growth + .05 * setup
 
@@ -627,8 +672,6 @@ def _daily_case(row: pd.Series, profile: str) -> dict[str, Any]:
         caution.extend([x.strip() for x in flags.split(",") if x.strip()][:2])
     if np.isfinite(coverage) and coverage < .60:
         caution.append(f"datatäckning bara {coverage:.0%}")
-    if not prev:
-        caution.append("saknar tidigare snapshot – dagsförändring i score kan inte bedömas")
     if not caution:
         caution.append("inga grova modellflaggor; kontrollera ändå rapport, kassaflöde och aktuell nyhetsbild")
 
@@ -686,6 +729,235 @@ def scan_universe(symbols: list[str]) -> tuple[pd.DataFrame, list[str]]:
             rows.append(row)
     return (pd.DataFrame(rows) if rows else pd.DataFrame()), errors
 
+
+
+@st.cache_data(ttl=43200, show_spinner=False)
+def fetch_deep_statements(symbol: str) -> dict[str, Any]:
+    """Fetch multi-year statements for a small finalist pool only.
+
+    Broad scanning stays fast; deeper Yahoo requests are reserved for the strongest
+    long-term candidates. Missing statements are returned as empty frames rather
+    than inferred.
+    """
+    try:
+        t = yf.Ticker(symbol)
+        def _frame(value: Any) -> pd.DataFrame:
+            return value if isinstance(value, pd.DataFrame) else pd.DataFrame()
+        try: income = _frame(t.income_stmt)
+        except Exception: income = pd.DataFrame()
+        try: cashflow = _frame(t.cashflow)
+        except Exception: cashflow = pd.DataFrame()
+        try: balance = _frame(t.balance_sheet)
+        except Exception: balance = pd.DataFrame()
+        try: quarterly_income = _frame(t.quarterly_income_stmt)
+        except Exception: quarterly_income = pd.DataFrame()
+        try: quarterly_cashflow = _frame(t.quarterly_cashflow)
+        except Exception: quarterly_cashflow = pd.DataFrame()
+
+        def _analyst_frame(*names: str) -> pd.DataFrame:
+            for name in names:
+                try:
+                    value = getattr(t, name)
+                    if callable(value):
+                        value = value()
+                    if isinstance(value, pd.DataFrame):
+                        return value
+                except Exception:
+                    continue
+            return pd.DataFrame()
+
+        # Analyst estimate tables are optional. Yahoo/yfinance coverage varies by
+        # market, so missing data is never inferred or replaced with headline text.
+        eps_trend = _analyst_frame("eps_trend", "get_eps_trend")
+        eps_revisions = _analyst_frame("eps_revisions", "get_eps_revisions")
+        earnings_history = _analyst_frame("earnings_history", "get_earnings_history")
+
+        # Catalyst inputs are deliberately lightweight and optional. Calendar timing is
+        # useful when available; news headlines are triage evidence only and are never
+        # treated as verified economic impact.
+        earnings_date = None
+        try:
+            cal = t.calendar
+            if isinstance(cal, dict):
+                earnings_date = cal.get("Earnings Date") or cal.get("EarningsDate")
+                if isinstance(earnings_date, (list, tuple)) and earnings_date:
+                    earnings_date = earnings_date[0]
+            elif isinstance(cal, pd.DataFrame) and not cal.empty:
+                for key in ["Earnings Date", "EarningsDate"]:
+                    if key in cal.index:
+                        earnings_date = cal.loc[key].iloc[0]
+                        break
+        except Exception:
+            earnings_date = None
+
+        catalyst_news = []
+        try:
+            for item in (t.news or [])[:6]:
+                content = item.get("content", item) if isinstance(item, dict) else {}
+                title = content.get("title") if isinstance(content, dict) else None
+                if not title and isinstance(item, dict):
+                    title = item.get("title")
+                link = None
+                if isinstance(content, dict):
+                    canonical = content.get("canonicalUrl") or content.get("clickThroughUrl")
+                    if isinstance(canonical, dict):
+                        link = canonical.get("url")
+                    elif isinstance(canonical, str):
+                        link = canonical
+                if not link and isinstance(item, dict):
+                    link = item.get("link")
+                if title:
+                    catalyst_news.append({"title": str(title), "link": link})
+        except Exception:
+            catalyst_news = []
+
+        return {
+            "income": income, "cashflow": cashflow, "balance": balance,
+            "quarterly_income": quarterly_income, "quarterly_cashflow": quarterly_cashflow,
+            "eps_trend": eps_trend, "eps_revisions": eps_revisions,
+            "earnings_history": earnings_history,
+            "catalyst_events": {"earnings": earnings_date, "news": catalyst_news},
+            "error": ""
+        }
+    except Exception as exc:
+        return {"income": pd.DataFrame(), "cashflow": pd.DataFrame(), "balance": pd.DataFrame(), "error": type(exc).__name__}
+
+
+def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) -> pd.DataFrame:
+    """Deep-check a small INVEST finalist pool using multi-year statements.
+
+    Ordering is gate-first (value-trap/data-quality checks) and only then uses the
+    existing INVEST score. This intentionally avoids inventing a new unvalidated
+    weighted mega-score.
+    """
+    if df.empty:
+        return df.copy()
+    pool = df.sort_values(["INVEST Score", "Datatäckning"], ascending=[False, False]).head(pool_size).copy()
+    records: dict[str, dict[str, Any]] = {}
+    max_workers = min(3, max(1, len(pool)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(fetch_deep_statements, str(row["Ticker"])): idx for idx, row in pool.iterrows()}
+        for future in as_completed(futures):
+            idx = futures[future]
+            row = pool.loc[idx]
+            try:
+                raw = future.result()
+                metrics = build_deep_metrics(raw.get("income"), raw.get("cashflow"), raw.get("balance"))
+                assessment = assess_deep_case(metrics, row)
+                inflection_metrics = build_inflection_metrics(
+                    raw.get("quarterly_income"), raw.get("quarterly_cashflow"),
+                    raw.get("eps_trend"), raw.get("eps_revisions"), raw.get("earnings_history")
+                )
+                inflection = assess_inflection(inflection_metrics)
+                assessment.update(inflection)
+                assessment = apply_inflection_gate(assessment)
+                mispricing = build_mispricing_assessment(row, assessment)
+                assessment.update(mispricing)
+                assessment = apply_mispricing_gate(assessment)
+                scenario = build_scenarios(row.to_dict(), assessment, assessment, assessment)
+                assessment["Scenario Status"] = scenario.get("status", "Otillräcklig data")
+                assessment["Scenario Confidence"] = scenario.get("confidence", 0)
+                if scenario.get("status") == "OK":
+                    assessment["Scenario Verdict"] = scenario.get("verdict", "—")
+                    assessment["Scenario Asymmetry"] = scenario.get("asymmetry", np.nan)
+                    assessment["Scenario Risk Label"] = scenario.get("risk_label", "—")
+                    assessment["Scenario Note"] = scenario.get("note", "—")
+                    for label, key in (("Bear", "bear"), ("Base", "base"), ("Bull", "bull")):
+                        s = scenario.get(key, {})
+                        assessment[f"{label} EPS growth"] = s.get("eps_growth", np.nan)
+                        assessment[f"{label} exit P/E"] = s.get("exit_pe", np.nan)
+                        assessment[f"{label} future price"] = s.get("future_price", np.nan)
+                        assessment[f"{label} upside"] = s.get("upside", np.nan)
+                        assessment[f"{label} annualized return"] = s.get("annualized_return", np.nan)
+                else:
+                    assessment["Scenario Verdict"] = "Kan inte bedömas"
+                    assessment["Scenario Asymmetry"] = np.nan
+                    assessment["Scenario Note"] = scenario.get("reason", "Otillräcklig data")
+                catalyst = build_catalyst_assessment({**row.to_dict(), **assessment}, raw.get("catalyst_events"))
+                assessment.update(catalyst)
+                assessment.update(build_case_quality_gate({**row.to_dict(), **assessment}))
+                if raw.get("error"):
+                    assessment["Deep fetch error"] = raw.get("error")
+                records[idx] = assessment
+            except Exception as exc:
+                records[idx] = {
+                    "Djupkontroll": "Otillräcklig data", "Value Trap Risk": np.nan, "Deep Confidence": 0.0,
+                    "Fleråriga styrkor": "kunde inte verifieras", "Fleråriga varningar": f"djupdata kunde inte läsas ({type(exc).__name__})",
+                    "Varför marknaden kan ha fel": "kan inte bedömas med tillräcklig flerårsdata",
+                    "Devil's Advocate": "otillräcklig data – gå inte vidare på modellen ensam", "Rapportdatum": "—",
+                }
+    for idx, assessment in records.items():
+        for key, value in assessment.items():
+            pool.loc[idx, key] = value
+    # Final ordering is evidence-gate first. INVEST only breaks ties after the
+    # independent quality, inflection, mispricing and scenario checks.
+    order = sorted(pool.index, key=lambda idx: case_gate_rank_key(pool.loc[idx]), reverse=True)
+    return pool.loc[order].head(limit).copy()
+
+
+def build_short_term_longlist(df: pd.DataFrame, benchmark: dict[str, Any] | None, pool_size: int = 8, limit: int = 5) -> pd.DataFrame:
+    """Build a 1–6 month finalist list.
+
+    Stage 1 uses only causal current technical/relative-strength data to choose a small
+    candidate pool. Stage 2 adds fresh quarterly/estimate inflection and catalyst evidence.
+    A prior fall is never a positive input and hard anti-falling-knife vetoes survive stage 2.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    prelim = df.copy()
+    prelim_records: dict[Any, dict[str, Any]] = {}
+    for idx, row in prelim.iterrows():
+        prelim_records[idx] = assess_short_term_case(row, benchmark)
+    for idx, assessment in prelim_records.items():
+        for key, value in assessment.items():
+            prelim.loc[idx, key] = value
+
+    prelim_order = sorted(prelim.index, key=lambda idx: short_term_rank_key(prelim.loc[idx]), reverse=True)
+    pool = prelim.loc[prelim_order].head(pool_size).copy()
+    if pool.empty:
+        return pool
+
+    records: dict[Any, dict[str, Any]] = {}
+    max_workers = min(3, max(1, len(pool)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(fetch_deep_statements, str(row["Ticker"])): idx for idx, row in pool.iterrows()}
+        for future in as_completed(futures):
+            idx = futures[future]
+            row = pool.loc[idx]
+            try:
+                raw = future.result()
+                inflection_metrics = build_inflection_metrics(
+                    raw.get("quarterly_income"), raw.get("quarterly_cashflow"),
+                    raw.get("eps_trend"), raw.get("eps_revisions"), raw.get("earnings_history")
+                )
+                inflection = assess_inflection(inflection_metrics)
+                catalyst = build_catalyst_assessment({**row.to_dict(), **inflection}, raw.get("catalyst_events"))
+                result = assess_short_term_case(row, benchmark, inflection, catalyst)
+                result.update({
+                    "Inflection Signal": inflection.get("Inflection Signal", "Otillräcklig förändringsdata"),
+                    "Inflection Score": inflection.get("Inflection Score", np.nan),
+                    "Varför nu": inflection.get("Varför nu", "—"),
+                    "Catalyst Signal": catalyst.get("Catalyst Signal", "Ingen tydlig katalysator verifierad"),
+                    "Primary Catalyst": catalyst.get("Primary Catalyst", "Ingen verifierad"),
+                    "Catalyst Timing": catalyst.get("Catalyst Timing", "—"),
+                    "Catalyst Evidence": catalyst.get("Catalyst Evidence", "Otillräcklig katalysatordata."),
+                    "Catalyst Warnings": catalyst.get("Catalyst Warnings", "—"),
+                })
+                if raw.get("error"):
+                    result["Short Data Warning"] = raw.get("error")
+                records[idx] = result
+            except Exception as exc:
+                fallback = assess_short_term_case(row, benchmark)
+                fallback["Short Data Warning"] = f"Färsk fundamental-/estimatsdata kunde inte läsas ({type(exc).__name__})."
+                records[idx] = fallback
+
+    for idx, assessment in records.items():
+        for key, value in assessment.items():
+            pool.loc[idx, key] = value
+
+    order = sorted(pool.index, key=lambda idx: short_term_rank_key(pool.loc[idx]), reverse=True)
+    return pool.loc[order].head(limit).copy()
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -898,6 +1170,10 @@ def init_db() -> None:
         _ensure_sqlite_column(conn, "watchlist", "signal_score_threshold", "REAL NOT NULL DEFAULT 75")
         _ensure_sqlite_column(conn, "watchlist", "signal_score_move", "REAL NOT NULL DEFAULT 8")
         _ensure_sqlite_column(conn, "watchlist", "signal_daily_drop", "REAL NOT NULL DEFAULT 5")
+        _ensure_sqlite_column(conn, "watchlist", "breaker_min_score", "REAL NOT NULL DEFAULT 0")
+        _ensure_sqlite_column(conn, "watchlist", "breaker_min_quality", "REAL NOT NULL DEFAULT 0")
+        _ensure_sqlite_column(conn, "watchlist", "breaker_min_risk", "REAL NOT NULL DEFAULT 0")
+        _ensure_sqlite_column(conn, "watchlist", "breaker_max_score_drop", "REAL NOT NULL DEFAULT 0")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS score_history (
@@ -960,18 +1236,344 @@ def init_db() -> None:
             "INSERT OR IGNORE INTO notification_preferences(singleton,notify_kinds) VALUES (1,?)",
             ("|".join(SIGNAL_KINDS),),
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS visit_state (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                last_seen_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS reviewed_changes (
+                change_key TEXT PRIMARY KEY,
+                reviewed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS recommendation_ledger (
+                record_id TEXT PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                horizon_type TEXT NOT NULL,
+                model_version TEXT NOT NULL,
+                profile TEXT NOT NULL,
+                market TEXT NOT NULL,
+                rank INTEGER NOT NULL,
+                entry_price REAL NOT NULL,
+                gate TEXT NOT NULL DEFAULT '',
+                score REAL,
+                confidence REAL,
+                evidence_count INTEGER,
+                why_now TEXT NOT NULL DEFAULT '',
+                primary_catalyst TEXT NOT NULL DEFAULT '',
+                captured_date TEXT NOT NULL,
+                captured_at TEXT NOT NULL,
+                snapshot_json TEXT NOT NULL DEFAULT '{}'
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS recommendation_outcomes (
+                record_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                horizon TEXT NOT NULL,
+                trading_days INTEGER NOT NULL,
+                evaluated_date TEXT NOT NULL,
+                evaluated_price REAL NOT NULL,
+                return_pct REAL NOT NULL,
+                positive INTEGER NOT NULL DEFAULT 0,
+                gain_10 INTEGER NOT NULL DEFAULT 0,
+                loss_10 INTEGER NOT NULL DEFAULT 0,
+                evaluated_at TEXT NOT NULL,
+                PRIMARY KEY (record_id, horizon)
+            )
+            """
+        )
+
+
+def _load_last_visit() -> str | None:
+    """Read the previous overview visit. Missing cloud migration degrades safely."""
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        try:
+            data = client.table("visit_state").select("last_seen_at").eq("user_id", uid).limit(1).execute().data or []
+            return str(data[0].get("last_seen_at")) if data else None
+        except Exception:
+            st.session_state["bq_visit_state_migration_needed"] = True
+            return None
+    init_db()
+    with _db_connect() as conn:
+        row = conn.execute("SELECT last_seen_at FROM visit_state WHERE singleton=1").fetchone()
+    return str(row[0]) if row else None
+
+
+def _save_last_visit(value: str) -> None:
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        try:
+            client.table("visit_state").upsert({"user_id": uid, "last_seen_at": value}, on_conflict="user_id").execute()
+        except Exception:
+            st.session_state["bq_visit_state_migration_needed"] = True
+        return
+    init_db()
+    with _db_connect() as conn:
+        conn.execute(
+            "INSERT INTO visit_state(singleton,last_seen_at) VALUES(1,?) "
+            "ON CONFLICT(singleton) DO UPDATE SET last_seen_at=excluded.last_seen_at",
+            (value,),
+        )
+
+
+def visit_context() -> tuple[str | None, str]:
+    """Freeze the previous-visit marker for this Streamlit session/reruns."""
+    if "bq_previous_visit_at" not in st.session_state:
+        previous = _load_last_visit()
+        current = datetime.now().isoformat(timespec="seconds")
+        st.session_state["bq_previous_visit_at"] = previous
+        st.session_state["bq_current_visit_started_at"] = current
+        _save_last_visit(current)
+    return st.session_state.get("bq_previous_visit_at"), str(st.session_state.get("bq_current_visit_started_at", ""))
+
+
+def get_reviewed_change_keys() -> set[str]:
+    """Return change ids the current user has explicitly reviewed."""
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        try:
+            data = client.table("reviewed_changes").select("change_key").eq("user_id", uid).execute().data or []
+            return {str(x.get("change_key")) for x in data if x.get("change_key")}
+        except Exception:
+            st.session_state["bq_review_state_migration_needed"] = True
+            return set()
+    init_db()
+    with _db_connect() as conn:
+        rows = conn.execute("SELECT change_key FROM reviewed_changes").fetchall()
+    return {str(r[0]) for r in rows}
+
+
+def mark_change_reviewed(change_key: str) -> None:
+    key = str(change_key or "").strip()
+    if not key:
+        return
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        try:
+            client.table("reviewed_changes").upsert({"user_id": uid, "change_key": key}, on_conflict="user_id,change_key").execute()
+        except Exception:
+            st.session_state["bq_review_state_migration_needed"] = True
+        return
+    init_db()
+    with _db_connect() as conn:
+        conn.execute("INSERT OR IGNORE INTO reviewed_changes(change_key) VALUES(?)", (key,))
+
+
+
+def save_recommendation_records(records: list[dict[str, Any]]) -> None:
+    """Idempotently freeze daily model finalists before future outcomes are known."""
+    if not records:
+        return
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        for rec in records:
+            payload = {"user_id": uid, **rec}
+            try:
+                client.table("recommendation_ledger").upsert(
+                    payload, on_conflict="user_id,record_id"
+                ).execute()
+            except Exception:
+                st.session_state["bq_recommendation_ledger_migration_needed"] = True
+                return
+        return
+
+    init_db()
+    cols = [
+        "record_id","symbol","name","horizon_type","model_version","profile","market",
+        "rank","entry_price","gate","score","confidence","evidence_count","why_now",
+        "primary_catalyst","captured_date","captured_at","snapshot_json",
+    ]
+    placeholders = ",".join(["?"] * len(cols))
+    sql = f"INSERT OR IGNORE INTO recommendation_ledger({','.join(cols)}) VALUES ({placeholders})"
+    with _db_connect() as conn:
+        for rec in records:
+            conn.execute(sql, tuple(rec.get(c) for c in cols))
+
+
+def get_recommendation_records(limit: int = 500) -> pd.DataFrame:
+    cols = [
+        "record_id","symbol","name","horizon_type","model_version","profile","market",
+        "rank","entry_price","gate","score","confidence","evidence_count","why_now",
+        "primary_catalyst","captured_date","captured_at","snapshot_json",
+    ]
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        try:
+            data = (
+                client.table("recommendation_ledger").select(",".join(cols))
+                .eq("user_id", uid).order("captured_at", desc=True).limit(int(limit))
+                .execute().data or []
+            )
+            return pd.DataFrame(data, columns=cols)
+        except Exception:
+            st.session_state["bq_recommendation_ledger_migration_needed"] = True
+            return pd.DataFrame(columns=cols)
+
+    init_db()
+    with _db_connect() as conn:
+        return pd.read_sql_query(
+            f"SELECT {','.join(cols)} FROM recommendation_ledger ORDER BY captured_at DESC LIMIT ?",
+            conn, params=(int(limit),)
+        )
+
+
+def save_recommendation_outcomes(rows: list[dict[str, Any]]) -> None:
+    if not rows:
+        return
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        for row in rows:
+            payload = {"user_id": uid, **row}
+            try:
+                client.table("recommendation_outcomes").upsert(
+                    payload, on_conflict="user_id,record_id,horizon"
+                ).execute()
+            except Exception:
+                st.session_state["bq_recommendation_ledger_migration_needed"] = True
+                return
+        return
+
+    init_db()
+    cols = [
+        "record_id","symbol","horizon","trading_days","evaluated_date","evaluated_price",
+        "return_pct","positive","gain_10","loss_10","evaluated_at",
+    ]
+    placeholders = ",".join(["?"] * len(cols))
+    sql = (
+        f"INSERT INTO recommendation_outcomes({','.join(cols)}) VALUES ({placeholders}) "
+        "ON CONFLICT(record_id,horizon) DO UPDATE SET "
+        "evaluated_date=excluded.evaluated_date,evaluated_price=excluded.evaluated_price,"
+        "return_pct=excluded.return_pct,positive=excluded.positive,gain_10=excluded.gain_10,"
+        "loss_10=excluded.loss_10,evaluated_at=excluded.evaluated_at"
+    )
+    with _db_connect() as conn:
+        for row in rows:
+            vals = []
+            for c in cols:
+                v = row.get(c)
+                if c in {"positive","gain_10","loss_10"}:
+                    v = 1 if bool(v) else 0
+                vals.append(v)
+            conn.execute(sql, tuple(vals))
+
+
+def get_recommendation_outcomes(limit: int = 2000) -> pd.DataFrame:
+    cols = [
+        "record_id","symbol","horizon","trading_days","evaluated_date","evaluated_price",
+        "return_pct","positive","gain_10","loss_10","evaluated_at",
+    ]
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        try:
+            data = (
+                client.table("recommendation_outcomes").select(",".join(cols))
+                .eq("user_id", uid).order("evaluated_at", desc=True).limit(int(limit))
+                .execute().data or []
+            )
+            return pd.DataFrame(data, columns=cols)
+        except Exception:
+            st.session_state["bq_recommendation_ledger_migration_needed"] = True
+            return pd.DataFrame(columns=cols)
+
+    init_db()
+    with _db_connect() as conn:
+        return pd.read_sql_query(
+            f"SELECT {','.join(cols)} FROM recommendation_outcomes ORDER BY evaluated_at DESC LIMIT ?",
+            conn, params=(int(limit),)
+        )
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_ledger_history(symbol: str, start_date: str) -> pd.DataFrame:
+    """Fetch raw price history needed to evaluate an already-frozen recommendation."""
+    try:
+        start = (pd.Timestamp(start_date) - pd.Timedelta(days=7)).date().isoformat()
+        hist = yf.Ticker(symbol).history(
+            start=start, interval="1d", auto_adjust=True, actions=False
+        )
+        if hist is None or hist.empty or "Close" not in hist:
+            return pd.DataFrame()
+        return hist[["Close"]].dropna()
+    except Exception:
+        return pd.DataFrame()
+
+
+def refresh_due_recommendation_outcomes(max_records: int = 12) -> int:
+    """Evaluate mature recommendations without changing their original snapshot."""
+    recs = get_recommendation_records(limit=500)
+    if recs.empty:
+        return 0
+    existing = get_recommendation_outcomes(limit=5000)
+    existing_keys = set()
+    if not existing.empty:
+        existing_keys = set(zip(existing["record_id"].astype(str), existing["horizon"].astype(str)))
+
+    now = pd.Timestamp.now(tz="UTC")
+    # Oldest first: they are most likely to have due outcomes.
+    work = recs.sort_values("captured_date").copy()
+    evaluated_rows: list[dict[str, Any]] = []
+    checked = 0
+    for _, rec in work.iterrows():
+        if checked >= int(max_records):
+            break
+        horizon_type = str(rec.get("horizon_type"))
+        wanted = ["1m","3m","6m"] if horizon_type == "short" else ["6m","1y","2y"]
+        if all((str(rec["record_id"]), h) in existing_keys for h in wanted):
+            continue
+
+        age_days = (now.tz_localize(None).normalize() - pd.Timestamp(str(rec["captured_date"])[:10])).days
+        min_age = 28 if horizon_type == "short" else 180
+        if age_days < min_age:
+            continue
+
+        checked += 1
+        hist = fetch_ledger_history(str(rec["symbol"]), str(rec["captured_date"]))
+        if hist.empty:
+            continue
+        rows = evaluate_record_from_history(rec.to_dict(), hist, as_of=now)
+        for row in rows:
+            if (str(row["record_id"]), str(row["horizon"])) not in existing_keys:
+                evaluated_rows.append(row)
+
+    if evaluated_rows:
+        save_recommendation_outcomes(evaluated_rows)
+    return len(evaluated_rows)
 
 
 def _cloud_watchlist() -> pd.DataFrame:
     client = _supabase_client(); uid = current_user_id()
     if client is None or not uid:
-        return pd.DataFrame(columns=["symbol", "note", "target_price", "signal_score_threshold", "signal_score_move", "signal_daily_drop", "added_at"])
+        return pd.DataFrame(columns=["symbol", "note", "target_price", "signal_score_threshold", "signal_score_move", "signal_daily_drop", "breaker_min_score", "breaker_min_quality", "breaker_min_risk", "breaker_max_score_drop", "added_at"])
     try:
-        res = client.table("watchlist").select("symbol,note,target_price,signal_score_threshold,signal_score_move,signal_daily_drop,added_at").eq("user_id", uid).order("added_at", desc=True).execute()
-        return pd.DataFrame(res.data or [], columns=["symbol", "note", "target_price", "signal_score_threshold", "signal_score_move", "signal_daily_drop", "added_at"])
+        cols = "symbol,note,target_price,signal_score_threshold,signal_score_move,signal_daily_drop,breaker_min_score,breaker_min_quality,breaker_min_risk,breaker_max_score_drop,added_at"
+        res = client.table("watchlist").select(cols).eq("user_id", uid).order("added_at", desc=True).execute()
+        return pd.DataFrame(res.data or [], columns=cols.split(","))
     except Exception as exc:
-        st.session_state["bq_cloud_error"] = str(exc)
-        return pd.DataFrame(columns=["symbol", "note", "target_price", "signal_score_threshold", "signal_score_move", "signal_daily_drop", "added_at"])
+        # Backward-compatible read if v2.21 Supabase migration has not been run yet.
+        try:
+            legacy_cols = "symbol,note,target_price,signal_score_threshold,signal_score_move,signal_daily_drop,added_at"
+            res = client.table("watchlist").select(legacy_cols).eq("user_id", uid).order("added_at", desc=True).execute()
+            df = pd.DataFrame(res.data or [], columns=legacy_cols.split(","))
+            for col in ["breaker_min_score", "breaker_min_quality", "breaker_min_risk", "breaker_max_score_drop"]:
+                df[col] = 0.0
+            st.session_state["bq_case_breaker_migration_needed"] = True
+            return df
+        except Exception:
+            st.session_state["bq_cloud_error"] = str(exc)
+            return pd.DataFrame(columns=["symbol", "note", "target_price", "signal_score_threshold", "signal_score_move", "signal_daily_drop", "breaker_min_score", "breaker_min_quality", "breaker_min_risk", "breaker_max_score_drop", "added_at"])
 
 
 def get_watchlist() -> pd.DataFrame:
@@ -979,7 +1581,7 @@ def get_watchlist() -> pd.DataFrame:
         return _cloud_watchlist()
     init_db()
     with _db_connect() as conn:
-        return pd.read_sql_query("SELECT symbol, note, target_price, signal_score_threshold, signal_score_move, signal_daily_drop, added_at FROM watchlist ORDER BY added_at DESC", conn)
+        return pd.read_sql_query("SELECT symbol, note, target_price, signal_score_threshold, signal_score_move, signal_daily_drop, breaker_min_score, breaker_min_quality, breaker_min_risk, breaker_max_score_drop, added_at FROM watchlist ORDER BY added_at DESC", conn)
 
 
 def watched_symbols() -> list[str]:
@@ -1016,26 +1618,46 @@ def update_watchlist_item(
     signal_score_threshold: float = 75.0,
     signal_score_move: float = 8.0,
     signal_daily_drop: float = 5.0,
+    breaker_min_score: float = 0.0,
+    breaker_min_quality: float = 0.0,
+    breaker_min_risk: float = 0.0,
+    breaker_max_score_drop: float = 0.0,
 ) -> None:
     target = None if target_price is None or not np.isfinite(target_price) or target_price <= 0 else float(target_price)
     score_threshold = float(np.clip(signal_score_threshold, 0, 100))
     score_move = float(np.clip(signal_score_move, 1, 50))
     daily_drop = float(np.clip(signal_daily_drop, 1, 50))
+    breaker_min_score = float(np.clip(breaker_min_score, 0, 100))
+    breaker_min_quality = float(np.clip(breaker_min_quality, 0, 100))
+    breaker_min_risk = float(np.clip(breaker_min_risk, 0, 100))
+    breaker_max_score_drop = float(np.clip(breaker_max_score_drop, 0, 100))
     client = _supabase_client(); uid = current_user_id()
     payload = {
         "note": note.strip(), "target_price": target,
         "signal_score_threshold": score_threshold,
         "signal_score_move": score_move,
         "signal_daily_drop": daily_drop,
+        "breaker_min_score": breaker_min_score,
+        "breaker_min_quality": breaker_min_quality,
+        "breaker_min_risk": breaker_min_risk,
+        "breaker_max_score_drop": breaker_max_score_drop,
     }
     if client is not None and uid:
-        client.table("watchlist").update(payload).eq("user_id", uid).eq("symbol", symbol).execute()
+        try:
+            client.table("watchlist").update(payload).eq("user_id", uid).eq("symbol", symbol).execute()
+        except Exception as exc:
+            # Preserve existing watchlist edits on an older Supabase schema, but case-breakers
+            # require the v2.21 migration before they can be stored in the cloud.
+            legacy_payload = {k: payload[k] for k in ["note", "target_price", "signal_score_threshold", "signal_score_move", "signal_daily_drop"]}
+            client.table("watchlist").update(legacy_payload).eq("user_id", uid).eq("symbol", symbol).execute()
+            st.session_state["bq_case_breaker_migration_needed"] = True
+            st.session_state["bq_cloud_error"] = f"Case-breaker-regler kunde inte sparas i molnet ännu: {exc}"
         return
     init_db()
     with _db_connect() as conn:
         conn.execute(
-            "UPDATE watchlist SET note=?, target_price=?, signal_score_threshold=?, signal_score_move=?, signal_daily_drop=? WHERE symbol=?",
-            (note.strip(), target, score_threshold, score_move, daily_drop, symbol),
+            "UPDATE watchlist SET note=?, target_price=?, signal_score_threshold=?, signal_score_move=?, signal_daily_drop=?, breaker_min_score=?, breaker_min_quality=?, breaker_min_risk=?, breaker_max_score_drop=? WHERE symbol=?",
+            (note.strip(), target, score_threshold, score_move, daily_drop, breaker_min_score, breaker_min_quality, breaker_min_risk, breaker_max_score_drop, symbol),
         )
 
 
@@ -1144,6 +1766,29 @@ def save_score_history(df: pd.DataFrame, profile: str) -> None:
                 conn.execute("UPDATE score_history SET score=?,valuation=?,quality=?,setup=?,income=?,risk=?,coverage=?,captured_at=CURRENT_TIMESTAMP WHERE rowid=?", (*vals, existing[0]))
             else:
                 conn.execute("INSERT INTO score_history(symbol,score,profile,valuation,quality,setup,income,risk,coverage) VALUES (?,?,?,?,?,?,?,?,?)", (str(row["Ticker"]), vals[0], profile, *vals[1:]))
+
+
+def get_score_history(symbol: str, profile: str) -> pd.DataFrame:
+    """Return chronological stored snapshots for Case Journal. Gracefully supports older schemas."""
+    client = _supabase_client(); uid = current_user_id()
+    fields = "score,valuation,quality,setup,income,risk,coverage,captured_date,created_at"
+    columns = ["score", "valuation", "quality", "setup", "income", "risk", "coverage", "captured_date", "created_at"]
+    try:
+        if client is not None and uid:
+            try:
+                data = client.table("score_history").select(fields).eq("user_id", uid).eq("symbol", symbol).eq("profile", profile).order("captured_date").execute().data or []
+            except Exception:
+                data = client.table("score_history").select("score,captured_date,created_at").eq("user_id", uid).eq("symbol", symbol).eq("profile", profile).order("captured_date").execute().data or []
+            return pd.DataFrame(data)
+        init_db()
+        with _db_connect() as conn:
+            rows = conn.execute(
+                "SELECT score,valuation,quality,setup,income,risk,coverage,substr(captured_at,1,10),captured_at FROM score_history WHERE symbol=? AND profile=? ORDER BY captured_at",
+                (symbol, profile),
+            ).fetchall()
+        return pd.DataFrame(rows, columns=columns)
+    except Exception:
+        return pd.DataFrame(columns=columns)
 
 
 def previous_score_snapshot(symbol: str, profile: str) -> dict[str, Any] | None:
@@ -1600,6 +2245,13 @@ def render_quality_at_fair_price(df: pd.DataFrame) -> None:
             pos=r.get("QRP Positives") or []; caut=r.get("QRP Cautions") or []
             if pos: st.write("**Det som talar för:** " + " ".join(pos))
             if caut: st.write("**Det som behöver kollas:** " + " ".join(caut))
+            qrp = _num(r.get("QRP Score"))
+            if qrp >= 75:
+                st.success("Enkelt förklarat: bolaget ser just nu ut att kombinera god kvalitet med ett ganska rimligt pris. Det är värt en djupare kontroll, inte ett automatiskt köp.")
+            elif qrp >= 60:
+                st.info("Enkelt förklarat: flera delar ser bra ut, men pris, kvalitet eller risk är inte tillräckligt starka för ett tydligt grönt ljus ännu.")
+            else:
+                st.warning("Enkelt förklarat: Borsify ser för många frågetecken i pris, kvalitet eller risk för att kalla detta ett starkt långsiktigt fynd just nu.")
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -1663,8 +2315,28 @@ def render_idea_flow(scored: pd.DataFrame) -> None:
         return
 
     passed = int((ideas.get("Borsify-granskning", pd.Series(dtype=str)) == "Klarar första kontrollen").sum())
-    st.caption(f"{len(ideas)} aktier matchades · {passed} klarar Borsifys första kontroll. Upptäcktsstyrka betyder hur brett och nyligen aktien nämnts – inte förväntad avkastning.")
+    combo_series = ideas.get("Kombinationssignal", pd.Series(dtype=str)).astype(str)
+    strong_combos = int(combo_series.isin(["Ovanligt intressant kombination", "Kvalitetsbolag i fokus", "Möjlig återhämtningsidé", "Kortsiktigt läge i fokus"]).sum())
+    st.caption(f"{len(ideas)} aktier matchades · {passed} klarar Borsifys första kontroll · {strong_combos} har en tydlig kombination av extern uppmärksamhet och Borsify-data. Upptäcktsstyrka betyder hur brett och nyligen aktien nämnts – inte förväntad avkastning.")
 
+    if strong_combos:
+        st.markdown("### Kombinationer värda att läsa först")
+        st.write("Här lyfts bara aktier där ett externt uppslag sammanfaller med något som redan syns i Borsifys egna siffror. Media eller forum får fortfarande **inte** höja Borsify Score.")
+        combo_view = ideas[combo_series.isin(["Ovanligt intressant kombination", "Kvalitetsbolag i fokus", "Möjlig återhämtningsidé", "Kortsiktigt läge i fokus"])].head(5)
+        for _, cr in combo_view.iterrows():
+            with st.container(border=True):
+                cc1, cc2 = st.columns([3.5, 1])
+                cc1.markdown(f"**{cr.get('Namn','')} · {cr.get('Ticker','')}**")
+                cc1.write(f"**{cr.get('Kombinationssignal','')}** — {cr.get('Kombinationsförklaring','')}")
+                event = str(cr.get("Huvudhändelse", "Övrigt / oklart"))
+                cc1.caption(f"Varför aktien syns just nu: **{event}**")
+                impact = str(cr.get("Case Impact", "Oklart om caset förändrats"))
+                cc1.caption(f"Påverkan på caset: **{impact}**")
+                prio = _num(cr.get('Idéprioritet'))
+                cc2.metric("Läs först", f"{prio:.0f}/100" if np.isfinite(prio) else "—")
+        st.caption("Läs först är endast en kö-prioritering för externa uppslag: 72 % Borsify Score + 28 % upptäcktsstyrka. Den är inte en ny investeringsscore eller avkastningsprognos.")
+
+    st.markdown("### Alla matchade uppslag")
     for _, r in ideas.head(12).iterrows():
         status = str(r.get("Borsify-granskning", ""))
         with st.container(border=True):
@@ -1672,10 +2344,34 @@ def render_idea_flow(scored: pd.DataFrame) -> None:
             a.markdown(f"### {r.get('Namn','')} · {r.get('Ticker','')}")
             media_sources = int(r.get("Mediekällor", 0) or 0)
             forum_sources = int(r.get("Forumkällor", 0) or 0)
-            a.caption(f"{int(r.get('Antal omnämnanden',0))} uppslag · {media_sources} mediekälla/källor · {forum_sources} forumkälla/källor")
+            pulse = str(r.get("Mediepuls", ""))
+            recent24 = int(r.get("Omnämnanden 24h", 0) or 0)
+            pulse_text = f" · {pulse}" if pulse else ""
+            a.caption(f"{int(r.get('Antal omnämnanden',0))} uppslag · {recent24} senaste 24 h · {media_sources} mediekälla/källor · {forum_sources} forumkälla/källor{pulse_text}")
             b.metric("Borsify", f"{_num(r.get('Borsify Score')):.0f}/100" if np.isfinite(_num(r.get('Borsify Score'))) else "—")
             c.metric("Kontroll", status)
             st.write(str(r.get("Förklaring", "")))
+            event_label = str(r.get("Huvudhändelse", "Övrigt / oklart"))
+            event_expl = str(r.get("Händelseförklaring", ""))
+            st.markdown(f"**Varför uppmärksammas aktien?** {event_label}")
+            if event_expl:
+                st.caption(event_expl)
+            impact_label = str(r.get("Case Impact", "Oklart om caset förändrats"))
+            impact_expl = str(r.get("Case Impact Förklaring", ""))
+            impact_level_num = _num(r.get("Case Impact Nivå", 0))
+            impact_level = int(impact_level_num) if np.isfinite(impact_level_num) else 0
+            if impact_level >= 3 and "risk" in impact_label.lower():
+                st.warning(f"**Ändrar detta investeringscaset? {impact_label}.** {impact_expl}")
+            elif impact_level >= 3:
+                st.info(f"**Ändrar detta investeringscaset? {impact_label}.** {impact_expl}")
+            else:
+                st.caption(f"**Ändrar detta investeringscaset? {impact_label}.** {impact_expl}")
+            combo_label = str(r.get("Kombinationssignal", ""))
+            combo_expl = str(r.get("Kombinationsförklaring", ""))
+            if combo_label and combo_label != "Ingen särskild kombination":
+                st.success(f"**{combo_label}:** {combo_expl}")
+            else:
+                st.caption(combo_expl)
             st.caption(f"Upptäcktsstyrka {_num(r.get('Upptäcktsstyrka')):.0f}/100 · mäter bara hur tydligt uppslaget syns i externa källor.")
             flags = str(r.get("Riskflaggor", ""))
             if flags and flags not in {"—", "nan"}:
@@ -1688,15 +2384,22 @@ def render_idea_flow(scored: pd.DataFrame) -> None:
                         link = str(h.get("link", ""))
                         source = str(h.get("source", ""))
                         category = str(h.get("category", ""))
+                        event_types = h.get("event_types") or []
+                        event_text = " / ".join(str(x) for x in event_types[:2])
                         label = f"{source} · {category}" if category else source
+                        if event_text:
+                            label += f" · {event_text}"
                         if link.startswith("http"):
                             st.markdown(f"- [{title}]({link}) · {label}")
                         else:
                             st.write(f"• {title} · {label}")
 
     with st.expander("Så ska mediabevakningen tolkas"):
-        st.write("Borsify försöker hitta **uppslag**, inte följa flocken. Flera oberoende mediekällor ger högre upptäcktsstyrka än många inlägg från ett enda forum. Ett bolag kan ändå sorteras bort direkt om nyckeltalen är svaga. Spekulativa forumkällor får lägre vikt och kan aldrig ensamma ge maximal upptäcktsstyrka.")
-        st.caption("Bevakningen bygger på publika flöden. Paywall-innehåll läses inte och Borsify ska inte tolka en rubrik som ett verifierat faktapåstående om bolaget.")
+        st.write("Borsify försöker hitta **uppslag**, inte följa flocken. Mediepuls visar om uppmärksamheten har ökat det senaste dygnet jämfört med den senaste veckan. Det är inte ett köp- eller säljsentiment. Flera oberoende mediekällor ger högre upptäcktsstyrka än många inlägg från ett enda forum. Ett bolag kan ändå sorteras bort direkt om nyckeltalen är svaga. Spekulativa forumkällor får lägre vikt och kan aldrig ensamma ge maximal upptäcktsstyrka.")
+        st.write("**Kombinationssignal** betyder bara att två separata saker råkar sammanfalla: Borsifys egen analys ser något intressant och externa källor har samtidigt börjat uppmärksamma bolaget. Det gör aktien värd att läsa om tidigare i kön, men det är fortfarande ingen köpsignal.")
+        st.write("**Varför uppmärksammas aktien?** Borsify klassificerar rubrikerna i enkla händelsetyper som rapport, prognos, riktkurs, insiderhandel, order, förvärv, utdelning, emission eller vinstvarning. Klassningen hjälper dig att förstå vad du ska läsa först – den avgör inte om nyheten är positiv eller negativ.")
+        st.write("**Ändrar detta investeringscaset?** Case Impact skiljer händelser som kan ändra bolagets vinst, risk eller finansiering från sådant som främst är åsikter eller marknadsbrus. När rubriken inte räcker för att avgöra riktningen säger Borsify uttryckligen att informationen måste verifieras i originalkällan.")
+        st.caption("Bevakningen bygger på publika flöden. Paywall-innehåll läses inte och rubrikklassningen är en första sortering, inte ett verifierat faktapåstående om bolaget. Läs originalkällan innan du drar slutsatser.")
 
 
 def render_dividend_discovery(df: pd.DataFrame) -> None:
@@ -1965,6 +2668,69 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail") -> N
     st.link_button("Öppna hos Yahoo Finance", str(row["Yahoo"]))
 
 
+def render_quick_change_target(scored: pd.DataFrame, signal_history: pd.DataFrame, profile: str) -> None:
+    """Inline destination for actions from Nytt sedan sist.
+
+    Streamlit tabs cannot be switched reliably from a button, so the destination
+    is rendered immediately on the overview instead of pretending navigation occurred.
+    """
+    ticker = str(st.session_state.get("bq_quick_open_ticker") or "").strip()
+    mode = str(st.session_state.get("bq_quick_open_mode") or "").strip()
+    if not ticker or not mode:
+        return
+    with st.container(border=True):
+        h1, h2 = st.columns([5, 1])
+        h1.markdown(f"### Öppnad från Nytt sedan sist · {ticker}")
+        if h2.button("Stäng", key=f"quick_close_{ticker}_{mode}", use_container_width=True):
+            st.session_state.pop("bq_quick_open_ticker", None)
+            st.session_state.pop("bq_quick_open_mode", None)
+            st.rerun()
+
+        row_df = scored[scored["Ticker"].astype(str) == ticker].head(1) if not scored.empty else pd.DataFrame()
+        if mode == "analysis":
+            if row_df.empty:
+                st.info("Aktien finns inte i den aktuella analyskörningen. Byt marknad/universum eller öppna den från bevakningslistan.")
+            else:
+                render_detail(row_df.iloc[0], profile, key_prefix=f"quick_{ticker}")
+        elif mode == "journal":
+            if row_df.empty:
+                st.info("Case Journal kan visas när aktien finns i den aktuella analysen eller bevakningen.")
+            else:
+                wr = row_df.iloc[0]
+                hist = get_score_history(ticker, profile)
+                current_case = {
+                    "score": _num(wr.get("Borsify Score")),
+                    "valuation": _num(wr.get("Värdering")),
+                    "quality": _num(wr.get("Kvalitet")),
+                    "setup": _num(wr.get("Marknadsläge")),
+                    "income": _num(wr.get("Utdelning")),
+                    "risk": _num(wr.get("Risk")),
+                    "coverage": _num(wr.get("Datatäckning")),
+                }
+                journal = assess_case_change(hist, current_case)
+                st.markdown("**Case Journal · vad har förändrats?**")
+                delta = _num(journal.get("score_delta"))
+                delta_text = f"{delta:+.1f} poäng sedan start" if np.isfinite(delta) else "historiken byggs upp"
+                st.write(f"**{journal.get('status', 'Historiken byggs upp')}** · {delta_text}")
+                for change in journal.get("changes", []):
+                    st.write(f"• {change}")
+                jt = journal_table(hist)
+                if len(jt) >= 2:
+                    st.dataframe(jt, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("Efter fler sparade analyser visas utvecklingen här.")
+        elif mode == "signal":
+            hist = signal_history[signal_history["symbol"].astype(str) == ticker].copy() if not signal_history.empty else pd.DataFrame()
+            st.markdown("**Signalhistorik**")
+            if hist.empty:
+                st.info("Ingen sparad signalhistorik hittades för aktien.")
+            else:
+                for _, sig in hist.sort_values(["created_at"], ascending=False).head(12).iterrows():
+                    read_label = "Läst" if bool(sig.get("is_read")) else "Oläst"
+                    st.markdown(f"**{sig.get('kind','Signal')} · {sig.get('occurred_date','')} · {read_label}**")
+                    st.write(str(sig.get("text") or ""))
+
+
 def render_overview(
     daily_shortlist: pd.DataFrame,
     filtered: pd.DataFrame,
@@ -1976,12 +2742,112 @@ def render_overview(
     idx: dict[str, Any] | None,
     elapsed: float,
     latest_price_date: str,
+    market: str,
+    benchmark_name: str,
 ) -> None:
     """Ren startsida: vad är intressant, varför och vad bör jag se upp med?"""
     best = daily_shortlist.iloc[0] if not daily_shortlist.empty else None
     high_priority = int((daily_shortlist["Prioritet"] == "Hög").sum()) if not daily_shortlist.empty else 0
     today = datetime.now().date().isoformat()
     today_signals = signal_history[signal_history["occurred_date"].astype(str) == today] if not signal_history.empty else pd.DataFrame()
+
+    # Dagens fokus: en kort prioriterad arbetslista som samlar nya kandidater,
+    # förändringar i bevakade case och nya Radar-signaler. Den ändrar inga scores.
+    watch_changes: list[dict[str, Any]] = []
+    if not watch_df.empty:
+        for _, wr in watch_df.iterrows():
+            sym = str(wr.get("Ticker", ""))
+            if not sym:
+                continue
+            hist = get_score_history(sym, profile)
+            current_case = {
+                "score": _num(wr.get("Borsify Score")),
+                "valuation": _num(wr.get("Värdering")),
+                "quality": _num(wr.get("Kvalitet")),
+                "setup": _num(wr.get("Marknadsläge")),
+                "income": _num(wr.get("Utdelning")),
+                "risk": _num(wr.get("Risk")),
+                "coverage": _num(wr.get("Datatäckning")),
+            }
+            journal = assess_case_change(hist, current_case)
+            # Bara riktiga förändringar ska konkurrera om dagens fokus.
+            if str(journal.get("tone")) in {"negative", "positive"}:
+                changes = journal.get("changes") or []
+                watch_changes.append({
+                    "ticker": sym,
+                    "name": str(wr.get("Namn") or sym),
+                    "tone": journal.get("tone"),
+                    "status": journal.get("status"),
+                    "score_delta": journal.get("score_delta"),
+                    "summary": changes[0] if changes else journal.get("status"),
+                    "changed_at": (str(hist.iloc[-1].get("created_at") or hist.iloc[-1].get("captured_date")) if not hist.empty else None),
+                })
+
+    candidate_rows = daily_shortlist.head(5).to_dict("records") if not daily_shortlist.empty else []
+    signal_rows = today_signals.sort_values(["priority", "created_at"], ascending=[False, False]).head(8).to_dict("records") if not today_signals.empty else []
+    focus_now = datetime.now()
+    focus_items = build_daily_focus(candidate_rows, watch_changes, signal_rows, limit=3, now=focus_now)
+    focus_meta = focus_context(focus_now)
+
+    previous_visit, _current_visit = visit_context()
+    reviewed_change_keys = get_reviewed_change_keys()
+    new_since = build_since_last_visit(
+        previous_visit,
+        signals=signal_history.to_dict("records") if not signal_history.empty else [],
+        watch_changes=watch_changes,
+        reviewed_keys=reviewed_change_keys,
+        limit=3,
+    )
+    st.markdown("## Nytt sedan sist")
+    st.caption(visit_label(previous_visit, focus_now) + ". Här visas bara tidsstämplade förändringar – inte sådant du redan har sett.")
+    if previous_visit is None:
+        st.info("Första besöket registrerat. Från nästa besök kan Borsify skilja på tidigare information och sådant som faktiskt har tillkommit sedan dess.")
+    elif not new_since:
+        st.success("Inga nya tidsstämplade signaler eller tydliga förändringar i dina bevakade case sedan förra besöket.")
+    else:
+        for item in new_since:
+            with st.container(border=True):
+                left, right = st.columns([3, 1])
+                ticker = str(item.get("ticker", ""))
+                change_id = str(item.get("key", ""))
+                left.markdown(f"**{item.get('name', ticker)} · {item.get('headline','Ny förändring')}**")
+                left.write(str(item.get('why', '')))
+                right.caption(str(item.get('kind', 'Nytt')))
+                right.caption(ticker)
+                a1, a2 = st.columns([1, 1])
+                target = str(item.get("target") or "analysis")
+                action_label = "Öppna Case Journal" if target == "journal" else "Öppna signalhistorik"
+                if a1.button(action_label, key=f"since_open_{change_id}", use_container_width=True):
+                    st.session_state["bq_quick_open_ticker"] = ticker
+                    st.session_state["bq_quick_open_mode"] = target
+                    st.rerun()
+                if a2.button("Markera som genomgången", key=f"since_review_{change_id}", use_container_width=True):
+                    mark_change_reviewed(change_id)
+                    st.rerun()
+        render_quick_change_target(scored, signal_history, profile)
+    if st.session_state.get("bq_visit_state_migration_needed"):
+        st.caption("Molnkontot saknar ännu v2.25-tabellen för senaste besök. Funktionen fungerar fullt ut efter den färdiga Supabase-migreringen; övriga delar av Borsify påverkas inte.")
+    if st.session_state.get("bq_review_state_migration_needed"):
+        st.caption("Molnkontot saknar ännu v2.26-tabellen för genomgångna förändringar. Knapparna fungerar lokalt; kör den färdiga Supabase-migreringen för permanent molnsynk.")
+
+    st.markdown(f"## {focus_meta['title']}")
+    st.caption(f"{focus_meta['intro']} Högst tre saker visas. Prioriteringen är en läsordning – inte en köp- eller säljlista.")
+    if not focus_items:
+        st.info("Inget nytt sticker ut just nu. Det är också ett resultat: du behöver inte leta fram en affär bara för att börsen är öppen.")
+    else:
+        cols = st.columns(len(focus_items))
+        for col, item in zip(cols, focus_items):
+            with col:
+                with st.container(border=True):
+                    freshness = str(item.get("freshness") or "").strip()
+                    label = str(item.get("kind", "Fokus")) + (f" · {freshness}" if freshness else "")
+                    st.caption(label)
+                    st.markdown(f"### {item.get('name', item.get('ticker',''))}")
+                    if item.get("name") != item.get("ticker"):
+                        st.caption(str(item.get("ticker", "")))
+                    st.markdown(f"**{item.get('headline','')}**")
+                    st.write(str(item.get("why", "")))
+                    st.caption(f"Gör så här: {item.get('action','Öppna analysen och kontrollera caset.')}")
 
     st.markdown("## Dagens mest intressanta aktie")
     st.caption("Borsify börjar med slutsatsen. Du kan öppna siffrorna och den fulla analysen när du vill.")
@@ -2055,6 +2921,252 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
     st.caption("Edge Lab försöker svara på en enkel fråga: om Borsify hade gett samma signaler tidigare, hur hade de gått då? Historik bevisar inte vad som händer framåt, men hjälper oss att upptäcka svaga modeller.")
     render_beginner_glossary("edge_terms")
     st.caption("Testar tekniska signaler historiskt utan att använda dagens fundamentaldata. Det är medvetet: dagens fundamenta på gamla datum skulle skapa look-ahead bias. Grundtestet visar bruttoresultat. Längre ned kan du lägga på courtage, spread/slippage och positionsstorlek för ett mer ekonomiskt realistiskt stresstest.")
+
+    with st.expander("Short Alpha 2.0 · point-in-time validering", expanded=True):
+        st.caption(
+            "Detta test återskapar bara de delar av Short Alpha 2.0 som faktiskt kan rekonstrueras historiskt: "
+            "relativ styrka, trend, momentum och handelsaktivitet. Historiska estimatrevideringar och katalysatorer "
+            "backfylls inte, eftersom Borsify ännu saknar point-in-time-historik för dem."
+        )
+        sa1, sa2, sa3 = st.columns([1.5, 1, 1])
+        short_symbol = sa1.text_input(
+            "Ticker · Short Alpha",
+            value=default_symbol or "INVE-B.ST",
+            key="short_edge_symbol",
+        ).strip().upper()
+        short_years = sa2.slider("Historik · Short Alpha", 3, 10, 7, key="short_edge_years")
+        short_spacing = sa3.selectbox(
+            "Minsta avstånd mellan signaler",
+            [10, 21, 42, 63],
+            index=1,
+            format_func=lambda x: f"{x} börsdagar",
+            key="short_edge_spacing",
+        )
+        run_short_edge = st.button("Testa Short Alpha 2.0", type="primary", key="run_short_edge")
+
+        if run_short_edge and short_symbol:
+            try:
+                short_hist = yf.download(
+                    short_symbol, period=f"{short_years}y", interval="1d",
+                    auto_adjust=True, progress=False, threads=False
+                )
+                short_bench = (
+                    yf.download(
+                        benchmark_symbol, period=f"{short_years}y", interval="1d",
+                        auto_adjust=True, progress=False, threads=False
+                    ) if benchmark_symbol else pd.DataFrame()
+                )
+            except Exception as exc:
+                st.error(f"Kunde inte hämta historik för Short Alpha-testet: {exc}")
+                short_hist = pd.DataFrame()
+                short_bench = pd.DataFrame()
+
+            def _edge_flat_frame(frame: pd.DataFrame, symbol_hint: str) -> pd.DataFrame:
+                if frame is None or frame.empty:
+                    return pd.DataFrame()
+                out = frame.copy()
+                if isinstance(out.columns, pd.MultiIndex):
+                    # yfinance may return either field/ticker or ticker/field orientation.
+                    fields = {"Open", "High", "Low", "Close", "Adj Close", "Volume"}
+                    level0 = set(map(str, out.columns.get_level_values(0)))
+                    level1 = set(map(str, out.columns.get_level_values(1)))
+                    if "Close" in level0:
+                        out.columns = out.columns.get_level_values(0)
+                    elif "Close" in level1:
+                        out.columns = out.columns.get_level_values(1)
+                return out.loc[:, ~out.columns.duplicated()].copy()
+
+            short_hist = _edge_flat_frame(short_hist, short_symbol)
+            short_bench = _edge_flat_frame(short_bench, benchmark_symbol or "")
+
+            if short_hist.empty or "Close" not in short_hist:
+                st.warning("För lite prisdata för Short Alpha-testet.")
+            else:
+                bench_close = (
+                    short_bench["Close"].dropna().astype(float)
+                    if not short_bench.empty and "Close" in short_bench else None
+                )
+                pit = build_point_in_time_short_signals(short_hist, bench_close)
+                pit = add_forward_returns(pit)
+                threshold_table = evaluate_thresholds(
+                    pit, thresholds=[55, 60, 65, 70, 75, 80], spacing_days=int(short_spacing)
+                )
+                wf_short = walk_forward_threshold_test(
+                    pit, min_train_days=min(504, max(252, int(len(pit) * .45))),
+                    test_days=126, thresholds=[55, 60, 65, 70, 75, 80]
+                )
+                short_summary = summarize_edge(threshold_table, wf_short)
+
+                status = str(short_summary.get("status", "Otillräcklig data"))
+                if status == "Historiskt lovande – ej bevisad alpha":
+                    st.success(status)
+                elif status == "Ingen tydlig historisk edge":
+                    st.warning(status)
+                else:
+                    st.info(status)
+                st.caption(str(short_summary.get("message", "")))
+
+                if "best_threshold" in short_summary:
+                    sm1, sm2, sm3, sm4 = st.columns(4)
+                    sm1.metric("Bäst historisk tröskel", f"{short_summary['best_threshold']:.0f}")
+                    sm2.metric("Median 3m", f"{short_summary['median_3m']:+.1%}")
+                    sm3.metric("Träff 3m", f"{short_summary['hit_rate_3m']:.0%}")
+                    wf_med = short_summary.get("walk_forward_median_3m", np.nan)
+                    sm4.metric("Walk-forward median 3m", f"{wf_med:+.1%}" if np.isfinite(wf_med) else "—")
+
+                if not threshold_table.empty:
+                    show = threshold_table.copy()
+                    show["Median %"] = (show["MedianReturn"] * 100).round(1)
+                    show["Snitt %"] = (show["MeanReturn"] * 100).round(1)
+                    show["Träff %"] = (show["HitRate"] * 100).round(0)
+                    show["≥ +10 %"] = (show["GainRate10"] * 100).round(0)
+                    show["≤ −10 %"] = (show["LossRate10"] * 100).round(0)
+                    show = show.rename(columns={
+                        "Threshold": "Min proxy",
+                        "Horizon": "Utfall",
+                        "Signals": "Signaler",
+                    })
+                    st.markdown("#### Trösklar och framtida utfall")
+                    st.dataframe(
+                        show[["Min proxy", "Utfall", "Signaler", "Median %", "Snitt %", "Träff %", "≥ +10 %", "≤ −10 %"]],
+                        use_container_width=True, hide_index=True,
+                    )
+
+                if not wf_short.empty:
+                    st.markdown("#### Walk-forward · tröskeln väljs bara på äldre data")
+                    wf_show = wf_short.copy()
+                    wf_show["Train median 3m %"] = (wf_show["TrainMedian3m"] * 100).round(1)
+                    wf_show["Test median 3m %"] = (wf_show["TestMedian3m"] * 100).round(1)
+                    wf_show["Test träff %"] = (wf_show["TestHitRate3m"] * 100).round(0)
+                    wf_show = wf_show.rename(columns={
+                        "TrainEnd": "Träning t.o.m.",
+                        "TestStart": "Test från",
+                        "TestEnd": "Test t.o.m.",
+                        "ChosenThreshold": "Vald tröskel",
+                        "TestSignals": "Testsignaler",
+                    })
+                    st.dataframe(
+                        wf_show[["Träning t.o.m.", "Test från", "Test t.o.m.", "Vald tröskel", "Testsignaler", "Train median 3m %", "Test median 3m %", "Test träff %"]],
+                        use_container_width=True, hide_index=True,
+                    )
+
+                st.markdown("#### Vilka tekniska delar verkar bära?")
+                component_name = st.selectbox(
+                    "Delsignal",
+                    ["Relative", "Trend", "Momentum", "Participation"],
+                    format_func=lambda x: {
+                        "Relative": "Relativ styrka",
+                        "Trend": "Trend",
+                        "Momentum": "Momentum",
+                        "Participation": "Handelsaktivitet",
+                    }.get(x, x),
+                    key="short_edge_component",
+                )
+                buckets = component_bucket_analysis(pit, component_name, "3m")
+                if buckets.empty:
+                    st.caption("För få observationer för kvartilanalys.")
+                else:
+                    bucket_show = buckets.copy()
+                    bucket_show["Median 3m %"] = (bucket_show["MedianReturn"] * 100).round(1)
+                    bucket_show["Träff %"] = (bucket_show["HitRate"] * 100).round(0)
+                    st.dataframe(
+                        bucket_show[["Bucket", "Signals", "Median 3m %", "Träff %"]],
+                        use_container_width=True, hide_index=True,
+                    )
+
+                veto = pit["FallingKnifeVeto"].fillna(False)
+                valid = pit["ShortProxy"].notna()
+                if valid.any():
+                    st.caption(
+                        f"Anti-falling-knife-filtret stoppade {int(veto[valid].sum())} av "
+                        f"{int(valid.sum())} historiska dagsobservationer från att få proxy över 54."
+                    )
+
+                st.warning(
+                    "Begränsning: detta validerar inte hela live-modellen. Estimatrevideringar och katalysatorer "
+                    "ingår först när Borsify har sparat verklig point-in-time-historik för dem. Resultatet ska därför "
+                    "användas för att justera de tekniska delarna – inte som bevis för framtida avkastning."
+                )
+
+    with st.expander("Recommendation Ledger · lär av faktiska utfall", expanded=False):
+        st.caption(
+            "Borsify fryser nu de fem kort- och långsiktiga finalisterna per modellversion/dag. "
+            "Även svagare finalister sparas för att undvika att framtida utvärdering bara innehåller vinnarna."
+        )
+        recs = get_recommendation_records(limit=500)
+        outs = get_recommendation_outcomes(limit=5000)
+
+        if st.button("Uppdatera mogna utfall", key="refresh_recommendation_outcomes"):
+            with st.spinner("Kontrollerar rekommendationer vars mätperiod har löpt ut…"):
+                added = refresh_due_recommendation_outcomes(max_records=40)
+            st.success(f"{added} nya utfall sparades." if added else "Inga nya utfall var mogna ännu.")
+            recs = get_recommendation_records(limit=500)
+            outs = get_recommendation_outcomes(limit=5000)
+
+        if recs.empty:
+            st.info("Ledgern är tom. Den börjar fyllas när Borsify körs med v2.35.0.")
+        else:
+            l1, l2, l3, l4 = st.columns(4)
+            l1.metric("Frysta case", len(recs))
+            l2.metric("Kortsiktiga", int((recs["horizon_type"] == "short").sum()))
+            l3.metric("Långsiktiga", int((recs["horizon_type"] == "long").sum()))
+            l4.metric("Mätta utfall", len(outs))
+
+            latest = recs.head(20).copy()
+            latest["Typ"] = latest["horizon_type"].map({"short":"1–6 mån","long":"Lång sikt"})
+            latest["Pris"] = pd.to_numeric(latest["entry_price"], errors="coerce").round(2)
+            latest["Score"] = pd.to_numeric(latest["score"], errors="coerce").round(1)
+            latest["Confidence"] = pd.to_numeric(latest["confidence"], errors="coerce").round(0)
+            st.markdown("#### Senaste frysta modellbeslut")
+            st.dataframe(
+                latest.rename(columns={
+                    "captured_date":"Datum","symbol":"Ticker","name":"Bolag","rank":"Rank",
+                    "gate":"Bedömning","model_version":"Version",
+                })[["Datum","Typ","Ticker","Bolag","Rank","Pris","Bedömning","Score","Confidence","Version"]],
+                use_container_width=True, hide_index=True,
+            )
+
+            summary = outcome_summary(recs, outs)
+            st.markdown("#### Utfall hittills")
+            if summary.get("evaluated", 0):
+                o1, o2, o3, o4 = st.columns(4)
+                o1.metric("Mätta observationer", int(summary["evaluated"]))
+                o2.metric("Medianutfall", f"{summary['median_return']:+.1%}")
+                o3.metric("Positiva", f"{summary['hit_rate']:.0%}")
+                o4.metric("≥ +10 %", f"{summary['gain_10_rate']:.0%}")
+                st.caption(str(summary["message"]))
+
+                horizon_options = sorted(outs["horizon"].dropna().astype(str).unique().tolist())
+                if horizon_options:
+                    chosen_h = st.selectbox(
+                        "Kalibrera bedömningar mot utfall",
+                        horizon_options,
+                        key="ledger_calibration_horizon",
+                    )
+                    cal = calibration_by_gate(recs, outs, chosen_h)
+                    if not cal.empty:
+                        cal_show = cal.copy()
+                        cal_show["Median %"] = (cal_show["MedianReturn"] * 100).round(1)
+                        cal_show["Snitt %"] = (cal_show["MeanReturn"] * 100).round(1)
+                        cal_show["Positiva %"] = (cal_show["HitRate"] * 100).round(0)
+                        cal_show["≥ +10 %"] = (cal_show["Gain10"] * 100).round(0)
+                        cal_show["≤ −10 %"] = (cal_show["Loss10"] * 100).round(0)
+                        st.dataframe(
+                            cal_show[["Gate","Antal","Median %","Snitt %","Positiva %","≥ +10 %","≤ −10 %"]],
+                            use_container_width=True, hide_index=True,
+                        )
+            else:
+                st.info(
+                    "Inga utfall har hunnit mogna ännu. Kortsiktiga case börjar kunna mätas efter cirka en månad; "
+                    "långsiktiga case först efter cirka sex månader."
+                )
+
+            st.warning(
+                "Ledgern ska användas för kalibrering, inte för att automatiskt optimera på ett litet sample. "
+                "Borsify ändrar inte modellvikter utifrån dessa utfall ännu."
+            )
+
+    st.divider()
     c1, c2, c3, c4 = st.columns([1.5, 1, 1, 1])
     symbol = c1.text_input("Ticker", value=default_symbol or "INVE-B.ST", key="edge_symbol").strip().upper()
     engine = c2.selectbox("Motor", ["SWING", "REVERSAL"], key="edge_engine")
@@ -2483,7 +3595,10 @@ def main() -> None:
         else:
             universe = f"{market} urval"
             custom = ""
-            st.caption(f"{len(MARKET_UNIVERSES[market])} stora/likvida bolag i Borsifys kuraterade startuniversum. Inte en komplett officiell indexlista.")
+            if market == "Alla marknader":
+                st.caption(f"{len(MARKET_UNIVERSES[market])} bolag från Sverige, USA, Norden, Tyskland och Storbritannien. Ett snabbare globalt radarurval – inte hela världens börser.")
+            else:
+                st.caption(f"{len(MARKET_UNIVERSES[market])} stora/likvida bolag i Borsifys kuraterade startuniversum. Inte en komplett officiell indexlista.")
 
         with st.expander("Fler filter", expanded=False):
             profile = st.selectbox("Borsify-strategi", list(PROFILE_WEIGHTS), index=0, help="Påverkar grundscoren. Om du är osäker kan Balanserad vara kvar.")
@@ -2561,10 +3676,32 @@ def main() -> None:
         min_yield = float(min_dividend_yield) / 100.0
         filtered = filtered[dy.notna() & (dy > 0) & (dy >= min_yield)]
     filtered = apply_discovery_intent(filtered, discovery_intent)
-    top = filtered.head(top_n).copy(); daily_shortlist = build_daily_shortlist(filtered, profile, limit=min(5, len(filtered))); market_cfg = MARKET_CONFIGS[market]
+    top = filtered.head(top_n).copy(); daily_shortlist = build_daily_shortlist(filtered, profile, limit=min(5, len(filtered)))
+    with st.spinner("Djupkontrollerar de starkaste långsiktiga kandidaterna…"):
+        deep_longlist = build_deep_longlist(filtered, pool_size=min(6, len(filtered)), limit=min(5, len(filtered)))
+    market_cfg = MARKET_CONFIGS[market]
     benchmark_symbol = market_cfg["benchmark"]
     benchmark_name = market_cfg["benchmark_name"]
-    idx = fetch_index_snapshot(benchmark_symbol) if benchmark_symbol else {}; elapsed = time.perf_counter() - start
+    idx = fetch_index_snapshot(benchmark_symbol) if benchmark_symbol else {}
+    with st.spinner("Kontrollerar de starkaste kortsiktiga kandidaterna…"):
+        short_longlist = build_short_term_longlist(filtered, idx, pool_size=min(8, len(filtered)), limit=min(5, len(filtered)))
+    # Freeze the actual finalists once per model version/day before any future outcome is known.
+    ledger_records = build_recommendation_records(
+        short_longlist, "short", APP_VERSION, profile, market, max_records=5
+    ) + build_recommendation_records(
+        deep_longlist, "long", APP_VERSION, profile, market, max_records=5
+    )
+    save_recommendation_records(ledger_records)
+
+    # Cheap background maintenance: only mature records are fetched, max a few per run.
+    try:
+        refresh_due_recommendation_outcomes(max_records=6)
+    except Exception:
+        pass
+
+    elapsed = time.perf_counter() - start
+    if market == "Alla marknader":
+        st.caption("Global jämförelse använder ETF:n VT som praktisk proxy för en bred världsmarknad. Det är inte ett exakt totalavkastningsindex och ska tolkas som referens, inte facit.")
 
     price_dates = sorted({str(x) for x in raw_df.get("Prisdatum", pd.Series(dtype=str)).dropna().tolist() if str(x) != "—"})
     latest_price_date = price_dates[-1] if price_dates else "—"
@@ -2602,11 +3739,190 @@ def main() -> None:
         "Överblick", "Upptäck", f"Bevakning ({len(watch_df_global)})", "Analysera", "Metod"
     ])
     with nav_overview:
-        render_overview(daily_shortlist, filtered, scored, watch_df_global, signal_history_global, unread_signals, profile, idx, elapsed, latest_price_date)
+        render_overview(daily_shortlist, filtered, scored, watch_df_global, signal_history_global, unread_signals, profile, idx, elapsed, latest_price_date, market, benchmark_name)
     with nav_discover:
         discover_daily, discover_ideas, discover_radar = st.tabs(["Dagens fynd", "Idéflöde", f"Radar ({unread_signals})"])
         with discover_daily:
             st.info(f"Du letar efter: **{discovery_intent}**. {intent_plain_text(discovery_intent)}")
+
+            st.subheader("Bästa kortsiktiga case · 1–6 månader")
+            st.caption("Short-Term Alpha 2.0 kräver marknadsbekräftelse: relativ styrka, trend, momentum och aktivitet, kompletterat med färska vinst-/estimatsignaler och katalysatorer där data finns. Ett stort kursfall ger inga pluspoäng i sig.")
+            if short_longlist.empty:
+                st.info("Ingen kortsiktig kandidat kunde analyseras.")
+            else:
+                for rank, (_, case) in enumerate(short_longlist.iterrows(), start=1):
+                    with st.container(border=True):
+                        s1, s2, s3, s4, s5 = st.columns([2.6, .9, .9, .9, 1.1])
+                        s1.markdown(f"### {rank}. {case.get('Namn', case.get('Ticker'))} · {case.get('Ticker')}")
+                        s1.caption(f"{case.get('Sektor','—')} · horisont cirka 1–6 månader")
+                        s2.metric("Short Alpha", f"{_num(case.get('Short Alpha Score')):.0f}/100")
+                        s3.metric("Confidence", f"{_num(case.get('Short Alpha Confidence')):.0f}/100", help="Datatäckning/evidens, inte sannolikheten att kursen stiger.")
+                        s4.metric("Relativ styrka", f"{_num(case.get('Short Relative Strength')):.0f}/100", help=f"Mot vald benchmark: {case.get('Short Relative Text','—')}")
+                        s5.metric("Bekräftelser", f"{int(_num(case.get('Short Confirmation Count')) if np.isfinite(_num(case.get('Short Confirmation Count'))) else 0)}/6")
+                        gate = str(case.get("Short Alpha Gate", "Svag kortsiktig signal"))
+                        if gate == "Kortsiktigt toppcase":
+                            st.success(gate)
+                        elif gate == "Starkt kortsiktigt case":
+                            st.info(gate)
+                        elif gate == "Ej kortsiktigt toppcase":
+                            st.warning(gate)
+                        else:
+                            st.caption(gate)
+                        st.markdown("**VARFÖR NU?**")
+                        st.write(str(case.get("Short Why Now", "Ingen stark kombination av bekräftande signaler.")))
+                        x1, x2 = st.columns(2)
+                        with x1:
+                            st.markdown("**Katalysator / revisionsbild**")
+                            st.write(f"{case.get('Catalyst Signal','Ingen tydlig katalysator verifierad')} · {case.get('Inflection Signal','Otillräcklig förändringsdata')}")
+                            if str(case.get("Primary Catalyst", "Ingen verifierad")) != "Ingen verifierad":
+                                st.caption(f"{case.get('Primary Catalyst')} · {case.get('Catalyst Timing','—')}")
+                        with x2:
+                            st.markdown("**Viktigaste motargumentet**")
+                            st.write(str(case.get("Short Counterargument", "—")))
+                        cautions = str(case.get("Short Cautions", "—"))
+                        vetoes = str(case.get("Short Vetoes", "—"))
+                        if vetoes != "—":
+                            st.warning(f"Stoppsignal: {vetoes}")
+                        elif cautions != "—":
+                            st.caption(f"Kontrollera: {cautions}")
+                        with st.expander("Visa kortsiktiga delsignaler"):
+                            st.write({
+                                "Trend": case.get("Short Trend", "—"),
+                                "Relativ styrka": case.get("Short Relative Strength", "—"),
+                                "Momentum": case.get("Short Momentum", "—"),
+                                "Handelsaktivitet": case.get("Short Participation", "—"),
+                                "Vinst/estimat": case.get("Short Revisions", "—"),
+                                "Katalysator": case.get("Short Catalyst", "—"),
+                                "Katalysatorevidens": case.get("Catalyst Evidence", "—"),
+                            })
+
+            st.divider()
+
+            st.subheader("Bästa långsiktiga case · flerårig djupkontroll")
+            st.caption("Borsify tar först fram INVEST-finalister och kräver därefter stöd från flera oberoende håll: flerårsdata, färsk inflektion, möjlig felprissättning, Bear/Base/Bull-risk/reward och konkret katalysator. En hård motsignal eller för svag datatäckning kan stoppa ett toppcase. Ingen ny viktad mega-score används.")
+            if deep_longlist.empty:
+                st.info("Ingen kandidat kunde djupkontrolleras.")
+            else:
+                for rank, (_, case) in enumerate(deep_longlist.iterrows(), start=1):
+                    with st.container(border=True):
+                        a, b, c, d, e, f = st.columns([2.65, .82, .95, .95, 1.05, .95])
+                        a.markdown(f"### {rank}. {case.get('Namn', case.get('Ticker'))} · {case.get('Ticker')}")
+                        a.caption(f"{case.get('Sektor','—')} · flerårsdata t.o.m. {case.get('Rapportdatum','—')}")
+                        b.metric("INVEST", f"{_num(case.get('INVEST Score')):.0f}/100")
+                        trap = _num(case.get('Value Trap Risk')); conf = _num(case.get('Deep Confidence'))
+                        infl = _num(case.get('Inflection Score'))
+                        c.metric("Value Trap", f"{trap:.0f}/100" if np.isfinite(trap) else "—", help="Högre = fler konkreta varningssignaler i tillgänglig flerårsdata. Inte en sannolikhet.")
+                        d.metric("Inflection", f"{infl:.0f}/100" if np.isfinite(infl) else "—", help="Förändringsindex för kvartalstrender och, där Yahoo har data, EPS-estimatrevideringar. Det är inte en prognos för kursavkastning.")
+                        e.metric("Mispricing", str(case.get("Mispricing Signal", "—")).replace("Tydlig möjlig ", "Tydlig ").replace("Marknaden kan vara mer rimlig än caset", "Krävande"), help="Jämför transparenta avkastnings-/värderingshurdlar med verifierad tillväxt. Detta är inte en sannolikhet eller DCF.")
+                        f.metric("Confidence", f"{conf:.0f}/100" if np.isfinite(conf) else "—", help="Mäter datatäckning och historiklängd, inte sannolikheten att kursen stiger.")
+                        gate = str(case.get('Djupkontroll','Otillräcklig data'))
+                        signal = str(case.get('Inflection Signal','Otillräcklig förändringsdata'))
+                        if gate == "Klarar djupkontroll": st.success(f"{gate} · {signal}")
+                        elif gate in {"Avstå tills vidare", "Hög value-trap-risk"}: st.error(f"{gate} · {signal}")
+                        elif gate == "Otillräcklig data": st.warning(f"{gate} · {signal}")
+                        else: st.info(f"{gate} · {signal}")
+                        case_gate = str(case.get("Case Gate", "Bevaka"))
+                        case_conf = _num(case.get("Case Confidence"))
+                        evidence_count = int(_num(case.get("Case Evidence Count"))) if np.isfinite(_num(case.get("Case Evidence Count"))) else 0
+                        if case_gate == "Toppcase":
+                            st.success(f"🏆 **{case_gate}** · {evidence_count}/5 oberoende stöd · evidenstäckning {case_conf:.0f}/100")
+                        elif case_gate == "Starkt case":
+                            st.success(f"**{case_gate}** · {evidence_count}/5 oberoende stöd · evidenstäckning {case_conf:.0f}/100")
+                        elif case_gate in {"Ej toppcase", "Bevaka – motbevis finns"}:
+                            st.warning(f"**{case_gate}** · {evidence_count}/5 oberoende stöd · evidenstäckning {case_conf:.0f}/100")
+                        else:
+                            st.info(f"**{case_gate}** · {evidence_count}/5 oberoende stöd · evidenstäckning {case_conf:.0f}/100")
+                        st.caption("Confidence här betyder hur mycket verifierbar evidens analysen vilar på – inte sannolikheten att aktien stiger.")
+                        st.markdown("**VARFÖR NU?**")
+                        st.write(str(case.get('Catalyst Why Now') or case.get('Varför nu','Ingen tydlig färsk inflektion kan verifieras.')))
+                        cat_signal = str(case.get("Catalyst Signal", "Ingen tydlig katalysator verifierad"))
+                        cat_conf = _num(case.get("Catalyst Confidence"))
+                        if cat_signal == "Tydlig möjlig katalysator":
+                            st.success(f"**Katalysator:** {case.get('Primary Catalyst','—')} · {case.get('Catalyst Timing','—')} · evidens {cat_conf:.0f}/100")
+                        elif cat_signal == "Ny risk måste verifieras först":
+                            st.warning(f"**Katalysator/risk:** {cat_signal}. {case.get('Catalyst Warnings','')}")
+                        else:
+                            st.info(f"**Katalysator:** {cat_signal} · {case.get('Primary Catalyst','—')} · {case.get('Catalyst Timing','—')}")
+                        st.caption(str(case.get("Catalyst Evidence", "Otillräcklig katalysatordata.")))
+                        st.markdown("**VAD VERKAR PRISET KRÄVA?**")
+                        base_req = _num(case.get("Implied EPS CAGR @ exit P/E 20"))
+                        verified_growth = _num(case.get("Verifierad tillväxtproxy"))
+                        if np.isfinite(base_req):
+                            st.write(f"Med 10 % årlig avkastningshurdle och P/E 20 om fem år kräver dagens värdering ungefär **{base_req:.1%} årlig EPS-tillväxt**. Verifierad tillväxtproxy ({case.get('Tillväxtkälla','—')}) är **{verified_growth:.1%}**." if np.isfinite(verified_growth) else f"Med 10 % årlig avkastningshurdle och P/E 20 om fem år kräver dagens värdering ungefär **{base_req:.1%} årlig EPS-tillväxt**. Tillräcklig verifierad tillväxtproxy saknas för jämförelse.")
+                        else:
+                            st.write("Forward P/E eller annan nödvändig värderingsdata saknas, så prisets förväntningshurdle kan inte beräknas robust.")
+                        st.write(f"**Mispricing-bedömning:** {case.get('Mispricing Signal','Kan inte bedömas')}. {case.get('Varför marknaden kan ha fel 2.0','')}")
+                        if case.get("Inflection Gate Note"):
+                            st.warning(str(case.get("Inflection Gate Note")))
+                        if case.get("Mispricing Gate Note"):
+                            st.warning(str(case.get("Mispricing Gate Note")))
+                        st.markdown("**RISK/REWARD · BEAR / BASE / BULL**")
+                        if str(case.get("Scenario Status", "")) == "OK":
+                            s1, s2, s3, s4 = st.columns(4)
+                            s1.metric("Bear", fmt_pct(case.get("Bear upside")), help=f"Antagande: EPS-tillväxt {fmt_pct(case.get('Bear EPS growth'))}, exit P/E {_num(case.get('Bear exit P/E')):.1f}")
+                            s2.metric("Base", fmt_pct(case.get("Base upside")), help=f"Antagande: EPS-tillväxt {fmt_pct(case.get('Base EPS growth'))}, exit P/E {_num(case.get('Base exit P/E')):.1f}")
+                            s3.metric("Bull", fmt_pct(case.get("Bull upside")), help=f"Antagande: EPS-tillväxt {fmt_pct(case.get('Bull EPS growth'))}, exit P/E {_num(case.get('Bull exit P/E')):.1f}")
+                            asym = _num(case.get("Scenario Asymmetry"))
+                            s4.metric("Asymmetri", f"{asym:.1f}×" if np.isfinite(asym) else "—", help="Base-uppsida relativt Bear-nedsida. En förenklad scenarioindikator, inte en sannolikhet.")
+                            st.caption(f"{case.get('Scenario Verdict','—')} · {case.get('Scenario Risk Label','—')}. Scenarioanalys – inte kursmål eller prognos.")
+                        else:
+                            st.info(f"Scenarioanalys: {case.get('Scenario Note','Otillräcklig data')}")
+                        if str(case.get("Case Vetoes", "")).strip() and str(case.get("Case Vetoes")) != "inga hårda motbevis i gate-modellen":
+                            st.warning("**Vad stoppar eller sänker caset:** " + str(case.get("Case Vetoes")))
+                        x1, x2, x3 = st.columns(3)
+                        x1.markdown("**Varför marknaden kan ha fel**"); x1.write(str(case.get('Varför marknaden kan ha fel','—')))
+                        x2.markdown("**Vad data stödjer**"); x2.write(str(case.get('Fleråriga styrkor','—')) + "\n\n" + str(case.get('Positiva förändringar','—')))
+                        x3.markdown("**Devil's Advocate**"); x3.write(str(case.get("Devil's Advocate",'—')) + "\n\n" + str(case.get('Negativa förändringar','—')))
+                        with st.expander("Visa flerårsdata + färska förändringar"):
+                            st.write({
+                                "Omsättning CAGR": fmt_pct(case.get("Omsättning CAGR")),
+                                "Vinst CAGR": fmt_pct(case.get("Vinst CAGR")),
+                                "FCF CAGR": fmt_pct(case.get("FCF CAGR")),
+                                "Flerårig marginalförändring": fmt_pct(case.get("Rörelsemarginal trend")),
+                                "Skuldförändring": fmt_pct(case.get("Skuldförändring")),
+                                "Positiv FCF-andel": fmt_pct(case.get("Positiv FCF-andel")),
+                                "Omsättning YoY senaste kvartal": fmt_pct(case.get("Omsättning YoY senaste kvartal")),
+                                "Omsättningsacceleration": fmt_pct(case.get("Omsättning acceleration")),
+                                "Marginal YoY-förändring": fmt_pct(case.get("Marginal YoY förändring")),
+                                "FCF YoY senaste kvartal": fmt_pct(case.get("FCF YoY senaste kvartal")),
+                                "EPS-estimat förändring": fmt_pct(case.get("EPS-estimat förändring")),
+                                "EPS-estimat jämfört med": case.get("EPS-estimat jämförelseperiod", "—"),
+                                "EPS-revisionsbalans": fmt_pct(case.get("EPS-revisionsbalans")),
+                                "Senaste EPS-överraskning": fmt_pct(case.get("Senaste EPS-överraskning")),
+                                "EPS-hurdle vid exit P/E 15": fmt_pct(case.get("Implied EPS CAGR @ exit P/E 15")),
+                                "EPS-hurdle vid exit P/E 20": fmt_pct(case.get("Implied EPS CAGR @ exit P/E 20")),
+                                "EPS-hurdle vid exit P/E 25": fmt_pct(case.get("Implied EPS CAGR @ exit P/E 25")),
+                                "FCF growth hurdle": fmt_pct(case.get("FCF growth hurdle")),
+                                "Verifierad tillväxtproxy": fmt_pct(case.get("Verifierad tillväxtproxy")),
+                                "Tillväxtkälla": case.get("Tillväxtkälla", "—"),
+                                "Mispricing-stöd": case.get("Mispricing Evidence", "—"),
+                                "Mispricing-motbevis": case.get("Mispricing Cautions", "—"),
+                                "Case Gate": case.get("Case Gate", "—"),
+                                "Oberoende stöd": case.get("Case Supports", "—"),
+                                "Neutrala/oklara delar": case.get("Case Neutrals", "—"),
+                                "Hårda motbevis": case.get("Case Vetoes", "—"),
+                                "Case Confidence": case.get("Case Confidence", "—"),
+                                "Katalysatorsignal": case.get("Catalyst Signal", "—"),
+                                "Primär katalysator": case.get("Primary Catalyst", "—"),
+                                "Katalysator – tid": case.get("Catalyst Timing", "—"),
+                                "Katalysator – möjlig effekt": case.get("Catalyst Effect", "—"),
+                                "Katalysator – evidens": case.get("Catalyst Evidence", "—"),
+                                "Katalysatorvarningar": case.get("Catalyst Warnings", "—"),
+                                "Bear EPS growth": fmt_pct(case.get("Bear EPS growth")),
+                                "Bear exit P/E": case.get("Bear exit P/E", "—"),
+                                "Bear upp-/nedsida": fmt_pct(case.get("Bear upside")),
+                                "Base EPS growth": fmt_pct(case.get("Base EPS growth")),
+                                "Base exit P/E": case.get("Base exit P/E", "—"),
+                                "Base upp-/nedsida": fmt_pct(case.get("Base upside")),
+                                "Bull EPS growth": fmt_pct(case.get("Bull EPS growth")),
+                                "Bull exit P/E": case.get("Bull exit P/E", "—"),
+                                "Bull upp-/nedsida": fmt_pct(case.get("Bull upside")),
+                                "Scenarioasymmetri": case.get("Scenario Asymmetry", "—"),
+                                "Fleråriga varningar": case.get("Fleråriga varningar", "—"),
+                            })
+                st.caption("Djupkontrollen kan sänka ett billigt bolag om kassaflöde, marginaler, omsättning, skuld, färska estimat eller prisets framtidskrav utvecklas fel. Case Gate kräver flera oberoende stöd och låter motbevis väga tungt. Bear/Base/Bull visar scenarioasymmetri med synliga antaganden; det är inte kursmål, sannolikheter eller en DCF. Saknade data lämnas som saknade.")
+
+            st.divider()
             render_discovery_shortlist(filtered, discovery_intent)
             st.divider()
             if discovery_intent in {"Bra långsiktig investering", "Billiga kvalitetsbolag", "Bästa möjligheter just nu"}:
@@ -2752,9 +4068,31 @@ def main() -> None:
         st.subheader("Min bevakning")
         watch_meta = watch_meta_global
         watched = watched_global
+        if st.session_state.get("bq_case_breaker_migration_needed"):
+            st.info("Case-breaker är tillgängligt, men Supabase behöver v2.21-migreringen innan reglerna kan sparas i molnet. Övrig bevakning fungerar som tidigare.")
         if not watched:
             st.info("Bevakningslistan är tom. Lägg till en aktie från detaljanalysen.")
         else:
+            st.markdown("#### Case Alert · intern utveckling + nya bolagshändelser")
+            st.caption("Case Alert kopplar ihop Case Journal, dina egna case-breakers och den publika mediabevakningen. Media ändrar aldrig Borsify Score. Rubriker används som varnings- och läsuppslag och ska verifieras i originalkällan.")
+            refresh_watch_media = st.button("Kontrollera senaste media för bevakade case", key="watch_case_alert_refresh", use_container_width=False)
+            if refresh_watch_media:
+                watch_feed, watch_feed_errors = fetch_idea_flow_cached()
+                st.session_state["idea_flow_feed"] = watch_feed
+                st.session_state["idea_flow_errors"] = watch_feed_errors
+            watch_media_feed = st.session_state.get("idea_flow_feed")
+            watch_ideas = pd.DataFrame()
+            if isinstance(watch_media_feed, pd.DataFrame) and not watch_media_feed.empty and not watch_df_global.empty:
+                watch_mentions = map_mentions(watch_media_feed, watch_df_global)
+                watch_ideas = build_verified_ideas(watch_mentions, watch_df_global) if not watch_mentions.empty else pd.DataFrame()
+                if not watch_ideas.empty:
+                    important = int((pd.to_numeric(watch_ideas.get("Case Impact Nivå", 0), errors="coerce").fillna(0) >= 2).sum())
+                    st.caption(f"Mediabevakning matchade {len(watch_ideas)} bevakade aktier · {important} med potentiellt casepåverkande händelse. Händelsernas riktning verifieras inte från rubriken ensam.")
+                else:
+                    st.caption("Mediabevakningen är hämtad, men inga aktuella rubriker matchade dina bevakade aktier.")
+            else:
+                st.caption("Ingen mediabevakning är hämtad i den här sessionen ännu. Knappen ovan hämtar den när du vill göra en Case Alert-kontroll.")
+
             watch_df = watch_df_global.copy()
             if not watch_df.empty:
                 order = {sym: i for i, sym in enumerate(watched)}
@@ -2773,11 +4111,101 @@ def main() -> None:
                 current_target = _num(meta.get("target_price"))
                 with st.expander(sym, expanded=False):
                     current_row = watch_df_global[watch_df_global["Ticker"].astype(str) == sym].head(1) if not watch_df_global.empty else pd.DataFrame()
+                    journal = None
+                    breaker = None
                     if not current_row.empty:
                         wr = current_row.iloc[0]
                         st.markdown(f"**Borsifys skäl just nu:** {wr.get('Varför','—')}")
                         cp = _num(wr.get("Pris"))
                         if np.isfinite(cp): st.caption(f"Aktuell hämtad kurs: {fmt_price_with_sek(wr)} · kursdag {wr.get('Prisdatum','—')}")
+                    if not current_row.empty:
+                        hist = get_score_history(sym, profile)
+                        wr = current_row.iloc[0]
+                        current_case = {
+                            "score": _num(wr.get("Borsify Score")),
+                            "valuation": _num(wr.get("Värdering")),
+                            "quality": _num(wr.get("Kvalitet")),
+                            "setup": _num(wr.get("Marknadsläge")),
+                            "income": _num(wr.get("Utdelning")),
+                            "risk": _num(wr.get("Risk")),
+                            "coverage": _num(wr.get("Datatäckning")),
+                        }
+                        journal = assess_case_change(hist, current_case, meta.get("added_at"))
+                        st.markdown("**Case Journal · vad har förändrats?**")
+                        delta = journal.get("score_delta")
+                        delta_text = f"{float(delta):+.1f} poäng sedan start" if np.isfinite(_num(delta)) else "historiken byggs upp"
+                        st.write(f"**{journal.get('status', 'Historiken byggs upp')}** · {delta_text}")
+                        days = journal.get("days_followed")
+                        if days is not None:
+                            st.caption(f"Följd i cirka {int(days)} dagar. Det här beskriver förändringar i Borsifys mätbild – inte ett automatiskt köp- eller säljbeslut.")
+                        for change in journal.get("changes", []):
+                            st.write(f"• {change}")
+                        jt = journal_table(hist)
+                        if len(jt) >= 2:
+                            with st.expander("Visa sparad utveckling", expanded=False):
+                                st.dataframe(jt, use_container_width=True, hide_index=True)
+                        else:
+                            st.caption("Efter fler dagliga analyser visas en tidslinje här så att du kan se om caset faktiskt utvecklas åt rätt håll.")
+                    else:
+                        st.caption("Case Journal börjar byggas när aktien har analyserats och sparats i bevakningen.")
+
+                    st.markdown("**Case-breaker · vad skulle få dig att tänka om?**")
+                    st.caption("Sätt bara gränser som faktiskt skulle få dig att ompröva caset. 0 betyder att regeln är avstängd. Det här är en kontrollista, inte en automatisk säljorder.")
+                    b1, b2 = st.columns(2)
+                    breaker_min_score = b1.number_input("Minsta Borsify Score", 0.0, 100.0, float(_num(meta.get("breaker_min_score"))) if np.isfinite(_num(meta.get("breaker_min_score"))) else 0.0, 1.0, key=f"breaker_score_{sym}")
+                    breaker_min_quality = b2.number_input("Minsta kvalitet", 0.0, 100.0, float(_num(meta.get("breaker_min_quality"))) if np.isfinite(_num(meta.get("breaker_min_quality"))) else 0.0, 1.0, key=f"breaker_quality_{sym}")
+                    b3, b4 = st.columns(2)
+                    breaker_min_risk = b3.number_input("Minsta riskpoäng", 0.0, 100.0, float(_num(meta.get("breaker_min_risk"))) if np.isfinite(_num(meta.get("breaker_min_risk"))) else 0.0, 1.0, key=f"breaker_risk_{sym}", help="I Borsify betyder högre riskpoäng bättre/tryggare riskbild.")
+                    breaker_max_score_drop = b4.number_input("Max scorefall från start", 0.0, 100.0, float(_num(meta.get("breaker_max_score_drop"))) if np.isfinite(_num(meta.get("breaker_max_score_drop"))) else 0.0, 1.0, key=f"breaker_drop_{sym}")
+                    if not current_row.empty:
+                        breaker_rules = {"min_score": breaker_min_score, "min_quality": breaker_min_quality, "min_risk": breaker_min_risk, "max_score_drop": breaker_max_score_drop}
+                        breaker = evaluate_case_breakers(current_case, hist, breaker_rules)
+                        status = str(breaker.get("status", ""))
+                        if breaker.get("tone") == "negative":
+                            st.error(f"**{status}** · {breaker.get('explanation','')}")
+                        elif breaker.get("tone") == "warning":
+                            st.warning(f"**{status}** · {breaker.get('explanation','')}")
+                        elif breaker.get("tone") == "positive":
+                            st.success(f"**{status}** · {breaker.get('explanation','')}")
+                        else:
+                            st.info(f"**{status}** · {breaker.get('explanation','')}")
+                        for item in breaker.get("triggered", []): st.write(f"🚨 {item}")
+                        for item in breaker.get("near", []): st.write(f"⚠️ {item}")
+
+                    if journal is not None and breaker is not None:
+                        idea_row = None
+                        if not watch_ideas.empty and "Ticker" in watch_ideas.columns:
+                            idea_match = watch_ideas[watch_ideas["Ticker"].astype(str) == sym].head(1)
+                            if not idea_match.empty:
+                                idea_row = idea_match.iloc[0]
+                        case_alert = evaluate_case_alert(journal, breaker, idea_row)
+                        st.markdown("**Case Alert · behöver något prioriteras?**")
+                        alert_text = f"**{case_alert.get('status','')}** · {case_alert.get('summary','')}"
+                        if case_alert.get("tone") == "critical":
+                            st.error(alert_text)
+                        elif case_alert.get("tone") == "warning":
+                            st.warning(alert_text)
+                        elif case_alert.get("tone") == "positive":
+                            st.success(alert_text)
+                        else:
+                            st.info(alert_text)
+                        for reason in case_alert.get("reasons", []):
+                            st.write(f"• {reason}")
+                        if idea_row is not None:
+                            event_name = str(idea_row.get("Huvudhändelse", "Övrigt / oklart"))
+                            pulse_name = str(idea_row.get("Mediepuls", "Ingen tydlig ny puls"))
+                            st.caption(f"Senaste externa kontext: {event_name} · {pulse_name}. Case Alert tolkar inte en vanlig rapport som positiv eller negativ utan verifierade fakta.")
+                            headlines = idea_row.get("Rubriker") or []
+                            if isinstance(headlines, list) and headlines:
+                                latest_headline = headlines[0]
+                                title = str(latest_headline.get("title", ""))
+                                source = str(latest_headline.get("source", ""))
+                                link = str(latest_headline.get("link", ""))
+                                if title:
+                                    st.write(f"Senaste rubrik: **{title}** · {source}")
+                                if link:
+                                    st.link_button("Öppna originalkällan", link)
+
                     note = st.text_area("Min anledning att bevaka", value=current_note, key=f"note_{sym}", placeholder="Exempel: Bra bolag men jag vill vänta på lägre pris.")
                     target = st.number_input(
                         "Mitt intressepris (0 = inget)", min_value=0.0, value=float(current_target) if np.isfinite(current_target) and current_target > 0 else 0.0, step=1.0, key=f"target_{sym}"
@@ -2790,7 +4218,7 @@ def main() -> None:
                     daily_drop = t3.number_input("Dagsfall %", 1.0, 50.0, float(current_drop) if np.isfinite(current_drop) else 5.0, 0.5, key=f"drop_{sym}")
                     csave, crem = st.columns(2)
                     if csave.button("Spara", key=f"save_watch_{sym}", use_container_width=True):
-                        update_watchlist_item(sym, note, target if target > 0 else None, score_threshold, score_move, daily_drop)
+                        update_watchlist_item(sym, note, target if target > 0 else None, score_threshold, score_move, daily_drop, breaker_min_score, breaker_min_quality, breaker_min_risk, breaker_max_score_drop)
                         st.success("Sparat")
                     if crem.button("Ta bort", key=f"remove_watch_{sym}", use_container_width=True):
                         toggle_watchlist(sym)

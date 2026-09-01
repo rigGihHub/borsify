@@ -1,4 +1,84 @@
-# Borsify v2.13.0
+# Borsify v2.35.0
+
+## v2.35.0 – Earnings Revisions & Inflection Engine
+
+Den här versionen prioriterar fyndkvalitet framför fler funktioner. Den långsiktiga djupkontrollen analyserar nu även **förändring** i stället för bara nivåer:
+
+- kvartalsvis omsättningstillväxt och acceleration,
+- marginalförändring YoY/QoQ,
+- FCF- och vinstförändring mot föregående år,
+- EPS-estimatrevideringar när Yahoo/yfinance faktiskt har täckning,
+- balans mellan analytikerhöjningar och -sänkningar,
+- senaste rapporterade EPS-överraskning när den finns.
+
+Resultatet visas som **Inflection Score** och **Inflection Signal**. Det är ett transparent förändringsindex, inte en prognos om framtida aktieavkastning. Positiv inflektion kan hjälpa ett redan fundamentalt godkänt case att prioriteras, men kan **aldrig rädda ett case som stoppats av Value Trap Risk**. Tydligt negativa EPS-revideringar eller bred försämring kan däremot sänka ett annars godkänt case till extra kontroll.
+
+Borsify visar dessutom **VARFÖR NU?** för toppcasen. Om ingen tydlig inflektion kan verifieras säger appen det i stället för att skapa en berättelse. Saknade analytikerestimat lämnas saknade och ersätts inte med AI, riktkurser eller rubriker.
+
+### Metodbegränsningar
+
+Yahoo/yfinance har varierande estimattäckning mellan marknader och bolag. v2.28 är därför byggd så att kvartalsdata kan ge förändringsevidens även när analytikertabeller saknas. Modellen är ännu inte point-in-time-backtestad för fundamenta eller estimatrevideringar; Inflection Score ska därför betraktas som en prioriteringssignal som måste valideras vidare, inte som bevisad alpha.
+
+
+## Nytt i v2.27.0 – Deep Case Engine: kvalitet före billig värdering
+
+Den här releasen markerar ett tydligt skifte: utvecklingen prioriterar **kvaliteten på de få case som hamnar högst**, inte fler funktioner.
+
+- Ny tvåstegsprocess för långsiktiga case. Den breda scanningen tar först fram finalister; endast de starkaste INVEST-kandidaterna hämtar därefter fleråriga resultat-, kassaflödes- och balansräkningsdata.
+- Ny **Value Trap Risk 0–100** med transparenta röda flaggor för negativt/instabilt FCF, krympande omsättning, försämrad vinst, fallande marginal, stigande skuld och svag aktuell lönsamhet. Skalan är en regelbaserad riskindikator, inte en sannolikhet.
+- Ny **Deep Confidence** som mäter hur mycket verifierbar flerårsdata analysen faktiskt bygger på. Tunn historik kan inte få hög confidence.
+- Ny gate-first-rankning: ett bolag med hög INVEST Score men tydlig value-trap-risk får inte slå ett verifierat case bara genom ett högt grundbetyg. Borsify skapar medvetet **ingen ny ovärderad mega-score** i detta steg.
+- Ny konkret **Devil's Advocate** och **Varför marknaden kan ha fel** baserad på observerade flerårstrender. Om ingen tydlig förbättring kan verifieras säger appen det.
+- Analytikers riktkurs/potential har tagits bort ur själva **Värdering**-scoren. En riktkurs är en åsikt och ska inte kunna göra ett bolag matematiskt ”billigare”.
+- FCF-yield har tagits bort ur **Growth**-delen av INVEST eftersom samma information tidigare indirekt räknades både som värdering och tillväxt.
+- Djupdata cachas i 12 timmar och hämtas bara för en liten finalistpool för att hålla den breda scanningen rimligt snabb. Om Yahoo saknar statement-data degraderar caset till otillräcklig data i stället för att Borsify fyller i luckor.
+
+### Kritisk nulägesanalys som ledde till ändringen
+
+Genomgången av v2.26 visade flera strukturella svagheter i fyndmotorn: fundamentalrankingen byggde huvudsakligen på en aktuell Yahoo-snapshot; flerårig uthållighet kunde därför inte verifieras. Värdering kunde dessutom få hjälp av analytikers målpris, FCF-yield återanvändes i Growth, och den breda Borsify Score blandade fundamenta med ett setup-betyg som medvetet premierar rekyler/RSI-områden. Det innebär risk för falsk precision och för att billiga/fallande aktier ser mer attraktiva ut än deras verksamhetsutveckling motiverar.
+
+Detta är **inte** löst fullt ut i v2.27. Kvarvarande högprioriterade brister är framför allt point-in-time estimatrevideringar, rapportöverraskningar, robusta katalysatordata, sektor-/bolagstypanpassning, historisk validering av fundamentalmodellen och survivorship-bias i universumen. INVEST-backtest ska därför fortfarande inte beskrivas som validerat.
+
+### Verifieringsgräns
+
+Enhetstester kan verifiera trendextraktion, riskregler, confidence och gate-rankning med syntetiska statement-data. Den här byggmiljön har inte internetåtkomst, så faktisk Yahoo-latens/täckning för liveuniversumet kan **inte** verifieras här och ska testas efter deployment.
+
+
+## Nytt i v2.26.0 – Gör "Nytt sedan sist" handlingsbart
+
+- Varje ny förändring har nu en direkt åtgärd: **Öppna Case Journal** för förändrade bevakade case eller **Öppna signalhistorik** för nya Radar-signaler.
+- Eftersom Streamlit-flikar inte kan bytas programmässigt på ett robust sätt visas destinationen direkt på Överblick i en tydlig, stängningsbar panel. Borsify låtsas alltså inte att den har navigerat till en annan flik.
+- Ny knapp **Markera som genomgången**. En explicit genomgången förändring försvinner ur "Nytt sedan sist" medan senare nya händelser för samma aktie fortfarande kan visas.
+- Genomgångsstatus använder stabila händelsenycklar och påverkar aldrig signalhistoriken, Case Journal eller någon investeringsscore.
+- Lokal SQLite fungerar direkt. För inloggade molnkonton finns en idempotent `reviewed_changes`-migration i `supabase_schema.sql`. Om den saknas degraderar appen säkert utan att övriga funktioner slutar fungera.
+
+
+## Nytt i v2.25.0 – Nytt sedan sist
+
+- Startsidan sparar tidpunkten för föregående besök och visar bara nya, tidsstämplade signaler och tydliga förändringar i bevakade case.
+- Första besöket behandlas neutralt: äldre information märks inte felaktigt som ny.
+- Streamlit-reruns under samma besök flyttar inte jämförelsepunkten; samma besök får därför en stabil förändringslista.
+- Samma aktie kan bara ta en plats i listan och den viktigaste nya orsaken behålls.
+- Funktionen är ett läst/oläst-lager och påverkar aldrig Borsify Score, INVEST, SWING eller REVERSAL.
+- Lokal SQLite fungerar direkt. För inloggade molnkonton finns en idempotent `visit_state`-migration i `supabase_schema.sql`; appen degraderar säkert om den ännu inte körts.
+
+## Nytt i v2.22.0 – Case Alert
+
+- **Case Alert** kopplar ihop Case Journal, användarens egna Case-breaker-regler och mediabevakningen för bevakade aktier.
+- En tydlig negativ händelse, exempelvis en vinstvarning, prioriteras extra högt när Borsifys egen mätbild samtidigt har försvagats eller en egen Case-breaker är utlöst.
+- Rapport, förvärv och andra potentiellt casepåverkande händelser märks som viktiga att läsa men Borsify gissar inte positiv/negativ riktning från rubriken ensam.
+- Case Alert kan även varna för intern försämring utan ny media och visa ny mediepuls utan att kalla det ett internt larm.
+- Mediabevakningen för bevakade case hämtas på användarens begäran och återanvänder samma cache som Idéflödet; den körs inte i onödan vid varje Streamlit-rerun.
+- Den senaste matchade originalrubriken och en länk till källan visas i bevakningscaset när sådan finns.
+- Extern information påverkar fortfarande aldrig Borsify Score, INVEST, SWING eller REVERSAL. Case Alert är triage och uppföljning, inte köp-/säljråd.
+- Ingen ny databas- eller Supabase-migration krävs för v2.22.0.
+
+## Nytt i v2.21.0 – Case-breaker
+
+Bevakade aktier kan nu få egna **case-breakers**: lägsta accepterade Borsify Score, kvalitet och riskpoäng samt största tillåtna scorefall från den första sparade analysen. 0 stänger av en regel. Borsify visar **Caset håller**, **Case-breaker nära** eller **Case-breaker utlöst** med vanlig svensk förklaring. En utlöst regel är en signal att granska investeringsidén på nytt – aldrig en automatisk säljorder.
+
+Lokalt migreras SQLite automatiskt. För Supabase finns fyra `alter table ... add column if not exists` längst ned i `supabase_schema.sql`; de behöver köras i SQL Editor när v2.21.0 tas i drift med molnbevakning.
+
 
 ## Nytt i v2.13.0 – Kvalitet till rätt pris + Idéflöde
 
@@ -261,7 +341,7 @@ I v2.7 bokfördes öppna positioner till insatt kapital mellan entry och exit. *
 
 Listorna är kuraterade startuniversum och ska inte tolkas som fullständiga eller officiella indexmedlemslistor. Yahoo Finance kan ändra symboler, datatillgänglighet och fundamental täckning över tid.
 
-## v2.15.0 – Valutaomräkning till SEK
+## v2.16.0 – Valutaomräkning till SEK
 
 - Utländska aktiekurser visas både i handelsvalutan och ungefärligt omräknade till SEK.
 - Börsvärde och genomsnittlig dagsomsättning räknas om till SEK före filtrering, så storleks- och likviditetsfilter blir jämförbara mellan marknader.
@@ -269,3 +349,182 @@ Listorna är kuraterade startuniversum och ska inte tolkas som fullständiga ell
 - Stöd för USD, EUR, GBP, DKK, NOK samt förberett stöd för CHF, CAD och JPY.
 - Londonnoteringar som anges i pence (GBp/GBX) konverteras först till GBP och därefter till SEK.
 - Originalkurs och originalvaluta bevaras alltid. SEK-värdet markeras som ungefärligt eftersom aktiekurs och valutakurs inte nödvändigtvis har exakt samma tidsstämpel.
+
+
+## v2.16.0 hotfix
+- Fixar NameError på Överblick när Datastatus renderas efter v2.15.0.
+- Marknad och benchmark skickas nu explicit till startsidan.
+- Saknad tidigare snapshot behandlas inte längre som något användaren bör kontrollera eller som en risksignal för aktien.
+
+
+## v2.16.0 – Global Radar & Mediepuls
+- Nytt marknadsval **Alla marknader** med ett begränsat globalt radaruniversum för snabb jämförelse mellan regioner.
+- Global referens använder VT som praktisk proxy; detta förklaras tydligt som referens, inte exakt benchmark.
+- Idéflödet visar **Mediepuls**: om ett bolag fått tydligt fler omnämnanden senaste 24 timmarna. Pulsen påverkar aldrig Borsify Score.
+- Kvalitet till rätt pris har fått en extra sammanfattning på vanlig svenska för nybörjare.
+- Ingen kärnscore har ändrats i denna release.
+
+
+## v2.18.0 – Händelseradar · varför pratas det om aktien?
+
+- Idéflödet klassificerar nu rubriker i konkreta händelsetyper: rapport/resultat, prognos/guidance, analys/riktkurs, insiderhandel, order/kontrakt, förvärv/bud, utdelning/återköp, emission/finansiering, ledningsförändring, regulatoriskt/juridiskt, produkt/lansering, kursrörelse samt vinstvarning/tydlig försämring.
+- Varje matchat bolag får `Huvudhändelse`, eventuella fler `Händelsetyper` och en kort förklaring på vanlig svenska om vad användaren bör kontrollera.
+- Rubrikerna bakom ett uppslag märks med händelsetyp så användaren snabbare kan förstå varför bolaget syns.
+- Händelseklassningen är deterministisk rubriksortering, inte sentimentanalys. Den ändrar aldrig Borsify Score, INVEST, SWING eller REVERSAL och ska alltid verifieras mot originalkällan.
+- Forumrubriker utan tydlig bolagshändelse märks som `Forumdiskussion` i stället för att Borsify gissar en orsak.
+
+## v2.17.0 – Kombinationsradar
+
+- Idéflödet kan nu upptäcka när extern uppmärksamhet sammanfaller med stark Borsify-data.
+- Nya etiketter: **Ovanligt intressant kombination**, **Kvalitetsbolag i fokus**, **Möjlig återhämtningsidé** och **Kortsiktigt läge i fokus**.
+- En separat **Läs först**-prioritet används bara för att sortera externa uppslag. Den består av 72 % Borsify Score och 28 % upptäcktsstyrka och är uttryckligen inte en investeringsscore eller avkastningsprognos.
+- För den starkaste kombinationsflaggan krävs bland annat flera oberoende mediekällor; forumaktivitet ensam räcker inte.
+- Media/forum ändrar fortfarande aldrig Borsify Score, INVEST, SWING eller REVERSAL.
+
+## v2.19.0 – Case Impact · ändrar nyheten själva investeringscaset?
+- Idéflödet skiljer nu mellan händelser som kan ändra bolagets vinst/risk och sådant som främst är brus eller andrahandsåsikter.
+- Ny etikett **Ändrar detta investeringscaset?** med tydlig, nybörjarvänlig förklaring.
+- Vinstvarning markeras som ny risk att kontrollera direkt.
+- Rapport, prognos, förvärv och regulatoriska händelser markeras som potentiellt caseförändrande utan att Borsify gissar om riktningen.
+- Emission/finansiering får särskild riskförklaring, inklusive extra varning när den befintliga riskbilden redan är svag.
+- Riktkurser/analytikeråsikter behandlas som sekundär information tills nya fundamentala fakta identifieras.
+- Kursrörelser och forumdiskussioner behandlas som brus tills bakomliggande orsak verifierats.
+- Case Impact påverkar inte Borsify Score, INVEST, SWING eller REVERSAL.
+
+## v2.21.0 – Case Journal · följ om caset faktiskt förändras
+
+- Bevakade aktier får en **Case Journal** direkt i bevakningslistan.
+- Journalen använder redan sparade dagssnapshots och kräver därför ingen ny databas eller Supabase-migration.
+- Borsify jämför dagens score och delpoäng med den första sparade analysen och beskriver på vanlig svenska om den egna mätbilden har stärkts, försvagats eller varit ungefär oförändrad.
+- Tydliga förändringar i Kvalitet, Värdering, Marknadsläge, Utdelning och Risk lyfts separat.
+- En enkel tidslinje visar de senaste sparade analyserna och förändringen från start.
+- Användarens egen bevakningsanteckning och intressepris ligger kvar bredvid journalen, så den ursprungliga tanken kan jämföras med hur datan utvecklats.
+- Journalen säger uttryckligen att förändringen gäller **Borsifys mätbild**, inte ett automatiskt köp- eller säljbeslut.
+- Ingen kärnscore eller signalmodell ändras i denna release.
+## v2.25.0 – Dagens fokus
+- Ny startsammanfattning som prioriterar högst tre saker att läsa först.
+- Samlar dagens kandidater, verkliga förändringar i bevakade case och nya Radar-signaler i samma vy.
+- Dubbletter per ticker tas bort så ett bolag inte kan fylla hela listan.
+- Fokus-rankingen används bara för läsordning och påverkar aldrig Borsify Score, INVEST, SWING eller REVERSAL.
+- Språket är avsiktligt vardagligt: varje punkt säger vad som hänt, varför det är relevant och vad användaren bör kontrollera härnäst.
+
+## Nytt i v2.25.0 – Tidsmedvetet Dagens fokus
+- Startsidan anpassar arbetsrubriken efter tid på dagen: **Inför börsöppning**, **Under dagen**, **Efter börsdagen** eller **Helgens fokus**.
+- Nya Radar-signaler får en försiktig färskhetsmarkering som **Nytt i dag**, **Sedan i går** eller **Senaste dagarna**.
+- Färskhet kan påverka vad som visas först, men påverkar aldrig Borsify Score, INVEST, SWING eller REVERSAL.
+- Åtgärdstexten anpassas efter läget: förberedelse före öppning, kontroll under dagen eller uppföljning efter stängning.
+- Tidsläget är en UX-hjälp och inte en officiell börskalender; helgdagar och halvdagar kan avvika.
+
+
+## v2.35.0 – Mispricing Engine
+
+Den långsiktiga djupkontrollen har nu ett separat förväntningslager. Borsify försöker inte påstå att den känner marknadens verkliga prognos. I stället räknar den ut transparenta **expectation hurdles**: vilken årlig EPS-tillväxt som ungefär krävs för 10 % årlig avkastning över fem år om slutvärderingen är P/E 15, 20 respektive 25. En separat förenklad FCF-lins jämför aktuell FCF-yield med samma avkastningshurdle.
+
+Hurdlarna jämförs endast med verifierbar tillväxtdata. Positiv felprissättning får inte rädda ett case med hög Value Trap Risk, medan en tydligt krävande värdering kan sänka ett tidigare godkänt djupcase till **Kräver extra kontroll**. Mispricing-bedömningen är en triage av prisets krav – inte en DCF, kursprognos eller sannolikhet.
+
+Viktigt: exitmultiplarna 15/20/25 och 10 %-hurdlen är synliga antaganden. De ska senare kalibreras/valideras per sektor och marknad när point-in-time data finns; de får inte optimeras bakåt enbart för bästa backtestresultat.
+
+
+## v2.35.0 – Bull / Base / Bear & Asymmetry Engine
+
+Den nya `scenario_engine.py` bygger transparenta femårsscenarier för långsiktiga djupcase.
+Bear, Base och Bull använder synliga antaganden för EPS-tillväxt och framtida P/E.
+Tillväxten ankras i verifierad flerårsdata, forward EPS där den finns och en försiktigt
+begränsad inflektionsjustering. Multipeln mean-revertas i stället för att dagens höga
+värdering automatiskt extrapoleras.
+
+Motorn beräknar modellerad upp-/nedsida, annualiserad avkastning och en enkel
+asymmetrikvot (Base-uppsida relativt Bear-nedsida). Value Trap Risk gör bear-scenariot
+hårdare och kan även sänka Base-antagandet. Extrem tillväxt och extrema multiplar
+begränsas uttryckligen för att minska falsk precision.
+
+Detta är scenarioanalys – inte kursmål eller prognoser. Saknas positiv EPS, pris eller
+tillräcklig tillväxthistorik returnerar motorn `Otillräcklig data`.
+
+
+## v2.35.0 – Confidence & Case Quality Gate
+
+Den långsiktiga topplistan använder nu en gate-first-modell som kräver stöd från flera oberoende analysdelar i stället för en ny viktad totalscore. Fyra stöd kontrolleras: flerårig fundamental kvalitet, färsk inflektion/estimatrevidering, möjlig felprissättning och Bear/Base/Bull-asymmetri. Datatäckning fungerar som förutsättning och tydlig value-trap-risk, negativ inflektion, krävande värdering eller svag scenario-risk/reward kan stoppa ett case.
+
+Scenario Engine från v2.30 är nu integrerad i den faktiska djupanalysen och UI:t. Bear/Base/Bull-antaganden och scenarioasymmetri visas för varje case när data räcker. `Case Confidence` betyder evidenstäckning, inte sannolikheten för positiv avkastning. INVEST används först efter gate-modellen som en tie-breaker, så hög gammal score kan inte ensam skapa ett toppcase.
+
+
+## v2.35.0 – Catalyst Engine & WHY NOW
+
+Long-term finalister får nu en separat katalysatoranalys som försöker svara på vad som
+konkret kan få marknaden att omvärdera bolaget och ungefär när. Motorn skiljer mellan
+schemalagda kontrollpunkter (t.ex. nästa rapport), data-baserad fundamental inflektion,
+skuld-/kassaflödesförbättring och rubrikbaserade bolagshändelser.
+
+Rubriker får aldrig ensamma bevisa ekonomisk effekt. Order, guidance, återköp m.m. märks
+som potentiella katalysatorer men originalkällan måste verifieras. Vinstvarning/sänkt
+guidance blir i stället en riskflagga som kan stoppa promotion av caset.
+
+Case Quality Gate har nu fem oberoende pelare: fundamental kvalitet, färsk inflektion,
+felprissättning, scenarioasymmetri och katalysator. Ett Toppcase kräver stöd från alla fem
+samt tillräcklig evidenstäckning. En kommande rapport är inte positiv bara för att den finns.
+
+
+## v2.35.0 – Short-Term Alpha Engine 2.0
+
+Kortsiktig fyndmotor för ungefär 1–6 månader. Den gamla SWING/REVERSAL-logiken finns kvar
+för historik och Edge Lab, men huvudlistan för kortsiktiga case använder nu en hårdare modell.
+
+Motorn prioriterar:
+- relativ styrka mot vald marknadsbenchmark över 1/3/6 månader,
+- trend mot SMA50/SMA200,
+- kontrollerat momentum,
+- handelsaktivitet/volym,
+- färska vinst- och estimatsignaler,
+- konkreta katalysatorer.
+
+Ett stort kursfall, stor drawdown eller låg RSI ger aldrig pluspoäng i sig. Kombinationen
+svag lång trend + negativt momentum, tydligt försämrade vinstsignaler eller ny extern risk
+kan stoppa ett case helt. Ett kortsiktigt Toppcase kräver dessutom minst en positiv
+fundamental/revisions- eller katalysatorsignal; en snygg kursgraf räcker inte ensam.
+
+Short Alpha Score är ett screeningindex, inte en prognos eller sannolikhet. Confidence mäter
+datatäckning/evidens. Benchmarkdata hämtas nu för upp till ett år så relativ styrka kan
+beräknas på 1, 3 och 6 månader.
+
+
+## v2.35.0 – Edge Lab för Short Alpha 2.0
+
+Edge Lab kan nu rekonstruera den tekniska delen av Short Alpha 2.0 point-in-time över
+historiska dagsdata. Testet använder endast information som fanns på respektive datum:
+relativ styrka mot vald benchmark, SMA50/SMA200-trend, 1/3/6-månadersmomentum och
+handelsaktivitet. Anti-falling-knife-reglerna appliceras historiskt på samma sätt.
+
+Framtida 1-, 3- och 6-månadersutfall läggs på först efter att signalserien byggts. Edge Lab
+visar tröskelanalys, träffsäkerhet, medianutfall, andel stora vinster/förluster och ett
+walk-forward-test där tröskeln väljs på äldre träningsdata innan nästa tidsperiod utvärderas.
+
+Delsignaler kan också delas i kvartiler för att undersöka om exempelvis starkare relativ
+styrka faktiskt följts av bättre 3-månadersutfall i den valda aktiens historik.
+
+Viktig begränsning: historiska estimatrevideringar och katalysatorer backfylls inte.
+Borsify har ännu inte point-in-time-historik för dessa faktorer. v2.34 validerar därför
+en teknisk Short Alpha-proxy, inte hela live-modellen. Detta är medvetet för att undvika
+look-ahead bias.
+
+
+## v2.35.0 – Recommendation Ledger & Outcome Learning
+
+Borsify fryser nu de faktiska kort- och långsiktiga finalisterna per dag, profil, marknad
+och modellversion innan framtida kursutfall är kända. Snapshoten innehåller bland annat
+rank, ingångspris, gate, score, confidence, evidensantal, WHY NOW, katalysator och de
+centrala delsignalerna. Även finalister som inte blev Toppcase sparas. Det är avsiktligt
+för att minska rekommendations-/survivorship bias i framtida kalibrering.
+
+Utfall mäts på exakta framtida handelssessioner från den frysta rekommendationsdagen:
+1/3/6 månader för kortsiktiga case och 6 månader/1 år/2 år för långsiktiga case. Om appen
+inte kördes exakt vid horisonten används den historiska stängningskursen på rätt
+handelssession – inte dagens pris som ersättning.
+
+Edge Lab har fått en Recommendation Ledger-vy med senaste frysta beslut, antal mogna
+utfall, medianutfall, andel positiva utfall och kalibrering per gate. Borsify ändrar ännu
+inte några modellvikter automatiskt från ledgern; små samples ska inte överoptimeras.
+
+SQLite fungerar direkt. För Supabase krävs de nya tabellerna `recommendation_ledger` och
+`recommendation_outcomes` i `supabase_schema.sql`. Om migrationen saknas fortsätter appen
+utan ledger i molnet och visar migration-needed-status internt i stället för att krascha.
