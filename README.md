@@ -530,6 +530,23 @@ SQLite fungerar direkt. För Supabase krävs de nya tabellerna `recommendation_l
 utan ledger i molnet och visar migration-needed-status internt i stället för att krascha.
 
 
-## v2.35.1 – Hotfix för djupanalys
+## v2.35.3 – Hotfix för djupanalys
 
 Byter scalar cell-assignments i deep/short finalist pipelines från `DataFrame.loc` till `DataFrame.at`. Detta gör att list-/dictvärden som Catalyst Candidates och stöd/veto-listor lagras som ett objekt i en cell i stället för att Pandas försöker tolka värdet som en kolumniterabel. Fixar kraschen `Must have equal len keys and value when setting with an iterable`.
+
+
+## v2.35.3 – Pandas iterable assignment hotfix
+
+Hotfix for Streamlit/Pandas runtime crash in deep and short finalist builders.
+`.at` alone was insufficient when a new column did not yet exist because Pandas
+internally fell back to `.loc`. All dynamically-added assessment columns are now
+created first as object dtype, then populated cell-by-cell. This safely supports
+lists and dictionaries such as Case Supports, Catalyst Candidates and similar
+structured evidence fields.
+
+## v2.35.3 – Runtime hotfix for structured assessment fields
+
+Replaced all cell-by-cell writes of deep/short assessment dictionaries with a separate
+object-typed DataFrame followed by index join. This completely avoids Pandas scalar
+assignment for list/dict fields and fixes the Streamlit Cloud crash path shown at
+build_deep_longlist line 891.

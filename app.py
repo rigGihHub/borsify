@@ -51,7 +51,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.35.1"
+APP_VERSION = "2.35.3"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -886,9 +886,19 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
                     "Varför marknaden kan ha fel": "kan inte bedömas med tillräcklig flerårsdata",
                     "Devil's Advocate": "otillräcklig data – gå inte vidare på modellen ensam", "Rapportdatum": "—",
                 }
-    for idx, assessment in records.items():
-        for key, value in assessment.items():
-            pool.at[idx, key] = value
+    # Pandas .at still falls back to .loc when a target column does not yet exist.
+    # Some assessment fields are lists/dicts (e.g. catalyst candidates/supports), so
+    # create all new columns as object dtype before assigning cell-by-cell.
+    # Build an object-typed result frame first, then join it into pool.
+    # This avoids Pandas scalar assignment entirely for list/dict values.
+    if records:
+        assessment_frame = pd.DataFrame.from_dict(records, orient="index")
+        for key in assessment_frame.columns:
+            assessment_frame[key] = assessment_frame[key].astype("object")
+        existing = [c for c in assessment_frame.columns if c in pool.columns]
+        if existing:
+            pool = pool.drop(columns=existing)
+        pool = pool.join(assessment_frame, how="left")
     # Final ordering is evidence-gate first. INVEST only breaks ties after the
     # independent quality, inflection, mispricing and scenario checks.
     order = sorted(pool.index, key=lambda idx: case_gate_rank_key(pool.loc[idx]), reverse=True)
@@ -952,9 +962,16 @@ def build_short_term_longlist(df: pd.DataFrame, benchmark: dict[str, Any] | None
                 fallback["Short Data Warning"] = f"Färsk fundamental-/estimatsdata kunde inte läsas ({type(exc).__name__})."
                 records[idx] = fallback
 
-    for idx, assessment in records.items():
-        for key, value in assessment.items():
-            pool.at[idx, key] = value
+    # Same protection as the deep longlist: pre-create new fields as object dtype
+    # so iterable assessment values never trigger Pandas' multi-column assignment path.
+    if records:
+        assessment_frame = pd.DataFrame.from_dict(records, orient="index")
+        for key in assessment_frame.columns:
+            assessment_frame[key] = assessment_frame[key].astype("object")
+        existing = [c for c in assessment_frame.columns if c in pool.columns]
+        if existing:
+            pool = pool.drop(columns=existing)
+        pool = pool.join(assessment_frame, how="left")
 
     order = sorted(pool.index, key=lambda idx: short_term_rank_key(pool.loc[idx]), reverse=True)
     return pool.loc[order].head(limit).copy()
