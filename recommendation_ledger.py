@@ -60,7 +60,9 @@ def stable_record_id(
 def snapshot_columns(horizon_type: str) -> list[str]:
     if horizon_type == "short":
         return [
-            "Ticker", "Namn", "Pris", "Sektor",
+            "Ticker", "Namn", "Pris", "Valuta", "Prisdatum", "Sektor",
+            "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
+            "ROE", "Vinstmarginal", "Skuld/eget kapital", "Risk", "Värdering", "Kvalitet",
             "Short Alpha Score", "Short Alpha Gate", "Short Alpha Confidence",
             "Short Relative Strength", "Short Trend", "Short Momentum",
             "Short Participation", "Short Revisions", "Short Catalyst",
@@ -69,7 +71,9 @@ def snapshot_columns(horizon_type: str) -> list[str]:
             "Catalyst Signal", "Primary Catalyst", "Catalyst Timing",
         ]
     return [
-        "Ticker", "Namn", "Pris", "Sektor", "INVEST Score",
+        "Ticker", "Namn", "Pris", "Valuta", "Prisdatum", "Sektor", "INVEST Score",
+        "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
+        "ROE", "Vinstmarginal", "Skuld/eget kapital",
         "Case Gate", "Case Confidence", "Case Evidence Count", "Case Veto Count",
         "Djupkontroll", "Value Trap Risk", "Deep Confidence",
         "Inflection Signal", "Inflection Score",

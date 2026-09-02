@@ -530,12 +530,12 @@ SQLite fungerar direkt. För Supabase krävs de nya tabellerna `recommendation_l
 utan ledger i molnet och visar migration-needed-status internt i stället för att krascha.
 
 
-## v2.37.0 – Hotfix för djupanalys
+## v2.41.0 – Hotfix för djupanalys
 
 Byter scalar cell-assignments i deep/short finalist pipelines från `DataFrame.loc` till `DataFrame.at`. Detta gör att list-/dictvärden som Catalyst Candidates och stöd/veto-listor lagras som ett objekt i en cell i stället för att Pandas försöker tolka värdet som en kolumniterabel. Fixar kraschen `Must have equal len keys and value when setting with an iterable`.
 
 
-## v2.37.0 – Pandas iterable assignment hotfix
+## v2.41.0 – Pandas iterable assignment hotfix
 
 Hotfix for Streamlit/Pandas runtime crash in deep and short finalist builders.
 `.at` alone was insufficient when a new column did not yet exist because Pandas
@@ -544,7 +544,7 @@ created first as object dtype, then populated cell-by-cell. This safely supports
 lists and dictionaries such as Case Supports, Catalyst Candidates and similar
 structured evidence fields.
 
-## v2.37.0 – Runtime hotfix for structured assessment fields
+## v2.41.0 – Runtime hotfix for structured assessment fields
 
 Replaced all cell-by-cell writes of deep/short assessment dictionaries with a separate
 object-typed DataFrame followed by index join. This completely avoids Pandas scalar
@@ -552,7 +552,7 @@ assignment for list/dict fields and fixes the Streamlit Cloud crash path shown a
 build_deep_longlist line 891.
 
 
-## v2.37.0 – Fråga Borsify AI på varje rekommendation
+## v2.41.0 – Fråga Borsify AI på varje rekommendation
 
 Varje kort- och långsiktig rekommendation har nu en egen fråga/svar-yta:
 `Fråga Borsify AI om rekommendationen`.
@@ -584,7 +584,7 @@ gränssnittet förklarar att extern AI inte är aktiverad. API-nyckeln skickas a
 webbläsaren eller lagras i GitHub.
 
 
-## v2.37.0 – Aktuell kurs på alla rekommendationer
+## v2.41.0 – Aktuell kurs på alla rekommendationer
 
 Alla rekommendationskort visar nu senaste tillgängliga kurs tydligt direkt i headern,
 tillsammans med dagsförändring där den finns. Detta gäller både Short Alpha 1–6 månader,
@@ -594,7 +594,7 @@ Syftet är att användaren direkt ska kunna bedöma om ett case fortfarande är 
 och undvika att behöva öppna detaljanalysen bara för att se priset.
 
 
-## v2.37.0 – AI-kostnadsmätare
+## v2.41.0 – AI-kostnadsmätare
 
 Borsify visar nu uppskattad kostnad för varje lyckad AI-fråga och ackumulerad kostnad
 för innevarande kalendermånad. Beräkningen använder faktisk tokenanvändning som returneras
@@ -604,8 +604,105 @@ Mätaren visar USD och, när USD/SEK kan hämtas via Borsifys befintliga Yahoo-F
 även ungefärlig kostnad i SEK.
 
 Inloggade Supabase-användares usage sparas i den nya tabellen `ai_usage`.
-Kör v2.37.0-delen i `supabase_schema.sql` för molnpersistens. Om tabellen saknas eller
+Kör v2.41.0-delen i `supabase_schema.sql` för molnpersistens. Om tabellen saknas eller
 användaren inte är inloggad faller appen säkert tillbaka till lokal SQLite.
 
 Kostnadsmätaren är en uppskattning, inte OpenAI-fakturan. Den lagrar endast lyckade
 Borsify-AI-anrop och prisar dem enligt den taxa som finns i appversionen.
+
+
+## v2.41.0 – Prisrelevans i AI + renare rekommendationskort
+
+- Aktuell kurs visas nu på en egen fullbreddsrad på kort- och långsiktiga rekommendationer
+  för att undvika Streamlits avkortning av exempelvis `134,00 SEK`.
+- Svenska decimaler används i kursvisningen och kursdag/dagsförändring visas på samma rad.
+- Short Alpha-casets AI-kontext innehåller nu även tillgängliga värderings- och kvalitetsdata:
+  P/E, Forward P/E, P/B, EV/EBITDA, FCF-yield, ROE, vinstmarginal, skuld/eget kapital,
+  risk, värderingsscore, kvalitetsscore, 52v-position, RSI och aktuell kursdata.
+- AI-instruktionen kräver nu att frågor av typen "är caset fortfarande relevant från dagens kurs?"
+  väger ihop värdering, kvalitet/risk och korttidssignaler. Hög aktiekurs i kronor får aldrig
+  automatiskt tolkas som dyr värdering.
+- AI:n får fortfarande inte kvantifiera uppsida om scenario-/värderingsunderlaget inte räcker.
+- Kostnadsmätaren är nedtonad till `AI denna månad: ≈ X kr · N frågor`.
+  USD, tokens och modell ligger bakom detaljexpanders.
+
+
+## v2.41.0 – Rekommendationens relevans nu
+
+Varje kort- och långsiktigt finalistcase jämförs nu med den senaste frysta
+rekommendationen från en tidigare dag för samma ticker, horisont, profil och marknad.
+
+Borsify visar en separat status:
+- `Ny rekommendation`
+- `Fortfarande relevant`
+- `Caset har stärkts`
+- `Mindre attraktivt än vid signal`
+- `Caset har försvagats`
+
+Bedömningen är deterministisk och är inte en ny avkastningsprognos. Den väger bland
+annat förändrad modellscore, förändrad gate, hårda motbevis samt kursförändringen sedan
+den tidigare frysta rekommendationen. En kursuppgång gör inte automatiskt aktien "dyr".
+Om kursen har stigit tydligt utan motsvarande förstärkning i modellstödet markeras i
+stället att värderingen bör kontrolleras på nytt.
+
+Från v2.41.0 fryser Recommendation Ledger dessutom relevanta värderingsfält
+(P/E, Forward P/E, P/B, EV/EBITDA, FCF-yield m.fl.) så framtida jämförelser kan beskriva
+om värderingsbilden faktiskt har förändrats, inte bara kursen.
+
+Samma dags frysta poster används aldrig som jämförelse för samma dags rerun, vilket
+förhindrar meningslös självjämförelse.
+
+
+## v2.41.0 – Case Plan: vad måste hända härifrån?
+
+Varje kort- och långsiktigt finalistcase får nu en explicit uppföljningsplan:
+- Tes
+- Vad som bekräftar caset
+- Varningssignal
+- Case-breaker
+- Nästa kontrollpunkt
+- Prisrelevans
+
+Planen är deterministisk och byggs endast av redan verifierad Borsify-data. Den hittar
+inte på riktkurser, rapportdatum, katalysatorer eller sannolikheter.
+
+För kortsiktiga case används bland annat relativ styrka, trend, revisionssignal,
+katalysatorer, vetoer och Relevans nu. För långsiktiga case används bland annat
+inflektion, mispricing, katalysatorer, Case Quality Gate, Devil's Advocate och
+Bull/Base/Bear-scenarier där de faktiskt kan beräknas.
+
+Prisregeln sätter ingen godtycklig procentuell stop/rekommendationsgräns. Om scenariodata
+saknas säger Borsify uttryckligen att underlaget inte räcker. Om ett gammalt scenario
+finns kräver planen att det räknas om vid väsentligt ändrad kurs i stället för att
+återanvända gamla uppsidesiffror.
+
+Case-planen skickas också med till Borsify AI så användaren kan fråga varför en viss
+bekräftelse, varningssignal eller case-breaker är viktig.
+
+
+## v2.41.0 – Global startsida med fyra Top 3-listor + Mina aktieköp
+
+Överblick börjar nu med fyra separata topp 3-rankningar:
+1. 1–2 dagar / Daytrader
+2. 1 vecka–3 månader
+3. 1–5 år
+4. Resten av livet
+
+Alla marknader är nu standardval. Det globala universumet använder hela Borsifys
+nuvarande kuraterade täckning i Sverige, USA, Danmark, Norge, Finland, Tyskland och
+Storbritannien. UI:t säger uttryckligen att detta ännu inte betyder samtliga börser i
+samtliga länder.
+
+Varje horisont har en separat transparent rankinglogik. Daytrading prioriterar momentum,
+volym/aktivitet, RSI, trend och risk. Mellanhorisonten kombinerar 1–3 månaders momentum
+med kvalitet/risk/värdering. 1–5 år prioriterar INVEST/kvalitet/värdering/risk. "Resten
+av livet" viktar kvalitet, robusthet, ROE och marginal högst och kallas uttryckligen en
+kandidatlista, inte ett löfte om evigt ägande.
+
+Ny sektion "Mina aktieköp · säljkoll" låter användaren registrera ticker, köpkurs, antal,
+köpdatum och anteckning. Tabellen visar aktuell kurs, utveckling, värde, färgkodad
+modellstatus och Borsifys skäl. Statusarna är BEHÅLL, BEVAKA, VINSTSÄKRA? och OMPRÖVA.
+Detta är en modellbaserad beslutsindikator och inte personlig finansiell rådgivning.
+
+Innehav sparas lokalt i SQLite eller privat per inloggad användare i Supabase efter att
+v2.41.0-migreringen i supabase_schema.sql har körts.

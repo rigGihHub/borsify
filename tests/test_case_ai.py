@@ -45,3 +45,27 @@ def test_local_fallback_is_explicitly_not_ai():
     text = local_case_explanation(case, "long")
     assert "regelbaserat reservsvar" in text
     assert "dyr" in text
+
+
+def test_short_context_now_includes_current_valuation_and_price_relevance_data():
+    case = {
+        "Ticker":"BUFAB.ST","Pris":134.0,"Valuta":"SEK","Prisdatum":"2026-09-02",
+        "P/E":22.4,"Forward P/E":18.7,"EV/EBITDA":13.2,"FCF yield":0.041,
+        "ROE":0.19,"Vinstmarginal":0.11,"Risk":68,
+        "Short Alpha Score":71,"Short Trend":88,"Short Relative Strength":50,
+    }
+    ctx = build_case_ai_context(case, "short")
+    data = ctx["case_data"]
+    assert data["Pris"] == 134.0
+    assert data["Valuta"] == "SEK"
+    assert data["P/E"] == 22.4
+    assert data["Forward P/E"] == 18.7
+    assert data["FCF yield"] == 0.041
+    assert data["Short Trend"] == 88
+
+
+def test_instructions_explain_current_price_relevance_without_equating_price_with_valuation():
+    ins = build_case_ai_instructions()
+    assert "fortfarande är relevant från dagens kurs" in ins
+    assert "hög aktiekurs i kronor" in ins
+    assert "Forward P/E" in ins

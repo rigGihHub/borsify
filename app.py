@@ -39,6 +39,10 @@ from recommendation_ledger import (
     build_recommendation_records, evaluate_record_from_history,
     outcome_summary, calibration_by_gate,
 )
+from recommendation_relevance import apply_recommendation_relevance
+from case_plan import apply_case_plans
+from horizon_rankings import top_three
+from portfolio_advisor import assess_holding
 from case_ai import build_case_ai_input, build_case_ai_instructions, local_case_explanation
 from ai_cost import token_usage, estimate_usage_cost, format_cost_usd
 
@@ -59,7 +63,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.37.0"
+APP_VERSION = "2.41.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -126,11 +130,11 @@ UK_LARGE_TICKERS = [
 # marknader utan att göra varje Streamlit-körning orimligt tung. Varje region finns kvar
 # separat om användaren vill göra en bredare regional analys.
 GLOBAL_RADAR_TICKERS = list(dict.fromkeys(
-    OMXS30_TICKERS
-    + US_LARGE_TICKERS[:25]
-    + NORDIC_LARGE_TICKERS[:12]
-    + GERMANY_LARGE_TICKERS[:12]
-    + UK_LARGE_TICKERS[:12]
+    SWEDEN_BROAD_TICKERS
+    + US_LARGE_TICKERS
+    + NORDIC_LARGE_TICKERS
+    + GERMANY_LARGE_TICKERS
+    + UK_LARGE_TICKERS
 ))
 
 MARKET_CONFIGS = {
@@ -1332,6 +1336,79 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS holdings (
+                holding_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                purchase_price REAL NOT NULL,
+                quantity REAL NOT NULL DEFAULT 1,
+                purchase_date TEXT NOT NULL DEFAULT '',
+                note TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+
+
+def get_holdings() -> pd.DataFrame:
+    cols = ["holding_id","symbol","purchase_price","quantity","purchase_date","note","created_at"]
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        try:
+            data = (
+                client.table("holdings").select(",".join(cols))
+                .eq("user_id", uid).order("created_at", desc=False).execute().data or []
+            )
+            return pd.DataFrame(data, columns=cols)
+        except Exception:
+            st.session_state["bq_holdings_migration_needed"] = True
+            return pd.DataFrame(columns=cols)
+    init_db()
+    with _db_connect() as conn:
+        return pd.read_sql_query(
+            f"SELECT {','.join(cols)} FROM holdings ORDER BY created_at ASC", conn
+        )
+
+
+def add_holding(symbol: str, purchase_price: float, quantity: float, purchase_date: str, note: str = "") -> None:
+    symbol = str(symbol or "").upper().strip()
+    if not symbol or purchase_price <= 0 or quantity <= 0:
+        return
+    client = _supabase_client(); uid = current_user_id()
+    payload = {
+        "symbol": symbol, "purchase_price": float(purchase_price), "quantity": float(quantity),
+        "purchase_date": str(purchase_date or ""), "note": str(note or ""),
+    }
+    if client is not None and uid:
+        try:
+            client.table("holdings").insert({"user_id": uid, **payload}).execute()
+            return
+        except Exception:
+            st.session_state["bq_holdings_migration_needed"] = True
+            return
+    init_db()
+    with _db_connect() as conn:
+        conn.execute(
+            "INSERT INTO holdings(symbol,purchase_price,quantity,purchase_date,note) VALUES(?,?,?,?,?)",
+            (payload["symbol"], payload["purchase_price"], payload["quantity"], payload["purchase_date"], payload["note"]),
+        )
+
+
+def delete_holding(holding_id: int) -> None:
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        try:
+            client.table("holdings").delete().eq("user_id", uid).eq("holding_id", int(holding_id)).execute()
+            return
+        except Exception:
+            st.session_state["bq_holdings_migration_needed"] = True
+            return
+    init_db()
+    with _db_connect() as conn:
+        conn.execute("DELETE FROM holdings WHERE holding_id=?", (int(holding_id),))
+
 
 
 def _load_last_visit() -> str | None:
@@ -2769,6 +2846,172 @@ def render_quick_change_target(scored: pd.DataFrame, signal_history: pd.DataFram
                     st.write(str(sig.get("text") or ""))
 
 
+
+def _market_label_for_ticker(symbol: str) -> str:
+    s = str(symbol or "").upper()
+    if s.endswith(".ST"): return "Sverige"
+    if s.endswith(".CO"): return "Danmark"
+    if s.endswith(".OL"): return "Norge"
+    if s.endswith(".HE"): return "Finland"
+    if s.endswith(".DE"): return "Tyskland"
+    if s.endswith(".L"): return "Storbritannien"
+    return "USA"
+
+
+def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
+    st.markdown("## 🌍 Borsify Topplistor")
+    if market == "Alla marknader":
+        st.caption(
+            "Topp 3 över alla marknader Borsify stöder just nu. "
+            "Datatäckningen omfattar Sverige, USA, Danmark, Norge, Finland, Tyskland och Storbritannien. "
+            "Listan är inte ännu en komplett scanning av alla världens börser."
+        )
+    else:
+        st.warning(
+            f"Du har filtrerat marknaden till {market}. Topplistorna nedan avser därför {market}. "
+            "Välj **Alla marknader** i vänstermenyn för Borsifys globala ranking."
+        )
+
+    sections = [
+        ("⚡ 1–2 dagar · Daytrader", "day", "Daytrade Score",
+         "Mycket kort horisont. Momentum, handelsaktivitet, RSI, trend och risk väger tyngst."),
+        ("📈 1 vecka–3 månader", "medium", "Mellan Score",
+         "Momentum över 1–3 månader kombineras med kvalitet, värdering och risk."),
+        ("🏗️ 1–5 år", "long", "Lång Score",
+         "INVEST, kvalitet, värdering och risk väger tyngre än kort kursmomentum."),
+        ("♾️ Resten av livet", "lifetime", "Livstid Score",
+         "Kvalitet, finansiell robusthet och lönsamhet prioriteras. Det är en livslång kandidatlista – ingen garanti att ett bolag ska ägas för alltid."),
+    ]
+    for title, horizon, score_col, caption in sections:
+        st.markdown(f"### {title}")
+        st.caption(caption)
+        top3 = top_three(scored, horizon)
+        if top3.empty:
+            st.info("Ingen kandidat kunde rankas med tillgänglig data.")
+            continue
+        cols = st.columns(3)
+        for rank, (col, (_, row)) in enumerate(zip(cols, top3.iterrows()), start=1):
+            with col:
+                with st.container(border=True):
+                    st.markdown(f"### {rank}. {row.get('Namn', row.get('Ticker'))}")
+                    st.caption(f"{row.get('Ticker','—')} · {_market_label_for_ticker(row.get('Ticker',''))}")
+                    price = _num(row.get("Pris"))
+                    ccy = str(row.get("Valuta","") or "")
+                    if np.isfinite(price):
+                        st.markdown(f"**{price:.2f} {ccy}**")
+                    score = _num(row.get(score_col))
+                    st.metric("Horisontscore", f"{score:.0f}/100" if np.isfinite(score) else "—")
+                    st.write(str(row.get("Horisontförklaring","—")))
+                    if horizon == "day":
+                        st.caption(
+                            f"Idag {fmt_pct(row.get('Dagsförändring'))} · Volym {fmt_num(row.get('Volymkvot'),2)}x · RSI {fmt_num(row.get('RSI14'),0)}"
+                        )
+                    elif horizon == "medium":
+                        st.caption(f"1 mån {fmt_pct(row.get('1 mån'))} · 3 mån {fmt_pct(row.get('3 mån'))}")
+                    else:
+                        st.caption(
+                            f"Kvalitet {fmt_num(row.get('Kvalitet'),0)}/100 · Risk {fmt_num(row.get('Risk'),0)}/100 · Värdering {fmt_num(row.get('Värdering'),0)}/100"
+                        )
+
+
+def _holding_status_style(row: pd.Series) -> list[str]:
+    status = str(row.get("Status",""))
+    bg = {
+        "BEHÅLL": "background-color: rgba(46, 160, 67, 0.20)",
+        "BEVAKA": "background-color: rgba(255, 193, 7, 0.22)",
+        "VINSTSÄKRA?": "background-color: rgba(255, 152, 0, 0.24)",
+        "OMPRÖVA": "background-color: rgba(220, 53, 69, 0.24)",
+    }.get(status, "")
+    return [bg] * len(row)
+
+
+def render_holdings_portfolio(scored: pd.DataFrame, profile: str) -> None:
+    st.markdown("## 💼 Mina aktieköp · säljkoll")
+    st.caption(
+        "Lägg in vad du köpt och till vilken kurs. Borsify jämför inköpskursen med dagens data och visar "
+        "BEHÅLL, BEVAKA, VINSTSÄKRA? eller OMPRÖVA. Det är en modellbaserad beslutsindikator, inte personlig finansiell rådgivning."
+    )
+
+    with st.expander("＋ Lägg till ett aktieköp", expanded=False):
+        with st.form("add_holding_form", clear_on_submit=True):
+            c1,c2,c3,c4 = st.columns([1.25,1,1,.9])
+            symbol = c1.text_input("Ticker", placeholder="t.ex. BUFAB.ST")
+            purchase_price = c2.number_input("Köpkurs", min_value=0.0, value=0.0, step=1.0)
+            quantity = c3.number_input("Antal", min_value=0.0, value=1.0, step=1.0)
+            purchase_date = c4.date_input("Köpdatum")
+            note = st.text_input("Anteckning", placeholder="Valfritt")
+            submitted = st.form_submit_button("Spara aktieköp", type="primary")
+            if submitted:
+                if not symbol.strip() or purchase_price <= 0 or quantity <= 0:
+                    st.warning("Ange ticker, köpkurs över 0 och antal över 0.")
+                else:
+                    add_holding(symbol, purchase_price, quantity, purchase_date.isoformat(), note)
+                    st.success("Aktieköpet sparades.")
+                    st.rerun()
+
+    holdings = get_holdings()
+    if holdings.empty:
+        st.info("Du har inte lagt in några aktieköp ännu.")
+        return
+
+    symbols = holdings["symbol"].astype(str).str.upper().tolist()
+    current = scored[scored["Ticker"].astype(str).str.upper().isin(symbols)].copy()
+    missing = [s for s in symbols if s not in set(current["Ticker"].astype(str).str.upper())]
+    if missing:
+        extra_raw, _ = scan_universe(list(dict.fromkeys(missing)))
+        if not extra_raw.empty:
+            extra_raw, _, _ = add_sek_conversions(extra_raw)
+            extra = add_scores(extra_raw, profile)
+            current = pd.concat([current, extra], ignore_index=True)
+
+    lookup = {str(r["Ticker"]).upper(): r for _,r in current.iterrows()}
+    rows=[]
+    for _,h in holdings.iterrows():
+        sym=str(h["symbol"]).upper()
+        row=lookup.get(sym)
+        if row is None:
+            rows.append({
+                "ID": int(h["holding_id"]), "Aktie": sym, "Köpkurs": h["purchase_price"],
+                "Aktuell kurs": np.nan, "Utveckling": np.nan, "Värde": np.nan,
+                "Status": "DATA SAKNAS", "Borsify råd": "Aktuell marknadsdata kunde inte hämtas", "Skäl": "—"
+            })
+            continue
+        assessment=assess_holding(h["purchase_price"], row)
+        now=_num(row.get("Pris")); qty=_num(h.get("quantity"))
+        rows.append({
+            "ID": int(h["holding_id"]),
+            "Aktie": f"{row.get('Namn',sym)} · {sym}",
+            "Köpdatum": h.get("purchase_date",""),
+            "Köpkurs": float(h["purchase_price"]),
+            "Aktuell kurs": now,
+            "Valuta": row.get("Valuta",""),
+            "Antal": qty,
+            "Utveckling": assessment["Utveckling"],
+            "Värde": now*qty if np.isfinite(now) and np.isfinite(qty) else np.nan,
+            "Status": assessment["Status"],
+            "Borsify råd": assessment["Borsify råd"],
+            "Skäl": assessment["Skäl"],
+        })
+    table=pd.DataFrame(rows)
+    display=table.drop(columns=["ID"]).copy()
+    if "Utveckling" in display:
+        display["Utveckling"] = display["Utveckling"].map(lambda x: "—" if not np.isfinite(_num(x)) else f"{x:+.1%}")
+    for col in ["Köpkurs","Aktuell kurs","Värde"]:
+        if col in display:
+            display[col] = display[col].map(lambda x: "—" if not np.isfinite(_num(x)) else f"{x:,.2f}".replace(",", " "))
+    st.dataframe(display.style.apply(_holding_status_style, axis=1), use_container_width=True, hide_index=True)
+
+    with st.expander("Ta bort ett registrerat köp", expanded=False):
+        opts={f"{r['Aktie']} · {r.get('Köpdatum','')}": int(r["ID"]) for _,r in table.iterrows()}
+        choice=st.selectbox("Välj rad", list(opts), key="holding_delete_choice")
+        if st.button("Ta bort köp", key="delete_holding_btn"):
+            delete_holding(opts[choice]); st.rerun()
+
+    if st.session_state.get("bq_holdings_migration_needed"):
+        st.warning("Supabase saknar holdings-tabellen för v2.41.0. Kör den nya SQL-migreringen för permanent molnsynk.")
+
+
+
 def render_overview(
     daily_shortlist: pd.DataFrame,
     filtered: pd.DataFrame,
@@ -2784,6 +3027,9 @@ def render_overview(
     benchmark_name: str,
 ) -> None:
     """Ren startsida: vad är intressant, varför och vad bör jag se upp med?"""
+    render_horizon_toplists(scored, market)
+    render_holdings_portfolio(scored, profile)
+    st.divider()
     best = daily_shortlist.iloc[0] if not daily_shortlist.empty else None
     high_priority = int((daily_shortlist["Prioritet"] == "Hög").sum()) if not daily_shortlist.empty else 0
     today = datetime.now().date().isoformat()
@@ -3047,16 +3293,17 @@ def render_ai_cost_meter() -> None:
     cost_usd = float(usage.get("cost_usd", 0.0))
     cost_sek = ai_cost_sek(cost_usd)
     requests = int(usage.get("requests", 0))
+    req_label = "fråga" if requests == 1 else "frågor"
     if np.isfinite(cost_sek):
-        st.caption(
-            f"AI-kostnad denna månad: **≈ {cost_sek:.2f} kr** ({format_cost_usd(cost_usd)}) · "
-            f"{requests} lyckade AI-frågor."
-        )
+        st.caption(f"AI denna månad: **≈ {cost_sek:.2f} kr** · {requests} {req_label}")
     else:
+        st.caption(f"AI denna månad: **{format_cost_usd(cost_usd)}** · {requests} {req_label}")
+    with st.expander("Visa AI-kostnadsdetaljer", expanded=False):
         st.caption(
-            f"AI-kostnad denna månad: **{format_cost_usd(cost_usd)}** · {requests} lyckade AI-frågor."
+            f"Beräknad API-kostnad: {format_cost_usd(cost_usd)}. "
+            "Mätaren bygger på faktisk tokenanvändning i lyckade AI-anrop och den standardtaxa som finns i aktuell Borsify-version."
         )
-    st.caption("Kostnaden är en uppskattning från faktisk tokenanvändning och aktuell standardtaxa för vald modell.")
+
 
 
 def _case_ai_api_key() -> str:
@@ -3114,22 +3361,66 @@ def ask_borsify_ai(case: pd.Series | dict[str, Any], horizon: str, question: str
 
 
 def render_recommendation_price(case: pd.Series | dict[str, Any]) -> None:
-    """Show the latest available market price prominently on every recommendation."""
+    """Show latest available market price without Streamlit metric truncation."""
     price = _num(case.get("Pris"))
     daily = _num(case.get("Dagsförändring"))
-    currency = str(case.get("Valuta", "") or "")
-    price_date = str(case.get("Prisdatum", "") or "")
+    currency = str(case.get("Valuta", "") or "").strip()
+    price_date = str(case.get("Prisdatum", "") or "").strip()
 
     if np.isfinite(price):
-        label = "Aktuell kurs"
-        value = f"{price:.2f} {currency}".strip()
-        delta = f"{daily:+.1%}" if np.isfinite(daily) else None
-        st.metric(label, value, delta)
+        # Swedish presentation, while preserving the source currency.
+        price_text = f"{price:,.2f}".replace(",", "X").replace(".", ",").replace("X", " ")
+        ccy_text = f" {currency}" if currency else ""
+        parts = [f"**Aktuell kurs:** {price_text}{ccy_text}"]
+        if np.isfinite(daily):
+            parts.append(f"**idag:** {daily:+.1%}".replace(".", ","))
         if price_date and price_date != "—":
-            st.caption(f"Senaste kursdag: {price_date}")
+            parts.append(f"kursdag {price_date}")
+        st.markdown(" · ".join(parts))
     else:
-        st.metric("Aktuell kurs", "—")
+        st.markdown("**Aktuell kurs:** —")
         st.caption("Aktuell kurs saknas i tillgänglig data.")
+
+
+
+
+
+def render_case_plan(case: pd.Series | dict[str, Any]) -> None:
+    thesis = str(case.get("Case Plan Tes", "") or "").strip()
+    if not thesis:
+        return
+    with st.expander("🧭 Case-plan · vad måste hända härifrån?", expanded=False):
+        st.markdown(f"**Tes**  \n{thesis}")
+        st.markdown(f"**Det som bekräftar caset**  \n{case.get('Case Plan Bekräftelse','—')}")
+        st.markdown(f"**Varningssignal**  \n{case.get('Case Plan Varning','—')}")
+        st.markdown(f"**Case-breaker**  \n{case.get('Case Plan Breaker','—')}")
+        st.markdown(f"**Nästa kontrollpunkt**  \n{case.get('Case Plan Nästa kontroll','—')}")
+        st.markdown(f"**Prisrelevans**  \n{case.get('Case Plan Prisregel','—')}")
+        st.caption(
+            "Case-planen är en regelbaserad uppföljningsplan från aktuell Borsify-data. "
+            "Den är inte en riktkurs, sannolikhet eller personlig köp-/säljrekommendation."
+        )
+
+
+def render_recommendation_relevance(case: pd.Series | dict[str, Any]) -> None:
+    status = str(case.get("Relevans nu", "") or "").strip()
+    explanation = str(case.get("Relevans förklaring", "") or "").strip()
+    if not status:
+        return
+
+    if status == "Caset har stärkts":
+        st.success(f"**Relevans nu: {status}**")
+    elif status == "Fortfarande relevant":
+        st.info(f"**Relevans nu: {status}**")
+    elif status == "Mindre attraktivt än vid signal":
+        st.warning(f"**Relevans nu: {status}**")
+    elif status == "Caset har försvagats":
+        st.warning(f"**Relevans nu: {status}**")
+    else:
+        st.caption(f"**Relevans nu: {status}**")
+
+    if explanation:
+        st.caption(explanation)
 
 
 def render_case_ai_qa(case: pd.Series | dict[str, Any], horizon: str, rank: int) -> None:
@@ -3187,9 +3478,13 @@ def render_case_ai_qa(case: pd.Series | dict[str, Any], horizon: str, rank: int)
                     one_sek = ai_cost_sek(one_usd)
                     token_total = int(usage_meta.get("input_tokens", 0)) + int(usage_meta.get("output_tokens", 0))
                     if np.isfinite(one_sek):
-                        st.caption(f"Den här frågan kostade uppskattningsvis ≈ {one_sek:.3f} kr ({format_cost_usd(one_usd)}) · {token_total:,} tokens.".replace(",", " "))
+                        st.caption(f"AI-kostnad för svaret: ≈ {one_sek:.3f} kr".replace(".", ","))
                     else:
-                        st.caption(f"Den här frågan kostade uppskattningsvis {format_cost_usd(one_usd)} · {token_total:,} tokens.".replace(",", " "))
+                        st.caption(f"AI-kostnad för svaret: {format_cost_usd(one_usd)}")
+                    with st.expander("Visa token- och kostnadsdetaljer", expanded=False):
+                        st.caption(
+                            f"{token_total:,} tokens · {format_cost_usd(one_usd)} · modell {usage_meta.get('model','—')}".replace(",", " ")
+                        )
                     render_ai_cost_meter()
                 elif mode != "ai":
                     st.caption("Reservsvaret är regelbaserat och ska inte förväxlas med ett AI-svar.")
@@ -3865,7 +4160,7 @@ def main() -> None:
         )
         st.caption(intent_plain_text(discovery_intent))
 
-        market = st.selectbox("Marknad", list(MARKET_CONFIGS), index=0, help="Byt land/region. Borsify använder samma grundmodell men jämför bolag inom det valda universumet.")
+        market = st.selectbox("Marknad", list(MARKET_CONFIGS), index=list(MARKET_CONFIGS).index("Alla marknader"), help="Byt land/region. Borsify använder samma grundmodell men jämför bolag inom det valda universumet.")
         if market == "Sverige":
             universe = st.radio("Universum", ["OMXS30", "Sverige bred", "Egen lista"], index=1)
             custom = st.text_area("Tickers", value="INVE-B.ST, VOLV-B.ST, SAND.ST, EVO.ST", height=100) if universe == "Egen lista" else ""
@@ -3875,7 +4170,7 @@ def main() -> None:
             universe = f"{market} urval"
             custom = ""
             if market == "Alla marknader":
-                st.caption(f"{len(MARKET_UNIVERSES[market])} bolag från Sverige, USA, Norden, Tyskland och Storbritannien. Ett snabbare globalt radarurval – inte hela världens börser.")
+                st.caption(f"{len(MARKET_UNIVERSES[market])} bolag från alla marknader Borsify stöder just nu: Sverige, USA, Danmark, Norge, Finland, Tyskland och Storbritannien. Detta är globalt inom nuvarande datatäckning – inte alla världens börser ännu.")
             else:
                 st.caption(f"{len(MARKET_UNIVERSES[market])} stora/likvida bolag i Borsifys kuraterade startuniversum. Inte en komplett officiell indexlista.")
 
@@ -3972,6 +4267,29 @@ def main() -> None:
     )
     save_recommendation_records(ledger_records)
 
+    # Compare today's candidates with the latest frozen recommendation from an earlier day.
+    # Same-day records are excluded by the relevance engine to avoid self-comparison on reruns.
+    try:
+        relevance_ledger = get_recommendation_records(limit=500)
+        relevance_date = pd.Timestamp.now(tz="UTC").date().isoformat()
+        short_longlist = apply_recommendation_relevance(
+            short_longlist, relevance_ledger, "short", profile, market, relevance_date
+        )
+        deep_longlist = apply_recommendation_relevance(
+            deep_longlist, relevance_ledger, "long", profile, market, relevance_date
+        )
+    except Exception:
+        # Relevance is supplemental and must never break the recommendation flow.
+        pass
+
+    # Turn each finalist into an explicit monitoring plan. This is deterministic:
+    # no invented targets, catalysts or probabilities.
+    try:
+        short_longlist = apply_case_plans(short_longlist, "short")
+        deep_longlist = apply_case_plans(deep_longlist, "long")
+    except Exception:
+        pass
+
     # Cheap background maintenance: only mature records are fetched, max a few per run.
     try:
         refresh_due_recommendation_outcomes(max_records=6)
@@ -4031,15 +4349,15 @@ def main() -> None:
             else:
                 for rank, (_, case) in enumerate(short_longlist.iterrows(), start=1):
                     with st.container(border=True):
-                        s1, s2, s3, s4, s5, s6 = st.columns([2.45, 1.05, .82, .82, .82, 1.0])
+                        s1, s2, s3, s4, s5 = st.columns([2.7, .9, .9, .9, 1.0])
                         s1.markdown(f"### {rank}. {case.get('Namn', case.get('Ticker'))} · {case.get('Ticker')}")
                         s1.caption(f"{case.get('Sektor','—')} · horisont cirka 1–6 månader")
-                        with s2:
-                            render_recommendation_price(case)
-                        s3.metric("Short Alpha", f"{_num(case.get('Short Alpha Score')):.0f}/100")
-                        s4.metric("Confidence", f"{_num(case.get('Short Alpha Confidence')):.0f}/100", help="Datatäckning/evidens, inte sannolikheten att kursen stiger.")
-                        s5.metric("Relativ styrka", f"{_num(case.get('Short Relative Strength')):.0f}/100", help=f"Mot vald benchmark: {case.get('Short Relative Text','—')}")
-                        s6.metric("Bekräftelser", f"{int(_num(case.get('Short Confirmation Count')) if np.isfinite(_num(case.get('Short Confirmation Count'))) else 0)}/6")
+                        s2.metric("Short Alpha", f"{_num(case.get('Short Alpha Score')):.0f}/100")
+                        s3.metric("Confidence", f"{_num(case.get('Short Alpha Confidence')):.0f}/100", help="Datatäckning/evidens, inte sannolikheten att kursen stiger.")
+                        s4.metric("Relativ styrka", f"{_num(case.get('Short Relative Strength')):.0f}/100", help=f"Mot vald benchmark: {case.get('Short Relative Text','—')}")
+                        s5.metric("Bekräftelser", f"{int(_num(case.get('Short Confirmation Count')) if np.isfinite(_num(case.get('Short Confirmation Count'))) else 0)}/6")
+                        render_recommendation_price(case)
+                        render_recommendation_relevance(case)
                         gate = str(case.get("Short Alpha Gate", "Svag kortsiktig signal"))
                         if gate == "Kortsiktigt toppcase":
                             st.success(gate)
@@ -4076,6 +4394,7 @@ def main() -> None:
                                 "Katalysator": case.get("Short Catalyst", "—"),
                                 "Katalysatorevidens": case.get("Catalyst Evidence", "—"),
                             })
+                        render_case_plan(case)
                         render_case_ai_qa(case, "short", rank)
 
             st.divider()
@@ -4087,18 +4406,18 @@ def main() -> None:
             else:
                 for rank, (_, case) in enumerate(deep_longlist.iterrows(), start=1):
                     with st.container(border=True):
-                        a, b, c, d, e, f, g = st.columns([2.35, 1.05, .72, .82, .82, .95, .82])
+                        a, b, c, d, e, f = st.columns([2.55, .78, .9, .9, 1.05, .9])
                         a.markdown(f"### {rank}. {case.get('Namn', case.get('Ticker'))} · {case.get('Ticker')}")
                         a.caption(f"{case.get('Sektor','—')} · flerårsdata t.o.m. {case.get('Rapportdatum','—')}")
-                        with b:
-                            render_recommendation_price(case)
-                        c.metric("INVEST", f"{_num(case.get('INVEST Score')):.0f}/100")
+                        b.metric("INVEST", f"{_num(case.get('INVEST Score')):.0f}/100")
                         trap = _num(case.get('Value Trap Risk')); conf = _num(case.get('Deep Confidence'))
                         infl = _num(case.get('Inflection Score'))
-                        d.metric("Value Trap", f"{trap:.0f}/100" if np.isfinite(trap) else "—", help="Högre = fler konkreta varningssignaler i tillgänglig flerårsdata. Inte en sannolikhet.")
-                        e.metric("Inflection", f"{infl:.0f}/100" if np.isfinite(infl) else "—", help="Förändringsindex för kvartalstrender och, där Yahoo har data, EPS-estimatrevideringar. Det är inte en prognos för kursavkastning.")
-                        f.metric("Mispricing", str(case.get("Mispricing Signal", "—")).replace("Tydlig möjlig ", "Tydlig ").replace("Marknaden kan vara mer rimlig än caset", "Krävande"), help="Jämför transparenta avkastnings-/värderingshurdlar med verifierad tillväxt. Detta är inte en sannolikhet eller DCF.")
-                        g.metric("Confidence", f"{conf:.0f}/100" if np.isfinite(conf) else "—", help="Mäter datatäckning och historiklängd, inte sannolikheten att kursen stiger.")
+                        c.metric("Value Trap", f"{trap:.0f}/100" if np.isfinite(trap) else "—", help="Högre = fler konkreta varningssignaler i tillgänglig flerårsdata. Inte en sannolikhet.")
+                        d.metric("Inflection", f"{infl:.0f}/100" if np.isfinite(infl) else "—", help="Förändringsindex för kvartalstrender och, där Yahoo har data, EPS-estimatrevideringar. Det är inte en prognos för kursavkastning.")
+                        e.metric("Mispricing", str(case.get("Mispricing Signal", "—")).replace("Tydlig möjlig ", "Tydlig ").replace("Marknaden kan vara mer rimlig än caset", "Krävande"), help="Jämför transparenta avkastnings-/värderingshurdlar med verifierad tillväxt. Detta är inte en sannolikhet eller DCF.")
+                        f.metric("Confidence", f"{conf:.0f}/100" if np.isfinite(conf) else "—", help="Mäter datatäckning och historiklängd, inte sannolikheten att kursen stiger.")
+                        render_recommendation_price(case)
+                        render_recommendation_relevance(case)
                         gate = str(case.get('Djupkontroll','Otillräcklig data'))
                         signal = str(case.get('Inflection Signal','Otillräcklig förändringsdata'))
                         if gate == "Klarar djupkontroll": st.success(f"{gate} · {signal}")
@@ -4204,6 +4523,7 @@ def main() -> None:
                                 "Scenarioasymmetri": case.get("Scenario Asymmetry", "—"),
                                 "Fleråriga varningar": case.get("Fleråriga varningar", "—"),
                             })
+                        render_case_plan(case)
                         render_case_ai_qa(case, "long", rank)
                 st.caption("Djupkontrollen kan sänka ett billigt bolag om kassaflöde, marginaler, omsättning, skuld, färska estimat eller prisets framtidskrav utvecklas fel. Case Gate kräver flera oberoende stöd och låter motbevis väga tungt. Bear/Base/Bull visar scenarioasymmetri med synliga antaganden; det är inte kursmål, sannolikheter eller en DCF. Saknade data lämnas som saknade.")
 

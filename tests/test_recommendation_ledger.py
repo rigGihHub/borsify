@@ -61,3 +61,19 @@ def test_calibration_groups_by_gate():
     c = calibration_by_gate(recs, outs, "3m")
     assert len(c) == 2
     assert c.iloc[0]["Gate"] == "Topp"
+
+
+def test_short_snapshot_preserves_valuation_for_future_relevance():
+    frame = pd.DataFrame([{
+        "Ticker":"BUFAB.ST","Namn":"Bufab","Pris":134.0,"Valuta":"SEK",
+        "P/E":22.0,"Forward P/E":18.0,"FCF yield":0.04,
+        "Short Alpha Score":71,"Short Alpha Gate":"Starkt kortsiktigt case",
+        "Short Alpha Confidence":90,
+    }])
+    rows = build_recommendation_records(
+        frame, "short", "2.39.0", "Balanserad", "Sverige",
+        captured_at=pd.Timestamp("2026-09-02T08:00:00Z")
+    )
+    snap = json.loads(rows[0]["snapshot_json"])
+    assert snap["Forward P/E"] == 18.0
+    assert snap["FCF yield"] == 0.04

@@ -9,7 +9,11 @@ import pandas as pd
 
 
 SHORT_FIELDS = [
-    "Ticker", "Namn", "Sektor", "Pris",
+    "Ticker", "Namn", "Sektor", "Pris", "Valuta", "Pris SEK", "Prisdatum",
+    "Dagsförändring", "52v från topp", "RSI14", "SMA200 avstånd",
+    "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
+    "ROE", "Vinstmarginal", "Skuld/eget kapital", "Datatäckning",
+    "INVEST Score", "Värdering", "Kvalitet", "Risk", "Growth Score",
     "Short Alpha Score", "Short Alpha Gate", "Short Alpha Confidence",
     "Short Relative Strength", "Short Relative Text", "Short Trend",
     "Short Momentum", "Short Participation", "Short Revisions",
@@ -17,6 +21,10 @@ SHORT_FIELDS = [
     "Short Counterargument", "Short Vetoes", "Short Cautions",
     "Inflection Signal", "Inflection Score", "Catalyst Signal",
     "Primary Catalyst", "Catalyst Timing", "Catalyst Evidence",
+    "Relevans nu", "Relevans förklaring", "Sedan rekommendation",
+    "Referenskurs", "Referensdatum", "Relevans score delta",
+    "Case Plan Tes", "Case Plan Bekräftelse", "Case Plan Varning",
+    "Case Plan Breaker", "Case Plan Nästa kontroll", "Case Plan Prisregel",
 ]
 
 LONG_FIELDS = [
@@ -38,6 +46,10 @@ LONG_FIELDS = [
     "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
     "ROE", "Vinstmarginal", "Skuld/eget kapital",
     "Omsättning CAGR", "Vinst CAGR", "FCF CAGR",
+    "Relevans nu", "Relevans förklaring", "Sedan rekommendation",
+    "Referenskurs", "Referensdatum", "Relevans score delta",
+    "Case Plan Tes", "Case Plan Bekräftelse", "Case Plan Varning",
+    "Case Plan Breaker", "Case Plan Nästa kontroll", "Case Plan Prisregel",
 ]
 
 
@@ -101,6 +113,11 @@ Regler:
 - Hänvisa konkret till relevanta datapunkter från caset.
 - Om användaren frågar varför aktien rekommenderas trots hög kurs, stark uppgång eller hög värdering:
   skilj tydligt mellan absolut aktiekurs, tidigare kursuppgång, relativ styrka och faktisk värdering.
+- Om frågan gäller om caset fortfarande är relevant från dagens kurs: använd tillgängliga värderingsmått
+  (t.ex. P/E, Forward P/E, EV/EBITDA, FCF-yield), kvalitet/risk och aktuella korttidssignaler tillsammans.
+  Säg uttryckligen om underlaget räcker för att bedöma attraktivitet men inte för att kvantifiera uppsida.
+- En hög aktiekurs i kronor betyder aldrig i sig att aktien är dyr; värdering måste bedömas mot vinst,
+  kassaflöde, kvalitet, tillväxt och risk där dessa data finns.
 - Lyft alltid det starkaste motargumentet när frågan gäller varför aktien är attraktiv.
 - Säg vad som skulle få Borsify att ändra uppfattning.
 - Säg uttryckligen när data inte räcker för att besvara något.
