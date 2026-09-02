@@ -35,6 +35,10 @@ from short_edge_lab import (
     build_point_in_time_short_signals, add_forward_returns, evaluate_thresholds,
     walk_forward_threshold_test, component_bucket_analysis, summarize_edge,
 )
+from daytrade_validation import (
+    build_point_in_time_daytrade, evaluate_daytrade, walk_forward_fixed_gate,
+    validation_grade, compare_horizons,
+)
 from recommendation_ledger import (
     build_recommendation_records, evaluate_record_from_history,
     outcome_summary, calibration_by_gate,
@@ -43,6 +47,9 @@ from recommendation_relevance import apply_recommendation_relevance
 from case_plan import apply_case_plans
 from horizon_rankings import top_three
 from portfolio_advisor import assess_holding
+from market_universe import load_avanza_universe, universe_symbols, coverage_table, breadth_summary
+from universe_quality import apply_universe_quality, filter_rankable_universe, quality_summary
+from qc_history import evolve_qc_state, is_quarantined, scan_health, quarantine_summary, should_record_qc_outcome
 from case_ai import build_case_ai_input, build_case_ai_instructions, local_case_explanation
 from ai_cost import token_usage, estimate_usage_cost, format_cost_usd
 
@@ -63,12 +70,13 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.41.0"
+APP_VERSION = "2.47.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
 DB_PATH = APP_DIR / "borsify.db"
 UNIVERSE_PATH = APP_DIR / "universe.csv"
+AVANZA_UNIVERSE_PATH = APP_DIR / "avanza_universe.csv"
 
 OMXS30_TICKERS = [
     "ABB.ST", "ADDT-B.ST", "ALFA.ST", "ASSA-B.ST", "AZN.ST", "ATCO-A.ST",
@@ -126,6 +134,47 @@ UK_LARGE_TICKERS = [
     "IMB.L", "VOD.L", "STAN.L", "EXPN.L", "III.L", "ANTO.L", "SSE.L", "NWG.L"
 ]
 
+CANADA_LARGE_TICKERS = [
+    "RY.TO", "TD.TO", "SHOP.TO", "ENB.TO", "CNR.TO", "CP.TO", "BMO.TO", "BNS.TO",
+    "TRI.TO", "CNQ.TO", "SU.TO", "MFC.TO", "BCE.TO", "T.TO", "WCN.TO", "CSU.TO",
+    "ATD.TO", "QSR.TO", "NTR.TO", "ABX.TO", "AEM.TO", "FTS.TO", "SLF.TO", "GWO.TO"
+]
+
+FRANCE_LARGE_TICKERS = [
+    "MC.PA", "OR.PA", "TTE.PA", "SAN.PA", "AIR.PA", "SU.PA", "BNP.PA", "EL.PA",
+    "SAF.PA", "AI.PA", "CS.PA", "RI.PA", "DG.PA", "KER.PA", "HO.PA", "ENGI.PA",
+    "VIE.PA", "CAP.PA", "ORA.PA", "GLE.PA", "STLAP.PA", "ML.PA"
+]
+
+NETHERLANDS_LARGE_TICKERS = [
+    "ASML.AS", "SHELL.AS", "INGA.AS", "ADYEN.AS", "PRX.AS", "PHIA.AS", "HEIA.AS",
+    "UNA.AS", "WKL.AS", "AKZA.AS", "ASM.AS", "RAND.AS", "KPN.AS", "NN.AS", "AGN.AS"
+]
+
+BELGIUM_LARGE_TICKERS = [
+    "ABI.BR", "UCB.BR", "KBC.BR", "GBLB.BR", "AGS.BR", "SOLB.BR", "UMI.BR",
+    "ELI.BR", "COLR.BR", "ACKB.BR"
+]
+
+ITALY_LARGE_TICKERS = [
+    "ENEL.MI", "ENI.MI", "ISP.MI", "UCG.MI", "STM.MI", "RACE.MI", "G.MI",
+    "PRY.MI", "LDO.MI", "MB.MI", "TIT.MI", "AMP.MI", "SRG.MI", "TRN.MI"
+]
+
+SPAIN_LARGE_TICKERS = [
+    "SAN.MC", "IBE.MC", "ITX.MC", "BBVA.MC", "TEF.MC", "REP.MC", "FER.MC",
+    "CABK.MC", "AENA.MC", "ACS.MC", "AMS.MC", "GRF.MC"
+]
+
+SWITZERLAND_LARGE_TICKERS = [
+    "NESN.SW", "ROG.SW", "NOVN.SW", "UBSG.SW", "ABBN.SW", "ZURN.SW", "CFR.SW",
+    "SIKA.SW", "GIVN.SW", "LONN.SW", "HOLN.SW", "SCMN.SW", "SGSN.SW", "LOGN.SW"
+]
+
+PORTUGAL_LARGE_TICKERS = [
+    "EDP.LS", "GALP.LS", "JMT.LS", "BCP.LS", "SON.LS", "REN.LS", "CTT.LS", "SEM.LS"
+]
+
 # Ett medvetet begränsat globalt radaruniversum. Syftet är att hitta kandidater över flera
 # marknader utan att göra varje Streamlit-körning orimligt tung. Varje region finns kvar
 # separat om användaren vill göra en bredare regional analys.
@@ -135,6 +184,14 @@ GLOBAL_RADAR_TICKERS = list(dict.fromkeys(
     + NORDIC_LARGE_TICKERS
     + GERMANY_LARGE_TICKERS
     + UK_LARGE_TICKERS
+    + CANADA_LARGE_TICKERS
+    + FRANCE_LARGE_TICKERS
+    + NETHERLANDS_LARGE_TICKERS
+    + BELGIUM_LARGE_TICKERS
+    + ITALY_LARGE_TICKERS
+    + SPAIN_LARGE_TICKERS
+    + SWITZERLAND_LARGE_TICKERS
+    + PORTUGAL_LARGE_TICKERS
 ))
 
 MARKET_CONFIGS = {
@@ -143,6 +200,14 @@ MARKET_CONFIGS = {
     "Norden exkl. Sverige": {"currency": "lokal valuta", "benchmark": None, "benchmark_name": "—"},
     "Tyskland": {"currency": "EUR", "benchmark": "^GDAXI", "benchmark_name": "DAX"},
     "Storbritannien": {"currency": "GBP", "benchmark": "^FTSE", "benchmark_name": "FTSE 100"},
+    "Kanada": {"currency": "CAD", "benchmark": "^GSPTSE", "benchmark_name": "S&P/TSX Composite"},
+    "Frankrike": {"currency": "EUR", "benchmark": "^FCHI", "benchmark_name": "CAC 40"},
+    "Nederländerna": {"currency": "EUR", "benchmark": "^AEX", "benchmark_name": "AEX"},
+    "Belgien": {"currency": "EUR", "benchmark": "^BFX", "benchmark_name": "BEL 20"},
+    "Italien": {"currency": "EUR", "benchmark": "FTSEMIB.MI", "benchmark_name": "FTSE MIB"},
+    "Spanien": {"currency": "EUR", "benchmark": "^IBEX", "benchmark_name": "IBEX 35"},
+    "Schweiz": {"currency": "CHF", "benchmark": "^SSMI", "benchmark_name": "SMI"},
+    "Portugal": {"currency": "EUR", "benchmark": "PSI20.LS", "benchmark_name": "PSI"},
     "Alla marknader": {"currency": "blandat", "benchmark": "VT", "benchmark_name": "Globalt aktieindex (VT)"},
 }
 
@@ -152,6 +217,14 @@ MARKET_UNIVERSES = {
     "Norden exkl. Sverige": NORDIC_LARGE_TICKERS,
     "Tyskland": GERMANY_LARGE_TICKERS,
     "Storbritannien": UK_LARGE_TICKERS,
+    "Kanada": CANADA_LARGE_TICKERS,
+    "Frankrike": FRANCE_LARGE_TICKERS,
+    "Nederländerna": NETHERLANDS_LARGE_TICKERS,
+    "Belgien": BELGIUM_LARGE_TICKERS,
+    "Italien": ITALY_LARGE_TICKERS,
+    "Spanien": SPAIN_LARGE_TICKERS,
+    "Schweiz": SWITZERLAND_LARGE_TICKERS,
+    "Portugal": PORTUGAL_LARGE_TICKERS,
     "Alla marknader": GLOBAL_RADAR_TICKERS,
 }
 
@@ -1349,6 +1422,120 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS universe_qc_state (
+                symbol TEXT PRIMARY KEY,
+                status TEXT NOT NULL DEFAULT 'OKÄND',
+                failure_streak INTEGER NOT NULL DEFAULT 0,
+                success_count INTEGER NOT NULL DEFAULT 0,
+                failure_count INTEGER NOT NULL DEFAULT 0,
+                last_checked_at TEXT,
+                last_verified_at TEXT,
+                last_reason TEXT NOT NULL DEFAULT '',
+                quarantine_until TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS universe_qc_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                outcome TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT '',
+                counted_failure INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+
+
+
+
+def get_universe_qc_states() -> pd.DataFrame:
+    cols = [
+        "symbol","status","failure_streak","success_count","failure_count",
+        "last_checked_at","last_verified_at","last_reason","quarantine_until",
+    ]
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        try:
+            data = client.table("universe_qc_state").select(",".join(cols)).eq("user_id", uid).execute().data or []
+            return pd.DataFrame(data, columns=cols)
+        except Exception:
+            st.session_state["bq_qc_state_migration_needed"] = True
+            return pd.DataFrame(columns=cols)
+    init_db()
+    with _db_connect() as conn:
+        return pd.read_sql_query(f"SELECT {','.join(cols)} FROM universe_qc_state", conn)
+
+
+def save_universe_qc_state(state: dict[str, Any], outcome: str, counted_failure: bool) -> None:
+    symbol = str(state.get("symbol") or "").upper().strip()
+    if not symbol:
+        return
+    client = _supabase_client(); uid = current_user_id()
+    payload = {
+        "symbol": symbol,
+        "status": str(state.get("status") or "OKÄND"),
+        "failure_streak": int(state.get("failure_streak") or 0),
+        "success_count": int(state.get("success_count") or 0),
+        "failure_count": int(state.get("failure_count") or 0),
+        "last_checked_at": state.get("last_checked_at"),
+        "last_verified_at": state.get("last_verified_at"),
+        "last_reason": str(state.get("last_reason") or ""),
+        "quarantine_until": state.get("quarantine_until"),
+    }
+    if client is not None and uid:
+        try:
+            client.table("universe_qc_state").upsert({"user_id": uid, **payload}, on_conflict="user_id,symbol").execute()
+            client.table("universe_qc_events").insert({
+                "user_id": uid, "symbol": symbol, "outcome": str(outcome),
+                "reason": payload["last_reason"], "counted_failure": bool(counted_failure),
+            }).execute()
+            return
+        except Exception:
+            st.session_state["bq_qc_state_migration_needed"] = True
+            return
+    init_db()
+    with _db_connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO universe_qc_state(
+                symbol,status,failure_streak,success_count,failure_count,last_checked_at,
+                last_verified_at,last_reason,quarantine_until
+            ) VALUES(?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(symbol) DO UPDATE SET
+                status=excluded.status,
+                failure_streak=excluded.failure_streak,
+                success_count=excluded.success_count,
+                failure_count=excluded.failure_count,
+                last_checked_at=excluded.last_checked_at,
+                last_verified_at=excluded.last_verified_at,
+                last_reason=excluded.last_reason,
+                quarantine_until=excluded.quarantine_until
+            """,
+            (
+                payload["symbol"], payload["status"], payload["failure_streak"], payload["success_count"],
+                payload["failure_count"], payload["last_checked_at"], payload["last_verified_at"],
+                payload["last_reason"], payload["quarantine_until"],
+            ),
+        )
+        conn.execute(
+            "INSERT INTO universe_qc_events(symbol,outcome,reason,counted_failure) VALUES(?,?,?,?)",
+            (symbol, str(outcome), payload["last_reason"], 1 if counted_failure else 0),
+        )
+
+
+def active_quarantine_symbols(states: pd.DataFrame) -> set[str]:
+    if states is None or states.empty:
+        return set()
+    return {
+        str(row.get("symbol") or "").upper()
+        for _, row in states.iterrows()
+        if str(row.get("symbol") or "") and is_quarantined(row)
+    }
 
 
 
@@ -2849,28 +3036,118 @@ def render_quick_change_target(scored: pd.DataFrame, signal_history: pd.DataFram
 
 def _market_label_for_ticker(symbol: str) -> str:
     s = str(symbol or "").upper()
-    if s.endswith(".ST"): return "Sverige"
-    if s.endswith(".CO"): return "Danmark"
-    if s.endswith(".OL"): return "Norge"
-    if s.endswith(".HE"): return "Finland"
-    if s.endswith(".DE"): return "Tyskland"
-    if s.endswith(".L"): return "Storbritannien"
+    suffix_map = {
+        ".ST": "Sverige", ".CO": "Danmark", ".OL": "Norge", ".HE": "Finland",
+        ".DE": "Tyskland", ".L": "Storbritannien", ".TO": "Kanada", ".V": "Kanada",
+        ".PA": "Frankrike", ".AS": "Nederländerna", ".BR": "Belgien",
+        ".MI": "Italien", ".MC": "Spanien", ".SW": "Schweiz", ".LS": "Portugal",
+    }
+    for suffix, country in suffix_map.items():
+        if s.endswith(suffix):
+            return country
     return "USA"
 
 
 def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
     st.markdown("## 🌍 Borsify Topplistor")
+    st.caption(
+        "Endast kvalificerade KÖPCASE visas. Borsify fyller inte ut en Top 3 med svagare kandidater – "
+        "om bara ett case klarar köpgränsen visas bara ett."
+    )
+    avanza_catalog = load_avanza_universe(AVANZA_UNIVERSE_PATH)
+    if not avanza_catalog.empty:
+        summary = breadth_summary(avanza_catalog)
+        with st.expander(f"Marknadstäckning · {summary['total']} aktier · {summary['countries']} länder", expanded=False):
+            st.dataframe(coverage_table(avanza_catalog), use_container_width=True, hide_index=True)
+            st.caption("Kärna = tidigare kuraterat universum. Bred tillägg = nya kandidater i Avanza Universe v1. Katalogen är inte verifierad som en komplett Avanza-lista ännu.")
+    if "Universe QC" in scored.columns:
+        qsum = quality_summary(scored)
+        with st.expander("✅ Universe Quality Control · denna körning", expanded=False):
+            q1,q2,q3 = st.columns(3)
+            q1.metric("Verifierade", qsum["verified"])
+            q2.metric("Delvis verifierade", qsum["partial"])
+            q3.metric("Hårt exkluderade", int(st.session_state.get("bq_qc_hard_rejected", 0)))
+            country_q = scored.copy()
+            country_q["Land"] = country_q["Ticker"].astype(str).map(_market_label_for_ticker)
+            rows=[]
+            for country,g in country_q.groupby("Land"):
+                qs=quality_summary(g)
+                rows.append({
+                    "Land":country,
+                    "Verifierade":qs["verified"],
+                    "Delvis verifierade":qs["partial"],
+                    "Analyserbara":qs["verified"]+qs["partial"],
+                })
+            if rows:
+                st.dataframe(pd.DataFrame(rows).sort_values(["Analyserbara","Land"],ascending=[False,True]), use_container_width=True, hide_index=True)
+            st.caption(
+                "QC bedömer om datan räcker för ranking – inte om aktien är ett bra köp. "
+                "Aktier med ogiltig kurs, saknat kursdatum eller mycket kort historik exkluderas automatiskt."
+            )
+    persistent_qc = get_universe_qc_states()
+    if not persistent_qc.empty:
+        psum = quarantine_summary(persistent_qc)
+        with st.expander("🛡️ Persistent QC · historik & karantän", expanded=False):
+            p1,p2,p3,p4 = st.columns(4)
+            p1.metric("Tickers med historik", psum["total"])
+            p2.metric("I karantän", psum["quarantined"])
+            p3.metric("Med felserie", psum["failing"])
+            p4.metric("Hoppades över nu", int(st.session_state.get("bq_qc_skipped_quarantine", 0)))
+            health_ratio = float(st.session_state.get("bq_qc_scan_health", 1.0))
+            provider_ok = bool(st.session_state.get("bq_qc_provider_healthy", True))
+            st.caption(
+                f"Senaste scanens träffgrad: {health_ratio:.0%}. "
+                + ("Datakällan såg tillräckligt frisk ut för att individuella misslyckanden ska räknas."
+                   if provider_ok else
+                   "Borsify misstänkte ett bredare datakälleproblem och räknade därför inte saknade hämtningar som QC-strikes.")
+            )
+            quarantine_rows = persistent_qc[persistent_qc.apply(is_quarantined, axis=1)].copy()
+            if not quarantine_rows.empty:
+                show = quarantine_rows[[
+                    "symbol","failure_streak","last_verified_at","last_reason","quarantine_until"
+                ]].rename(columns={
+                    "symbol":"Ticker","failure_streak":"Fel i följd",
+                    "last_verified_at":"Senast verifierad","last_reason":"Senaste problem",
+                    "quarantine_until":"Karantän till",
+                })
+                st.dataframe(show, use_container_width=True, hide_index=True)
+            else:
+                st.success("Ingen ticker ligger i aktiv karantän.")
+            st.caption(
+                "Tre separata hårda QC-misslyckanden krävs innan en ticker sätts i 7 dagars karantän. "
+                "Samma fel på Streamlit-reruns räknas högst en gång per UTC-dag."
+            )
+    if st.session_state.get("bq_qc_state_migration_needed"):
+        st.warning("Supabase saknar v2.45-tabellerna för persistent Universe QC. Kör den nya SQL-migreringen för permanent molnlagring.")
     if market == "Alla marknader":
         st.caption(
             "Topp 3 över alla marknader Borsify stöder just nu. "
-            "Datatäckningen omfattar Sverige, USA, Danmark, Norge, Finland, Tyskland och Storbritannien. "
-            "Listan är inte ännu en komplett scanning av alla världens börser."
+            "Datatäckningen omfattar Borsifys 15 Avanza-inspirerade direktmarknader. "
+            "Listan är ännu inte en komplett scanning av varje aktie som kan handlas hos Avanza."
         )
     else:
         st.warning(
             f"Du har filtrerat marknaden till {market}. Topplistorna nedan avser därför {market}. "
             "Välj **Alla marknader** i vänstermenyn för Borsifys globala ranking."
         )
+
+    available_countries = sorted({
+        _market_label_for_ticker(sym) for sym in scored.get("Ticker", pd.Series(dtype=str)).astype(str).tolist()
+    })
+    selected_countries = st.multiselect(
+        "Filtrera Topplistor på land",
+        options=available_countries,
+        default=available_countries,
+        help="Välj ett eller flera länder. Alla fyra Top 3-listorna räknas om direkt inom de valda länderna.",
+        key="toplist_country_filter",
+    )
+    if selected_countries:
+        toplist_base = scored[
+            scored["Ticker"].astype(str).map(_market_label_for_ticker).isin(selected_countries)
+        ].copy()
+    else:
+        toplist_base = scored.iloc[0:0].copy()
+        st.info("Välj minst ett land för att visa Topplistor.")
 
     sections = [
         ("⚡ 1–2 dagar · Daytrader", "day", "Daytrade Score",
@@ -2885,9 +3162,9 @@ def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
     for title, horizon, score_col, caption in sections:
         st.markdown(f"### {title}")
         st.caption(caption)
-        top3 = top_three(scored, horizon)
+        top3 = top_three(toplist_base, horizon)
         if top3.empty:
-            st.info("Ingen kandidat kunde rankas med tillgänglig data.")
+            st.info("Inget köpcase klarar Borsifys minimikrav för den här horisonten just nu.")
             continue
         cols = st.columns(3)
         for rank, (col, (_, row)) in enumerate(zip(cols, top3.iterrows()), start=1):
@@ -2901,7 +3178,16 @@ def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
                         st.markdown(f"**{price:.2f} {ccy}**")
                     score = _num(row.get(score_col))
                     st.metric("Horisontscore", f"{score:.0f}/100" if np.isfinite(score) else "—")
+                    if str(row.get("Köpfilter","")) == "KÖPCASE":
+                        st.success("KÖPCASE · klarar Buy Quality Gate")
+                    gate_support = str(row.get("Köpfilter stöd","") or "")
+                    if gate_support:
+                        st.caption(f"Köpfilter: {gate_support}")
                     st.write(str(row.get("Horisontförklaring","—")))
+                    qc = str(row.get("Universe QC","") or "")
+                    if qc:
+                        qc_score = _num(row.get("Universe QC Score"))
+                        st.caption(f"Datakvalitet: {qc}" + (f" · {qc_score:.0f}/100" if np.isfinite(qc_score) else ""))
                     if horizon == "day":
                         st.caption(
                             f"Idag {fmt_pct(row.get('Dagsförändring'))} · Volym {fmt_num(row.get('Volymkvot'),2)}x · RSI {fmt_num(row.get('RSI14'),0)}"
@@ -3496,7 +3782,116 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
     render_beginner_glossary("edge_terms")
     st.caption("Testar tekniska signaler historiskt utan att använda dagens fundamentaldata. Det är medvetet: dagens fundamenta på gamla datum skulle skapa look-ahead bias. Grundtestet visar bruttoresultat. Längre ned kan du lägga på courtage, spread/slippage och positionsstorlek för ett mer ekonomiskt realistiskt stresstest.")
 
-    with st.expander("Short Alpha 2.0 · point-in-time validering", expanded=True):
+    with st.expander("⚡ Daytrader 1–2 dagar · validering av köpmodellen", expanded=True):
+        st.caption(
+            "Testet bygger en kausal historisk proxy för Topplistans Daytrader-score. "
+            "Signalen beräknas efter stängning dag t, köp antas ske nästa börsdags öppning och "
+            "utfall mäts efter 1 respektive 2 handelsdagar. Det undviker att modellen får köpa på "
+            "samma stängningskurs som användes för att skapa signalen."
+        )
+        st.warning(
+            "Detta är fortfarande en proxy – inte en exakt historisk replay. Live-modellens Risk-komponent "
+            "innehåller fundamentaldata som Borsify ännu inte har point-in-time-historik för. "
+            "Valideringsmotorn använder därför endast rekonstruerbar historisk pris/volymdata för den delen."
+        )
+        d1,d2,d3 = st.columns([1.5,1,1])
+        dt_symbol = d1.text_input(
+            "Ticker · Daytrader",
+            value=default_symbol or "INVE-B.ST",
+            key="daytrade_validation_symbol",
+        ).strip().upper()
+        dt_years = d2.slider("Historik · Daytrader", 3, 10, 7, key="daytrade_validation_years")
+        dt_cost = d3.number_input(
+            "Roundtrip-kostnad (bps)",
+            min_value=0.0, max_value=200.0, value=20.0, step=5.0,
+            help="Gemensamt stresstest för courtage + spread/slippage tur och retur. 20 bps = 0,20 %.",
+            key="daytrade_validation_cost",
+        )
+        run_daytrade_validation = st.button(
+            "Validera Daytrader 1–2 dagar",
+            type="primary",
+            key="run_daytrade_validation",
+        )
+        if run_daytrade_validation and dt_symbol:
+            try:
+                dt_hist = yf.download(
+                    dt_symbol, period=f"{dt_years}y", interval="1d",
+                    auto_adjust=True, progress=False, threads=False
+                )
+            except Exception as exc:
+                st.error(f"Kunde inte hämta historik för Daytrader-testet: {exc}")
+                dt_hist = pd.DataFrame()
+
+            if dt_hist is None or dt_hist.empty:
+                st.warning("För lite historik för Daytrader-validering.")
+            else:
+                pit_day = build_point_in_time_daytrade(dt_hist)
+                if pit_day.empty:
+                    st.warning("Historiken saknar Open/Close-data som krävs för ett kausalt 1–2-dagarstest.")
+                else:
+                    comparison = compare_horizons(
+                        pit_day,
+                        roundtrip_cost_bps=float(dt_cost),
+                        min_train_days=min(504, max(252, int(len(pit_day)*.45))),
+                        test_days=126,
+                    )
+                    if not comparison.empty:
+                        display_cmp = comparison.copy()
+                        for c in ["Netto median","Träffsäkerhet","Median över baseline"]:
+                            display_cmp[c] = pd.to_numeric(display_cmp[c],errors="coerce")
+                        st.dataframe(
+                            display_cmp.style.format({
+                                "Netto median":"{:.2%}",
+                                "Träffsäkerhet":"{:.1%}",
+                                "Median över baseline":"{:.2%}",
+                                "Profit factor":"{:.2f}",
+                            }),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                    for h in (1,2):
+                        stats = evaluate_daytrade(pit_day,h,float(dt_cost))
+                        wf = walk_forward_fixed_gate(
+                            pit_day,h,float(dt_cost),
+                            min_train_days=min(504, max(252, int(len(pit_day)*.45))),
+                            test_days=126,
+                        )
+                        grade = validation_grade(stats,wf)
+                        st.markdown(f"**{h} handelsdag{'ar' if h==2 else ''}: {grade['status']}**")
+                        st.caption(grade["message"])
+                        if int(stats.get("signals",0) or 0) > 0:
+                            a,b,c,d = st.columns(4)
+                            a.metric("Signaler", int(stats.get("signals",0)))
+                            b.metric("Netto median", f"{float(stats.get('net_median',0)):.2%}")
+                            c.metric("Träffsäkerhet", f"{float(stats.get('hit_rate',0)):.1%}")
+                            pf = float(stats.get("profit_factor")) if np.isfinite(_num(stats.get("profit_factor"))) else np.nan
+                            d.metric("Profit factor", f"{pf:.2f}" if np.isfinite(pf) else "—")
+                        if isinstance(wf,pd.DataFrame) and not wf.empty:
+                            with st.expander(f"Visa walk-forward/OOS · {h} dag{'ar' if h==2 else ''}", expanded=False):
+                                wf_show=wf.copy()
+                                st.dataframe(
+                                    wf_show.style.format({
+                                        "NetMedian":"{:.2%}",
+                                        "HitRate":"{:.1%}",
+                                        "MedianExcess":"{:.2%}",
+                                    }),
+                                    use_container_width=True,
+                                    hide_index=True,
+                                )
+
+                    st.caption(
+                        "Regeln och köpgränsen är frysta i detta test. Walk-forward-delen optimerar inte "
+                        "tröskeln på varje träningsfönster. Det minskar risken att vi överanpassar modellen "
+                        "till historiken."
+                    )
+                    st.caption(
+                        "Kvarvarande begränsningar: survivorship bias i dagens tickeruniversum, inga historiska "
+                        "Avanza-handelsrestriktioner, ingen intradagsorderbok, inga verkliga orderfyllnader och "
+                        "ingen point-in-time fundamental Risk-komponent."
+                    )
+
+    with st.expander("Short Alpha 2.0 · point-in-time validering", expanded=False):
         st.caption(
             "Detta test återskapar bara de delar av Short Alpha 2.0 som faktiskt kan rekonstrueras historiskt: "
             "relativ styrka, trend, momentum och handelsaktivitet. Historiska estimatrevideringar och katalysatorer "
@@ -4150,6 +4545,7 @@ def main() -> None:
     init_db()
     universe_df = load_universe_file()
     file_universe_symbols = universe_df["Ticker"].tolist()
+    avanza_universe_df = load_avanza_universe(AVANZA_UNIVERSE_PATH)
 
     with st.sidebar:
         st.header("Hitta aktier")
@@ -4167,12 +4563,25 @@ def main() -> None:
             if universe == "Sverige bred":
                 st.caption(f"{len(file_universe_symbols)} svenska aktier i nuvarande universum.")
         else:
-            universe = f"{market} urval"
             custom = ""
-            if market == "Alla marknader":
-                st.caption(f"{len(MARKET_UNIVERSES[market])} bolag från alla marknader Borsify stöder just nu: Sverige, USA, Danmark, Norge, Finland, Tyskland och Storbritannien. Detta är globalt inom nuvarande datatäckning – inte alla världens börser ännu.")
+            country_map = {
+                "Norden exkl. Sverige": ["Danmark","Norge","Finland"],
+                "Alla marknader": sorted(avanza_universe_df["Land"].unique().tolist()) if not avanza_universe_df.empty else [],
+            }
+            countries_for_market = country_map.get(market, [market])
+            universe_mode = st.radio(
+                "Universum",
+                ["Snabbt kärnurval", "Brett universum (beta)"],
+                index=0,
+                help="Brett universum använder Borsifys växande Avanza-inspirerade katalog. Första körningen kan ta längre tid eftersom fler bolag måste kontrolleras.",
+            )
+            broad_universe = universe_mode == "Brett universum (beta)"
+            universe = universe_mode
+            if not avanza_universe_df.empty:
+                candidate_count = len(universe_symbols(avanza_universe_df, countries_for_market, broad=broad_universe))
+                st.caption(f"{candidate_count} aktier i valt universum över {len(countries_for_market)} land/länder.")
             else:
-                st.caption(f"{len(MARKET_UNIVERSES[market])} stora/likvida bolag i Borsifys kuraterade startuniversum. Inte en komplett officiell indexlista.")
+                st.caption("Brett universum kunde inte läsas. Borsify använder reservlistan.")
 
         with st.expander("Fler filter", expanded=False):
             profile = st.selectbox("Borsify-strategi", list(PROFILE_WEIGHTS), index=0, help="Påverkar grundscoren. Om du är osäker kan Balanserad vara kvar.")
@@ -4218,12 +4627,43 @@ def main() -> None:
                     st.caption("Bevakning och scorehistorik sparas i molnet.")
             else:
                 st.caption("Lokalt läge · konfigurera Supabase för konto och molnsynk.")
-    symbols = (OMXS30_TICKERS if universe == "OMXS30" else (file_universe_symbols if universe == "Sverige bred" else parse_symbols(custom))) if market == "Sverige" else MARKET_UNIVERSES[market]
+    if market == "Sverige":
+        symbols = OMXS30_TICKERS if universe == "OMXS30" else (file_universe_symbols if universe == "Sverige bred" else parse_symbols(custom))
+    else:
+        country_map = {
+            "Norden exkl. Sverige": ["Danmark","Norge","Finland"],
+            "Alla marknader": sorted(avanza_universe_df["Land"].unique().tolist()) if not avanza_universe_df.empty else [],
+        }
+        countries_for_market = country_map.get(market, [market])
+        if not avanza_universe_df.empty:
+            symbols = universe_symbols(avanza_universe_df, countries_for_market, broad=(universe == "Brett universum (beta)"))
+        else:
+            symbols = MARKET_UNIVERSES[market]
     if refresh: st.cache_data.clear()
     if not symbols: st.warning("Ange minst en ticker."); st.stop()
+
+    qc_states_before = get_universe_qc_states()
+    quarantine_symbols = active_quarantine_symbols(qc_states_before)
+    retry_quarantine = st.sidebar.checkbox(
+        "Omtesta karantän denna körning",
+        value=False,
+        help="Normalt hoppas återkommande problemtickers över i 7 dagar. Slå på detta om du vill tvinga fram ett nytt test nu.",
+    )
+    requested_symbols = list(dict.fromkeys(symbols))
+    if retry_quarantine:
+        scan_symbols = requested_symbols
+    else:
+        scan_symbols = [sym for sym in requested_symbols if str(sym).upper() not in quarantine_symbols]
+    skipped_quarantine = [sym for sym in requested_symbols if sym not in scan_symbols]
+    st.session_state["bq_qc_skipped_quarantine"] = int(len(skipped_quarantine))
+
+    if not scan_symbols:
+        st.warning("Alla valda tickers ligger just nu i QC-karantän. Aktivera 'Omtesta karantän denna körning' för att prova dem igen.")
+        st.stop()
+
     start = time.perf_counter()
-    with st.spinner(f"Borsify analyserar {len(symbols)} aktier…"):
-        raw_df, errors = scan_universe(symbols)
+    with st.spinner(f"Borsify analyserar {len(scan_symbols)} aktier…"):
+        raw_df, errors = scan_universe(scan_symbols)
     if raw_df.empty:
         st.error("Ingen marknadsdata kunde hämtas. Yahoo Finance kan tillfälligt begränsa anrop.")
         if errors: st.code("\n".join(errors[:12]))
@@ -4232,6 +4672,62 @@ def main() -> None:
     raw_df, fx_rates, missing_fx = add_sek_conversions(raw_df)
     if missing_fx:
         errors.append("Valutaomräkning saknas för: " + ", ".join(missing_fx))
+
+    raw_df = apply_universe_quality(raw_df)
+    qc_all_fetched = raw_df.copy()
+    raw_df, qc_rejected = filter_rankable_universe(raw_df)
+    st.session_state["bq_qc_hard_rejected"] = int(len(qc_rejected))
+
+    # Persist at most one equivalent QC observation per ticker/day, so Streamlit
+    # reruns do not manufacture failure streaks. Provider-wide outages are guarded
+    # against: missing fetches only count as strikes when enough of the batch worked.
+    prior_lookup = {
+        str(r.get("symbol") or "").upper(): r
+        for _, r in qc_states_before.iterrows()
+    } if not qc_states_before.empty else {}
+    fetched_symbols = set(qc_all_fetched.get("Ticker", pd.Series(dtype=str)).astype(str).str.upper().tolist())
+    health = scan_health(len(fetched_symbols), len(scan_symbols))
+    st.session_state["bq_qc_scan_health"] = float(health["success_ratio"])
+    st.session_state["bq_qc_provider_healthy"] = bool(health["provider_healthy_enough"])
+
+    for _, qc_row in qc_all_fetched.iterrows():
+        sym = str(qc_row.get("Ticker") or "").upper()
+        status = str(qc_row.get("Universe QC") or "")
+        outcome = "verified" if status == "VERIFIERAD" else ("partial" if status == "DELVIS VERIFIERAD" else "hard_failure")
+        prev = prior_lookup.get(sym)
+        if should_record_qc_outcome(prev, outcome):
+            state = evolve_qc_state(
+                prev, symbol=sym, outcome=outcome,
+                reason=str(qc_row.get("Universe QC Problem") or ""),
+                count_failure=True,
+            )
+            save_universe_qc_state(state, outcome, counted_failure=(outcome == "hard_failure"))
+            prior_lookup[sym] = state
+
+    missing_fetch_symbols = [str(sym).upper() for sym in scan_symbols if str(sym).upper() not in fetched_symbols]
+    for sym in missing_fetch_symbols:
+        prev = prior_lookup.get(sym)
+        if not should_record_qc_outcome(prev, "hard_failure" if health["provider_healthy_enough"] else "transient_failure"):
+            continue
+        counted = bool(health["provider_healthy_enough"])
+        outcome = "hard_failure" if counted else "transient_failure"
+        state = evolve_qc_state(
+            prev, symbol=sym, outcome=outcome,
+            reason=("ingen kurshistorik kunde verifieras" if counted else "brett datakällefel misstänks – ingen QC-strike"),
+            count_failure=counted,
+        )
+        save_universe_qc_state(state, outcome, counted_failure=counted)
+        prior_lookup[sym] = state
+
+    if not qc_rejected.empty:
+        for _, rejected_row in qc_rejected.iterrows():
+            errors.append(
+                f"{rejected_row.get('Ticker','?')}: Universe QC exkluderad · "
+                f"{rejected_row.get('Universe QC Problem','otillräcklig datakvalitet')}"
+            )
+    if raw_df.empty:
+        st.error("Ingen aktie hade tillräcklig marknadsdatakvalitet för ranking.")
+        st.stop()
 
     scored = add_scores(raw_df, profile)
     save_score_history(scored, profile)

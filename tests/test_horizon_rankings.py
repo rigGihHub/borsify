@@ -24,4 +24,5 @@ def test_lifetime_rewards_quality_and_robustness():
     assert "Horisontförklaring" in top.columns
 
 def test_top_three_has_at_most_three_rows():
-    assert len(top_three(sample(),"medium"))==3
+    result = top_three(sample(),"medium")
+    assert 0 <= len(result) <= 3

@@ -3,6 +3,7 @@ import math
 from typing import Any
 import numpy as np
 import pandas as pd
+from buy_quality_gate import eligible_buys
 
 def _num(v: Any) -> float:
     try:
@@ -97,9 +98,13 @@ def horizon_reason(row: pd.Series|dict[str,Any], horizon: str) -> str:
     return "; ".join(parts[:3]) or "kvalitetsprofil lämpad för mycket lång ägarhorisont"
 
 def top_three(df: pd.DataFrame, horizon: str) -> pd.DataFrame:
-    if df is None or df.empty: return pd.DataFrame()
+    if df is None or df.empty:
+        return pd.DataFrame()
     col={"day":"Daytrade Score","medium":"Mellan Score","long":"Lång Score","lifetime":"Livstid Score"}[horizon]
     out=add_horizon_scores(df)
+    out=eligible_buys(out,horizon)
+    if out.empty:
+        return out
     out=out.sort_values([col,"Datatäckning"],ascending=[False,False]).head(3).copy()
     out["Horisontförklaring"]=[horizon_reason(r,horizon) for _,r in out.iterrows()]
     return out

@@ -530,12 +530,12 @@ SQLite fungerar direkt. För Supabase krävs de nya tabellerna `recommendation_l
 utan ledger i molnet och visar migration-needed-status internt i stället för att krascha.
 
 
-## v2.41.0 – Hotfix för djupanalys
+## v2.47.0 – Hotfix för djupanalys
 
 Byter scalar cell-assignments i deep/short finalist pipelines från `DataFrame.loc` till `DataFrame.at`. Detta gör att list-/dictvärden som Catalyst Candidates och stöd/veto-listor lagras som ett objekt i en cell i stället för att Pandas försöker tolka värdet som en kolumniterabel. Fixar kraschen `Must have equal len keys and value when setting with an iterable`.
 
 
-## v2.41.0 – Pandas iterable assignment hotfix
+## v2.47.0 – Pandas iterable assignment hotfix
 
 Hotfix for Streamlit/Pandas runtime crash in deep and short finalist builders.
 `.at` alone was insufficient when a new column did not yet exist because Pandas
@@ -544,7 +544,7 @@ created first as object dtype, then populated cell-by-cell. This safely supports
 lists and dictionaries such as Case Supports, Catalyst Candidates and similar
 structured evidence fields.
 
-## v2.41.0 – Runtime hotfix for structured assessment fields
+## v2.47.0 – Runtime hotfix for structured assessment fields
 
 Replaced all cell-by-cell writes of deep/short assessment dictionaries with a separate
 object-typed DataFrame followed by index join. This completely avoids Pandas scalar
@@ -552,7 +552,7 @@ assignment for list/dict fields and fixes the Streamlit Cloud crash path shown a
 build_deep_longlist line 891.
 
 
-## v2.41.0 – Fråga Borsify AI på varje rekommendation
+## v2.47.0 – Fråga Borsify AI på varje rekommendation
 
 Varje kort- och långsiktig rekommendation har nu en egen fråga/svar-yta:
 `Fråga Borsify AI om rekommendationen`.
@@ -584,7 +584,7 @@ gränssnittet förklarar att extern AI inte är aktiverad. API-nyckeln skickas a
 webbläsaren eller lagras i GitHub.
 
 
-## v2.41.0 – Aktuell kurs på alla rekommendationer
+## v2.47.0 – Aktuell kurs på alla rekommendationer
 
 Alla rekommendationskort visar nu senaste tillgängliga kurs tydligt direkt i headern,
 tillsammans med dagsförändring där den finns. Detta gäller både Short Alpha 1–6 månader,
@@ -594,7 +594,7 @@ Syftet är att användaren direkt ska kunna bedöma om ett case fortfarande är 
 och undvika att behöva öppna detaljanalysen bara för att se priset.
 
 
-## v2.41.0 – AI-kostnadsmätare
+## v2.47.0 – AI-kostnadsmätare
 
 Borsify visar nu uppskattad kostnad för varje lyckad AI-fråga och ackumulerad kostnad
 för innevarande kalendermånad. Beräkningen använder faktisk tokenanvändning som returneras
@@ -604,14 +604,14 @@ Mätaren visar USD och, när USD/SEK kan hämtas via Borsifys befintliga Yahoo-F
 även ungefärlig kostnad i SEK.
 
 Inloggade Supabase-användares usage sparas i den nya tabellen `ai_usage`.
-Kör v2.41.0-delen i `supabase_schema.sql` för molnpersistens. Om tabellen saknas eller
+Kör v2.47.0-delen i `supabase_schema.sql` för molnpersistens. Om tabellen saknas eller
 användaren inte är inloggad faller appen säkert tillbaka till lokal SQLite.
 
 Kostnadsmätaren är en uppskattning, inte OpenAI-fakturan. Den lagrar endast lyckade
 Borsify-AI-anrop och prisar dem enligt den taxa som finns i appversionen.
 
 
-## v2.41.0 – Prisrelevans i AI + renare rekommendationskort
+## v2.47.0 – Prisrelevans i AI + renare rekommendationskort
 
 - Aktuell kurs visas nu på en egen fullbreddsrad på kort- och långsiktiga rekommendationer
   för att undvika Streamlits avkortning av exempelvis `134,00 SEK`.
@@ -627,7 +627,7 @@ Borsify-AI-anrop och prisar dem enligt den taxa som finns i appversionen.
   USD, tokens och modell ligger bakom detaljexpanders.
 
 
-## v2.41.0 – Rekommendationens relevans nu
+## v2.47.0 – Rekommendationens relevans nu
 
 Varje kort- och långsiktigt finalistcase jämförs nu med den senaste frysta
 rekommendationen från en tidigare dag för samma ticker, horisont, profil och marknad.
@@ -645,7 +645,7 @@ den tidigare frysta rekommendationen. En kursuppgång gör inte automatiskt akti
 Om kursen har stigit tydligt utan motsvarande förstärkning i modellstödet markeras i
 stället att värderingen bör kontrolleras på nytt.
 
-Från v2.41.0 fryser Recommendation Ledger dessutom relevanta värderingsfält
+Från v2.47.0 fryser Recommendation Ledger dessutom relevanta värderingsfält
 (P/E, Forward P/E, P/B, EV/EBITDA, FCF-yield m.fl.) så framtida jämförelser kan beskriva
 om värderingsbilden faktiskt har förändrats, inte bara kursen.
 
@@ -653,7 +653,7 @@ Samma dags frysta poster används aldrig som jämförelse för samma dags rerun,
 förhindrar meningslös självjämförelse.
 
 
-## v2.41.0 – Case Plan: vad måste hända härifrån?
+## v2.47.0 – Case Plan: vad måste hända härifrån?
 
 Varje kort- och långsiktigt finalistcase får nu en explicit uppföljningsplan:
 - Tes
@@ -680,7 +680,7 @@ Case-planen skickas också med till Borsify AI så användaren kan fråga varfö
 bekräftelse, varningssignal eller case-breaker är viktig.
 
 
-## v2.41.0 – Global startsida med fyra Top 3-listor + Mina aktieköp
+## v2.47.0 – Global startsida med fyra Top 3-listor + Mina aktieköp
 
 Överblick börjar nu med fyra separata topp 3-rankningar:
 1. 1–2 dagar / Daytrader
@@ -705,4 +705,171 @@ modellstatus och Borsifys skäl. Statusarna är BEHÅLL, BEVAKA, VINSTSÄKRA? oc
 Detta är en modellbaserad beslutsindikator och inte personlig finansiell rådgivning.
 
 Innehav sparas lokalt i SQLite eller privat per inloggad användare i Supabase efter att
-v2.41.0-migreringen i supabase_schema.sql har körts.
+v2.47.0-migreringen i supabase_schema.sql har körts.
+
+
+## v2.47.0 – Landfilter i Topplistor + bredare Avanza-inspirerad marknadstäckning
+
+De fyra Top 3-listorna på Överblick har nu ett gemensamt multiselect-filter för land.
+Användaren kan välja ett eller flera länder och samtliga fyra horisonter räknas om inom
+det valda urvalet.
+
+"Alla marknader" har samtidigt breddats till de 15 länder/marknader som motsvarar
+Avanzas nuvarande digitala direktutbud enligt Avanzas publika information:
+Sverige, USA, Kanada, Danmark, Norge, Finland, Tyskland, Storbritannien, Frankrike,
+Nederländerna, Belgien, Portugal, Italien, Spanien och Schweiz.
+
+Borsifys universum är fortfarande ett kuraterat, likviditetsorienterat urval av aktier
+på dessa marknader – inte ännu varje enskilt värdepapper som Avanza tillåter handel i.
+Detta är medvetet: vi vill inte kalla täckningen komplett innan vi faktiskt kan
+identifiera, hämta och kvalitetssäkra hela den handlingsbara listan.
+
+Nya regionala listor har lagts till för Kanada, Frankrike, Nederländerna, Belgien,
+Italien, Spanien, Schweiz och Portugal. Befintliga listor för Sverige, USA, Norden,
+Tyskland och Storbritannien finns kvar.
+
+
+## v2.47.0 – Avanza Universe v1
+
+Borsifys marknadsuniversum har flyttats till en separat skalbar katalog
+`avanza_universe.csv` med ticker, land och nivå. Första breda versionen innehåller
+586 unika aktier i 15 länder.
+
+För utländska marknader kan användaren välja:
+- Snabbt kärnurval
+- Brett universum (beta)
+
+Topplistorna behåller landfiltret. Överblick visar dessutom en täckningstabell per land
+med antal kärnaktier, breda tillägg och total katalogstorlek.
+
+Detta ska inte tolkas som att Borsify redan täcker exakt alla aktier som går att handla
+hos Avanza. Avanza Universe är en växande, Avanza-inspirerad katalog. En ticker i den
+breda nivån kan dessutom sluta fungera eller byta symbol hos datakällan; scanmotorn
+tolererar sådana fel och exkluderar aktier vars marknadsdata inte kan verifieras.
+
+Arkitekturen gör att katalogen kan växa mot tusentals värdepapper utan att alla tickers
+behöver hårdkodas i app.py.
+
+
+## v2.47.0 – Universe Quality Control
+
+Det breda marknadsuniversumet får nu en separat datakvalitetskontroll innan en aktie
+tillåts delta i ranking. Kontrollen bedömer bland annat:
+- giltig aktuell kurs
+- verifierbart kursdatum
+- tillräcklig kurshistorik
+- bolagsnamn och valuta
+- täckning av centrala fundamentala datapunkter
+
+Status:
+- VERIFIERAD
+- DELVIS VERIFIERAD
+- EXKLUDERA
+
+En aktie hårdexkluderas endast när marknadsdatan inte räcker för en pålitlig ranking,
+exempelvis ogiltig kurs, saknat kursdatum eller mycket kort historik. Saknade
+fundamentala data får inte fyllas i eller gissas; aktien kan i stället märkas
+DELVIS VERIFIERAD.
+
+Överblick visar Universe Quality Control för den aktuella körningen, inklusive
+verifierade/delvis verifierade/hårt exkluderade tickers samt analyserbar täckning per
+land. Topplistorna visar också datakvalitetsstatus på varje kandidat.
+
+QC är strikt separerad från investeringsbedömningen: VERIFIERAD betyder att datan går
+att använda, inte att aktien är ett bra köp.
+
+
+## v2.47.0 – Persistent Universe QC & Quarantine
+
+Universe Quality Control är nu beständig över tid i stället för att börja om från noll
+vid varje scanning.
+
+Borsify sparar per ticker:
+- senaste QC-status
+- antal lyckade och misslyckade kontroller
+- fel i följd
+- senast kontrollerad
+- senast verifierad
+- senaste problemorsak
+- eventuell karantän till datum/tid
+
+Tre separata hårda QC-misslyckanden krävs innan en ticker sätts i sju dagars karantän.
+Samma fel får inte räknas flera gånger bara för att Streamlit gör omkörningar under
+samma dag. En senare lyckad verifiering nollställer felserien och häver karantän.
+
+Före varje scan hoppas aktivt karantänsatta tickers normalt över. Användaren kan välja
+"Omtesta karantän denna körning" för att tvinga fram ett nytt test.
+
+Borsify har också en datakälle-säkring. Om en mycket stor del av hela scanbatchen
+plötsligt misslyckas behandlas saknade hämtningar som ett möjligt Yahoo/dataleverantörs-
+problem och ger inte automatiskt individuella QC-strikes. Detta minskar risken för
+masskarantän vid ett externt driftfel.
+
+Överblick visar Persistent QC med historik, aktiv karantän, felserier, senast verifierad
+och scanens träffgrad. SQLite fungerar lokalt. För beständig molnlagring per användare
+ska v2.45-migreringen i `supabase_schema.sql` köras.
+
+
+## v2.47.0 – Buy Quality Gate
+
+De fyra horisontlistorna är nu strikt köp-orienterade. Borsify rankar inte längre bara
+de tre högsta relativa kandidaterna och kallar dem Top 3. Varje kandidat måste först
+klara ett separat minimifilter för sin tidshorisont.
+
+Grundprincip:
+- 1–2 dagar: kräver tillräckligt horisontscore och undviker bland annat extrem RSI,
+  mycket svag handelsaktivitet och tydligt negativ kort trend.
+- 1 vecka–3 månader: kräver tillräckligt score samt rimlig trend, kvalitet och risk.
+- 1–5 år: kräver tillräckligt score, INVEST-nivå, kvalitet och risk samt stoppar
+  allvarliga breda riskflaggor.
+- Resten av livet: har högst krav på uthållig kvalitet, riskprofil, lönsamhet och ROE.
+
+Om färre än tre aktier klarar filtret visas färre än tre. Om ingen klarar det visas
+"Inget köpcase klarar Borsifys minimikrav..." i stället för att fylla ut listan.
+
+Varje godkänd kandidat märks tydligt "KÖPCASE · klarar Buy Quality Gate" tillsammans
+med de viktigaste stöden i filtret.
+
+Gränserna är modellregler och inte bevisad framtida avkastning. Särskilt 1–2-dagars-
+modellen behöver fortfarande valideras point-in-time i Edge Lab innan den kan beskrivas
+som en verifierad trading-edge.
+
+
+## v2.47.0 – Daytrader Validation Lab
+
+Edge Lab har fått en separat valideringsmotor för förstasidans köpmodell
+"1–2 dagar · Daytrader".
+
+Valideringen är point-in-time på pris/volymnivå:
+- signalen byggs av information som fanns efter stängning dag t
+- antaget köp sker först nästa handelsdags öppning
+- utfall mäts efter 1 respektive 2 handelsdagar
+- roundtrip-kostnad för courtage + spread/slippage kan anges i basis points
+- brutto och netto hålls isär
+- median, träffsäkerhet, median-edge mot baslinjen, profit factor, värsta trade och
+  5-percentil kan beräknas
+- sekventiella walk-forward/OOS-fönster använder en FRYST köpgräns och optimerar inte
+  tröskeln i efterhand
+
+Valideringsstatus kan vara:
+- Ej validerad
+- Svagt/blandat historiskt stöd
+- Ingen tydlig historisk edge
+- Historiskt lovande – ej bevisad edge
+
+Motorn får aldrig kalla historiken "bevisad alpha".
+
+Viktig begränsning: dagens live-Daytrade Score innehåller 10 procent Risk, och Risk
+innehåller delvis fundamentala datapunkter. Borsify har ännu inte point-in-time-historik
+för dessa fundamenta. Backtestet använder därför en kausal teknisk RiskProxy och är en
+nära proxy, inte en exakt historisk replay av live-modellen.
+
+Ytterligare begränsningar som visas i UI:
+- survivorship bias eftersom dagens tickeruniversum används bakåt i tiden
+- historiska Avanza-handelsrestriktioner saknas
+- ingen intradagsorderbok
+- ingen modell för verklig orderfyllnad
+- Yahoo-historik kan innehålla databrister
+
+Detta steg ändrar INTE produktionsvikterna automatiskt. Syftet är att falsifiera eller
+stödja modellen innan en framtida kalibrering görs.
