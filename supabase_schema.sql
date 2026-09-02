@@ -227,3 +227,26 @@ create index if not exists recommendation_ledger_user_date_idx
   on public.recommendation_ledger(user_id, captured_date desc);
 create index if not exists recommendation_outcomes_user_symbol_idx
   on public.recommendation_outcomes(user_id, symbol, evaluated_date desc);
+
+
+-- v2.37.0: per-user OpenAI usage and estimated cost meter.
+create table if not exists public.ai_usage (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  request_id text not null,
+  symbol text not null default '',
+  model text not null,
+  input_tokens bigint not null default 0,
+  output_tokens bigint not null default 0,
+  cost_usd double precision not null default 0,
+  created_at timestamptz not null default now(),
+  primary key (user_id, request_id)
+);
+alter table public.ai_usage enable row level security;
+drop policy if exists "ai_usage_select_own" on public.ai_usage;
+create policy "ai_usage_select_own" on public.ai_usage for select using (auth.uid() = user_id);
+drop policy if exists "ai_usage_insert_own" on public.ai_usage;
+create policy "ai_usage_insert_own" on public.ai_usage for insert with check (auth.uid() = user_id);
+drop policy if exists "ai_usage_update_own" on public.ai_usage;
+create policy "ai_usage_update_own" on public.ai_usage for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create index if not exists ai_usage_user_created_idx
+  on public.ai_usage(user_id, created_at desc);

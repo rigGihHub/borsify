@@ -530,12 +530,12 @@ SQLite fungerar direkt. För Supabase krävs de nya tabellerna `recommendation_l
 utan ledger i molnet och visar migration-needed-status internt i stället för att krascha.
 
 
-## v2.36.1 – Hotfix för djupanalys
+## v2.37.0 – Hotfix för djupanalys
 
 Byter scalar cell-assignments i deep/short finalist pipelines från `DataFrame.loc` till `DataFrame.at`. Detta gör att list-/dictvärden som Catalyst Candidates och stöd/veto-listor lagras som ett objekt i en cell i stället för att Pandas försöker tolka värdet som en kolumniterabel. Fixar kraschen `Must have equal len keys and value when setting with an iterable`.
 
 
-## v2.36.1 – Pandas iterable assignment hotfix
+## v2.37.0 – Pandas iterable assignment hotfix
 
 Hotfix for Streamlit/Pandas runtime crash in deep and short finalist builders.
 `.at` alone was insufficient when a new column did not yet exist because Pandas
@@ -544,7 +544,7 @@ created first as object dtype, then populated cell-by-cell. This safely supports
 lists and dictionaries such as Case Supports, Catalyst Candidates and similar
 structured evidence fields.
 
-## v2.36.1 – Runtime hotfix for structured assessment fields
+## v2.37.0 – Runtime hotfix for structured assessment fields
 
 Replaced all cell-by-cell writes of deep/short assessment dictionaries with a separate
 object-typed DataFrame followed by index join. This completely avoids Pandas scalar
@@ -552,7 +552,7 @@ assignment for list/dict fields and fixes the Streamlit Cloud crash path shown a
 build_deep_longlist line 891.
 
 
-## v2.36.1 – Fråga Borsify AI på varje rekommendation
+## v2.37.0 – Fråga Borsify AI på varje rekommendation
 
 Varje kort- och långsiktig rekommendation har nu en egen fråga/svar-yta:
 `Fråga Borsify AI om rekommendationen`.
@@ -584,7 +584,7 @@ gränssnittet förklarar att extern AI inte är aktiverad. API-nyckeln skickas a
 webbläsaren eller lagras i GitHub.
 
 
-## v2.36.1 – Aktuell kurs på alla rekommendationer
+## v2.37.0 – Aktuell kurs på alla rekommendationer
 
 Alla rekommendationskort visar nu senaste tillgängliga kurs tydligt direkt i headern,
 tillsammans med dagsförändring där den finns. Detta gäller både Short Alpha 1–6 månader,
@@ -592,3 +592,20 @@ långsiktiga djupcase och Dagens fynd. Senaste kursdag visas när Prisdatum finn
 
 Syftet är att användaren direkt ska kunna bedöma om ett case fortfarande är relevant
 och undvika att behöva öppna detaljanalysen bara för att se priset.
+
+
+## v2.37.0 – AI-kostnadsmätare
+
+Borsify visar nu uppskattad kostnad för varje lyckad AI-fråga och ackumulerad kostnad
+för innevarande kalendermånad. Beräkningen använder faktisk tokenanvändning som returneras
+av Responses API. Standardpriset för `gpt-5.6-luna` är centraliserat i `ai_cost.py`.
+
+Mätaren visar USD och, när USD/SEK kan hämtas via Borsifys befintliga Yahoo-FX-cache,
+även ungefärlig kostnad i SEK.
+
+Inloggade Supabase-användares usage sparas i den nya tabellen `ai_usage`.
+Kör v2.37.0-delen i `supabase_schema.sql` för molnpersistens. Om tabellen saknas eller
+användaren inte är inloggad faller appen säkert tillbaka till lokal SQLite.
+
+Kostnadsmätaren är en uppskattning, inte OpenAI-fakturan. Den lagrar endast lyckade
+Borsify-AI-anrop och prisar dem enligt den taxa som finns i appversionen.

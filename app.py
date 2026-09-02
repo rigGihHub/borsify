@@ -40,6 +40,7 @@ from recommendation_ledger import (
     outcome_summary, calibration_by_gate,
 )
 from case_ai import build_case_ai_input, build_case_ai_instructions, local_case_explanation
+from ai_cost import token_usage, estimate_usage_cost, format_cost_usd
 
 from edge_lab import (
     build_technical_history, summarize_backtest, summarize_universe_backtest,
@@ -58,7 +59,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.36.1"
+APP_VERSION = "2.37.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -1315,6 +1316,19 @@ def init_db() -> None:
                 loss_10 INTEGER NOT NULL DEFAULT 0,
                 evaluated_at TEXT NOT NULL,
                 PRIMARY KEY (record_id, horizon)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_usage (
+                request_id TEXT PRIMARY KEY,
+                symbol TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cost_usd REAL NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
@@ -2941,6 +2955,110 @@ def render_overview(
 
 
 
+
+def save_ai_usage(request_id: str, symbol: str, model: str, input_tokens: int, output_tokens: int, cost_usd: float) -> None:
+    """Persist successful AI usage. Cloud persistence is per signed-in user; SQLite is the safe fallback."""
+    rid = str(request_id or "").strip()
+    if not rid:
+        rid = f"local-{datetime.now().isoformat(timespec='microseconds')}-{symbol}"
+    payload = {
+        "request_id": rid,
+        "symbol": str(symbol or ""),
+        "model": str(model or ""),
+        "input_tokens": int(input_tokens or 0),
+        "output_tokens": int(output_tokens or 0),
+        "cost_usd": float(cost_usd or 0.0),
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        try:
+            client.table("ai_usage").upsert(
+                {"user_id": uid, **payload},
+                on_conflict="user_id,request_id",
+            ).execute()
+            return
+        except Exception:
+            st.session_state["bq_ai_usage_migration_needed"] = True
+
+    init_db()
+    with _db_connect() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO ai_usage(request_id,symbol,model,input_tokens,output_tokens,cost_usd,created_at) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (
+                payload["request_id"], payload["symbol"], payload["model"],
+                payload["input_tokens"], payload["output_tokens"], payload["cost_usd"], payload["created_at"],
+            ),
+        )
+
+
+def get_ai_usage_month() -> dict[str, float]:
+    """Return current calendar month's usage totals without estimating missing requests."""
+    month_start = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        try:
+            rows = (
+                client.table("ai_usage")
+                .select("input_tokens,output_tokens,cost_usd,created_at")
+                .eq("user_id", uid)
+                .gte("created_at", month_start)
+                .execute().data or []
+            )
+            return {
+                "requests": float(len(rows)),
+                "input_tokens": float(sum(int(r.get("input_tokens") or 0) for r in rows)),
+                "output_tokens": float(sum(int(r.get("output_tokens") or 0) for r in rows)),
+                "cost_usd": float(sum(float(r.get("cost_usd") or 0.0) for r in rows)),
+            }
+        except Exception:
+            st.session_state["bq_ai_usage_migration_needed"] = True
+
+    init_db()
+    with _db_connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(input_tokens),0), COALESCE(SUM(output_tokens),0), COALESCE(SUM(cost_usd),0) "
+            "FROM ai_usage WHERE created_at >= ?",
+            (month_start,),
+        ).fetchone()
+    return {
+        "requests": float(row[0] or 0),
+        "input_tokens": float(row[1] or 0),
+        "output_tokens": float(row[2] or 0),
+        "cost_usd": float(row[3] or 0.0),
+    }
+
+
+def ai_cost_sek(cost_usd: float) -> float:
+    """Convert the estimated USD API cost to SEK using Borsify's cached Yahoo FX rate when available."""
+    try:
+        rates = fetch_fx_rates_to_sek(("USD",))
+        usdsek = _num(rates.get("USD"))
+        if np.isfinite(usdsek) and usdsek > 0:
+            return float(cost_usd) * usdsek
+    except Exception:
+        pass
+    return math.nan
+
+
+def render_ai_cost_meter() -> None:
+    usage = get_ai_usage_month()
+    cost_usd = float(usage.get("cost_usd", 0.0))
+    cost_sek = ai_cost_sek(cost_usd)
+    requests = int(usage.get("requests", 0))
+    if np.isfinite(cost_sek):
+        st.caption(
+            f"AI-kostnad denna månad: **≈ {cost_sek:.2f} kr** ({format_cost_usd(cost_usd)}) · "
+            f"{requests} lyckade AI-frågor."
+        )
+    else:
+        st.caption(
+            f"AI-kostnad denna månad: **{format_cost_usd(cost_usd)}** · {requests} lyckade AI-frågor."
+        )
+    st.caption("Kostnaden är en uppskattning från faktisk tokenanvändning och aktuell standardtaxa för vald modell.")
+
+
 def _case_ai_api_key() -> str:
     try:
         return str(st.secrets.get("OPENAI_API_KEY", "") or "").strip()
@@ -2955,28 +3073,43 @@ def _case_ai_model() -> str:
         return "gpt-5.6-luna"
 
 
-def ask_borsify_ai(case: pd.Series | dict[str, Any], horizon: str, question: str) -> tuple[str, str]:
-    """Ask the configured OpenAI model using only the structured Borsify case context."""
+def ask_borsify_ai(case: pd.Series | dict[str, Any], horizon: str, question: str) -> tuple[str, str, dict[str, Any]]:
+    """Ask the configured OpenAI model and record actual token usage for the cost meter."""
     key = _case_ai_api_key()
     if not key or OpenAI is None:
-        return local_case_explanation(case, horizon), "local"
+        return local_case_explanation(case, horizon), "local", {}
 
+    model = _case_ai_model()
     try:
         client = OpenAI(api_key=key)
         response = client.responses.create(
-            model=_case_ai_model(),
+            model=model,
             instructions=build_case_ai_instructions(),
             input=build_case_ai_input(case, horizon, question),
             max_output_tokens=700,
         )
         text = str(getattr(response, "output_text", "") or "").strip()
         if not text:
-            return local_case_explanation(case, horizon), "local"
-        return text, "ai"
+            return local_case_explanation(case, horizon), "local", {}
+
+        input_tokens, output_tokens = token_usage(response)
+        usage_cost = estimate_usage_cost(model, input_tokens, output_tokens)
+        request_id = str(getattr(response, "id", "") or "")
+        symbol = str(case.get("Ticker", "") or "")
+        save_ai_usage(
+            request_id, symbol, usage_cost.model,
+            usage_cost.input_tokens, usage_cost.output_tokens, usage_cost.cost_usd,
+        )
+        meta = {
+            "model": usage_cost.model,
+            "input_tokens": usage_cost.input_tokens,
+            "output_tokens": usage_cost.output_tokens,
+            "cost_usd": usage_cost.cost_usd,
+        }
+        return text, "ai", meta
     except Exception as exc:
-        # Never crash a recommendation card because the AI provider is unavailable.
         fallback = local_case_explanation(case, horizon)
-        return fallback + f"\n\n_AI-tjänsten kunde inte nås ({type(exc).__name__})._", "local"
+        return fallback + f"\n\n_AI-tjänsten kunde inte nås ({type(exc).__name__})._", "local", {}
 
 
 
@@ -3017,6 +3150,8 @@ def render_case_ai_qa(case: pd.Series | dict[str, Any], horizon: str, rank: int)
                 "Lägg `OPENAI_API_KEY` i Streamlit Secrets. Utan nyckel visas bara ett regelbaserat reservsvar."
             )
 
+        render_ai_cost_meter()
+
         history = st.session_state.setdefault(history_key, [])
         for item in history[-4:]:
             st.markdown(f"**Du:** {item['q']}")
@@ -3041,13 +3176,22 @@ def render_case_ai_qa(case: pd.Series | dict[str, Any], horizon: str, rank: int)
                 st.warning("Skriv en fråga först.")
             else:
                 with st.spinner("Borsify AI granskar caset…"):
-                    answer, mode = ask_borsify_ai(case, horizon, q)
-                history.append({"q": q, "a": answer, "mode": mode})
+                    answer, mode, usage_meta = ask_borsify_ai(case, horizon, q)
+                history.append({"q": q, "a": answer, "mode": mode, "usage": usage_meta})
                 st.session_state[history_key] = history[-8:]
                 st.markdown(f"**Du:** {q}")
                 label = "Borsify AI" if mode == "ai" else "Borsify · reservsvar"
                 st.markdown(f"**{label}:** {answer}")
-                if mode != "ai":
+                if mode == "ai" and usage_meta:
+                    one_usd = float(usage_meta.get("cost_usd", 0.0))
+                    one_sek = ai_cost_sek(one_usd)
+                    token_total = int(usage_meta.get("input_tokens", 0)) + int(usage_meta.get("output_tokens", 0))
+                    if np.isfinite(one_sek):
+                        st.caption(f"Den här frågan kostade uppskattningsvis ≈ {one_sek:.3f} kr ({format_cost_usd(one_usd)}) · {token_total:,} tokens.".replace(",", " "))
+                    else:
+                        st.caption(f"Den här frågan kostade uppskattningsvis {format_cost_usd(one_usd)} · {token_total:,} tokens.".replace(",", " "))
+                    render_ai_cost_meter()
+                elif mode != "ai":
                     st.caption("Reservsvaret är regelbaserat och ska inte förväxlas med ett AI-svar.")
 
 
