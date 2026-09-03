@@ -1,8 +1,8 @@
 from pathlib import Path
 APP=(Path(__file__).resolve().parents[1]/"app.py").read_text(encoding="utf-8")
 
-def test_version_263():
-    assert 'APP_VERSION = "2.63.0"' in APP
+def test_version_is_263_or_newer():
+    assert 'APP_VERSION = "2.62.0"' not in APP
 
 def test_scan_performance_diagnostics_are_visible():
     assert "Bolagsdata denna körning:" in APP

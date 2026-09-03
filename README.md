@@ -1461,3 +1461,136 @@ procentuell prestandaförbättring innan live-mätningar finns.
 En kall första scanning av ett stort och helt giltigt universum behöver fortfarande
 hämta bolagsdata för många aktier. v2.63 reducerar upprepade anrop och slösade
 anrop till ogiltiga tickers, men löser inte hela cold-start-problemet.
+
+
+## v2.64.0 – Validering före tvåstegsscanning
+
+v2.64 kapar ännu inga fundamental-anrop utifrån en price-only-gallring.
+
+I stället simulerar Borsify vad som hade hänt om en billig första gallring fått
+välja vilka aktier som skulle gå vidare till full bolagsdata.
+
+### Hur simuleringen fungerar
+
+Den billiga gallringen använder bara sådant som redan finns i kurshistoriken:
+- 1, 3 och 6 månaders kursutveckling,
+- avstånd till 52-veckorstopp,
+- RSI,
+- volymkvot,
+- avstånd till 200-dagars medelvärde,
+- ungefärlig handelsomsättning.
+
+För att minska risken att bara välja momentumaktier byggs kandidatpoolen som en
+union av flera olika prislinser:
+- trend,
+- rekyl,
+- möjlig vändning,
+- stabilitet.
+
+Standardtestet använder ungefär 60 % av det fulla universumet, dock minst 80
+aktier när universumet är tillräckligt stort.
+
+### Vad mäts?
+
+Efter att den vanliga fulla Borsify-analysen är klar jämförs den simulerade
+kandidatpoolen med:
+- de fem högst rankade aktierna i huvudmodellen,
+- Top 3 för 1–2 dagar,
+- Top 3 för 1 vecka–3 månader,
+- Top 3 för 1–5 år,
+- Top 3 för mycket lång sikt.
+
+Borsify visar sedan hur många av dessa slutliga toppkandidater som en billig
+första gallring hade behållit.
+
+### Ingen aktivering efter en enda bra körning
+
+Resultatet sparas per dag och marknad i SQLite.
+
+Borsify rekommenderar inte ens ett kontrollerat aktiveringstest förrän minst fem
+separata körningar finns. Dessutom krävs:
+- minst 98 % genomsnittlig träff i de senaste körningarna,
+- ingen enskild körning under 95 %.
+
+Även när detta uppfylls är gallringen fortfarande inte automatiskt aktiverad.
+
+Det här är medvetet konservativt. En snabbare app är inte bättre om den missar ett
+starkt investeringscase.
+
+
+## v2.65.0 – Liquidity & Execution Guard
+
+Den här releasen gör de korta köpcasen mer praktiskt användbara.
+
+Borsify kontrollerar nu normal daglig handelsomsättning innan en aktie får visas
+som Top 3 för 1–2 dagar eller 1 vecka–3 månader.
+
+### Hårda miniminivåer
+
+För 1–2 dagar:
+- under 2 MSEK i normal daglig handel stoppas,
+- 2–10 MSEK märks som tunnare handel,
+- över 10 MSEK behandlas som godtagbar handel.
+
+För 1 vecka–3 månader:
+- under 1 MSEK stoppas,
+- 1–5 MSEK märks som tunnare handel,
+- över 5 MSEK behandlas som godtagbar handel.
+
+Om omsättningsdata saknas stoppas korta Top-3-case i stället för att Borsify gissar.
+
+Fleråriga case hårdfiltreras inte av samma kortsiktiga likviditetsgränser.
+
+### Viktig begränsning
+
+Borsify har fortfarande dagsdata från Yahoo. Den kan därför inte verifiera:
+- aktuell bid/ask-spread,
+- orderboksdjup,
+- antal avslut i realtid,
+- faktisk slippage.
+
+Appen säger detta uttryckligen. 1–2-dagarsvyn beskrivs nu som en kortsiktig
+dagsdatabaserad signal och inte som en intradagssignal.
+
+Detta är en grov exekveringskontroll, inte en garanti för att en viss orderstorlek
+kan genomföras utan pris påverkan.
+
+
+## v2.66.0 – Kritisk kraschfix + färskare "Varför nu?"
+
+### Kritisk kraschfix
+
+Efter v2.61 flyttades huvudnavigationen och vissa dyra analyser. I samband med
+detta låg en gammal rad kvar som byggde marknadsjämförelsen med variablerna
+`idx`, `benchmark_name` och `benchmark_symbol` utan att de längre skapades i
+`main()`.
+
+Det gav ett `NameError` och stoppade hela appen efter scanningen.
+
+v2.66 skapar nu marknadens benchmark-konfiguration explicit efter marknadsvalet
+och hämtar indexsnapshoten innan texten använder den. Samma variabler finns även
+för sidan med historiska tester.
+
+Ett regressionstest kontrollerar ordningen så att samma typ av refaktorbugg inte
+ska kunna passera testsviten igen.
+
+### "Varför nu?" kräver nu tidsstämplad nyhet
+
+Tidigare kunde en Yahoo-rubrik klassificeras som möjlig katalysator även när
+Borsify inte kunde verifiera hur gammal rubriken var.
+
+Från v2.66:
+- publiceringsdatum och källa sparas när Yahoo tillhandahåller dem,
+- en rubrik utan verifierbart datum får inte skapa ett positivt "Varför nu?",
+- rubriker äldre än 30 dagar räknas inte som aktuell katalysator,
+- rubriker 15–30 dagar gamla får lägre bevisstyrka,
+- färska negativa rubriker kan fortfarande stoppa ett positivt katalysatorbudskap,
+- rubriker är alltid bara en ledtråd och ska verifieras i originalkällan.
+
+Detta minskar risken att gammal nyhetsinformation presenteras som något som händer
+"just nu".
+
+### Språk
+
+Några kvarvarande tekniska ord i djupcaset har också förenklats. Bland annat
+visas inte längre "avkastningshurdle" i användartexten.

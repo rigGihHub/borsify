@@ -29,6 +29,8 @@ from earnings_quality import build_earnings_quality_metrics, assess_earnings_qua
 from data_trust import add_data_trust
 from fundamental_cache import get_cached_fundamentals, put_cached_fundamentals, CACHE_MAX_AGE_HOURS
 from scan_pipeline import assess_price_history
+from staged_scan_validation import validate_candidate_pool, activation_readiness
+from prefilter_history import save_prefilter_validation, get_prefilter_validation_history
 from inflection_engine import build_inflection_metrics, assess_inflection, apply_inflection_gate, inflection_rank_value
 from mispricing_engine import build_mispricing_assessment, apply_mispricing_gate, mispricing_rank_value
 from scenario_engine import build_scenarios
@@ -82,7 +84,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.63.0"
+APP_VERSION = "2.66.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -975,7 +977,21 @@ def fetch_deep_statements(symbol: str) -> dict[str, Any]:
                 if not link and isinstance(item, dict):
                     link = item.get("link")
                 if title:
-                    catalyst_news.append({"title": str(title), "link": link})
+                    published_at = None
+                    provider = None
+                    if isinstance(content, dict):
+                        published_at = content.get("pubDate") or content.get("displayTime")
+                        provider_obj = content.get("provider")
+                        if isinstance(provider_obj, dict):
+                            provider = provider_obj.get("displayName") or provider_obj.get("name")
+                    if not published_at and isinstance(item, dict):
+                        published_at = item.get("providerPublishTime") or item.get("pubDate")
+                    catalyst_news.append({
+                        "title": str(title),
+                        "link": link,
+                        "published_at": published_at,
+                        "provider": provider,
+                    })
         except Exception:
             catalyst_news = []
 
@@ -3296,7 +3312,7 @@ def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
 
     sections = [
         ("⚡ Bästa köp · 1–2 dagar", "day", "Daytrade Score",
-         "Mycket kort sikt. Borsify vill se styrka och ovanligt aktiv handel, men försöker samtidigt undvika aktier som redan rusat så mycket att ett nytt köp riskerar att komma för sent."),
+         "Mycket kort sikt baserad på dagsdata – inte en realtids- eller intradagssignal. Borsify vill se styrka, tillräcklig handel och en tydlig riskplan, men försöker samtidigt undvika aktier som redan rusat så mycket att ett nytt köp riskerar att komma för sent."),
         ("📈 Bästa köp · 1 vecka–3 månader", "medium", "Mellan Score",
          "Borsify tittar på hur kursen gått de senaste 1–3 månaderna och väger ihop det med bolagets kvalitet, prisnivå och risk. En aktie som redan gått extremt långt kan stoppas trots ett högt betyg."),
         ("🏗️ Bästa köp · 1–5 år", "long", "Lång Score",
@@ -3368,6 +3384,23 @@ def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
                     st.write(str(row.get("Största risk","—")))
                     st.markdown("**Vad skulle få Borsify att ändra sig?**")
                     st.write(str(row.get("Vad ändrar Borsifys syn","—")))
+
+                    if horizon in {"day","medium"}:
+                        liq_status = str(row.get("Likviditetskontroll","") or "")
+                        liq_text = str(row.get("Likviditet förklaring","") or "")
+                        if liq_status:
+                            st.markdown("**Går aktien rimligt att handla?**")
+                            if liq_status == "GODTAGBAR HANDEL":
+                                st.success(liq_status)
+                            elif liq_status == "TUNNARE HANDEL":
+                                st.warning(liq_status)
+                            else:
+                                st.error(liq_status)
+                            if liq_text:
+                                st.write(liq_text)
+                            st.caption(
+                                "Borsify använder dagsdata här – inte realtid. Aktuell spread och orderboksdjup kan därför inte verifieras."
+                            )
 
                     market_status = str(row.get("Marknadsläge","") or "")
                     market_text = str(row.get("Marknadsläge text","") or "")
@@ -3468,6 +3501,14 @@ def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
                             )
                         elif horizon == "medium":
                             st.caption(f"1 månad {fmt_pct(row.get('1 mån'))} · 3 månader {fmt_pct(row.get('3 mån'))}")
+                        if horizon in {"day","medium"}:
+                            liq_turnover = _num(row.get("Likviditet omsättning MSEK"))
+                            if np.isfinite(liq_turnover):
+                                st.caption(f"Normal daglig handelsomsättning: cirka {liq_turnover:.1f} MSEK.")
+                            liq_limit = str(row.get("Likviditet begränsning","") or "")
+                            if liq_limit:
+                                st.caption("Begränsning: " + liq_limit)
+
                         market_required = _num(row.get("Marknadskrav"))
                         market_adjustment = _num(row.get("Marknadsläge justering"))
                         if np.isfinite(market_required):
@@ -3825,6 +3866,45 @@ def render_overview(
             st.caption(
                 "Tiderna mäts i den aktuella körningen. De är diagnostik, inte ett löfte om en viss framtida laddtid."
             )
+
+        validation = st.session_state.get("bq_prefilter_validation", {})
+        if isinstance(validation, dict) and validation:
+            st.markdown("**Test av framtida snabbare scanning**")
+            retention = _num(validation.get("retention"))
+            pool_fraction = _num(validation.get("fraction"))
+            if np.isfinite(retention):
+                st.write(
+                    f"En billig första gallring till cirka {pool_fraction:.0%} av aktierna "
+                    f"hade behållit {int(validation.get('retained',0))} av "
+                    f"{int(validation.get('targets',0))} slutliga toppkandidater "
+                    f"i den här körningen ({retention:.0%})."
+                )
+            missed = validation.get("missed") or []
+            if missed:
+                st.warning(
+                    "Gallringen hade missat: " + ", ".join(map(str, missed))
+                    + ". Därför används den inte för att styra dagens analys."
+                )
+            else:
+                st.success(
+                    "Ingen av dagens slutliga toppkandidater hade missats i simuleringen."
+                )
+
+            validation_history = get_prefilter_validation_history(
+                DB_PATH, market=market, limit=10
+            )
+            readiness = activation_readiness(validation_history, minimum_runs=5)
+            if bool(readiness.get("ready")):
+                st.success(
+                    "Historiken är tillräckligt stabil för att senare prova gallringen "
+                    "i ett kontrollerat prestandatest. Den är fortfarande inte aktiverad."
+                )
+            else:
+                st.caption(
+                    "Aktivering: " + str(readiness.get("status","För lite historik"))
+                    + ". Borsify kräver minst fem separata körningar och mycket hög träff innan "
+                    "några fundamental-anrop får tas bort."
+                )
         if idx:
             st.write(f"{benchmark_name}: {idx['index']:.2f} ({fmt_pct(idx.get('daily'))})")
         st.caption(f"Borsify v{APP_VERSION}. Kurser och bolagsuppgifter kan ibland vara fördröjda eller saknas.")
@@ -5137,6 +5217,11 @@ def main() -> None:
                     st.caption("Bevakning och scorehistorik sparas i molnet.")
             else:
                 st.caption("Lokalt läge · konfigurera Supabase för konto och molnsynk.")
+
+    market_config = MARKET_CONFIGS.get(market, {})
+    benchmark_symbol = market_config.get("benchmark")
+    benchmark_name = market_config.get("benchmark_name", "Jämförelseindex")
+
     if market == "Sverige":
         symbols = OMXS30_TICKERS if universe == "OMXS30" else (file_universe_symbols if universe == "Sverige bred" else parse_symbols(custom))
     else:
@@ -5243,6 +5328,28 @@ def main() -> None:
     scored = add_scores(raw_df, profile)
     scored = add_data_trust(scored)
     save_score_history(scored, profile)
+
+    # v2.64: validate a possible future price-only prefilter against the full
+    # analysis. This does NOT reduce today's Yahoo calls or change rankings.
+    try:
+        validation_targets: set[str] = set(
+            scored.sort_values(["Borsify Score","Datatäckning"],ascending=[False,False])
+            .head(5)["Ticker"].astype(str).tolist()
+        )
+        for validation_horizon in ("day","medium","long","lifetime"):
+            validation_top = top_three(scored, validation_horizon)
+            if not validation_top.empty:
+                validation_targets.update(validation_top["Ticker"].astype(str).tolist())
+        prefilter_validation = validate_candidate_pool(
+            scored, validation_targets, fraction=.60, minimum=80
+        )
+        save_prefilter_validation(
+            DB_PATH, market, prefilter_validation, APP_VERSION
+        )
+        st.session_state["bq_prefilter_validation"] = prefilter_validation
+    except Exception:
+        st.session_state["bq_prefilter_validation"] = {}
+
     filtered = scored.copy()
     if min_market_cap > 0:
         cap_ok = filtered["Börsvärde BSEK"] >= min_market_cap
@@ -5265,6 +5372,7 @@ def main() -> None:
 
     price_dates = sorted({str(x) for x in raw_df.get("Prisdatum", pd.Series(dtype=str)).dropna().tolist() if str(x) != "—"})
     latest_price_date = price_dates[-1] if price_dates else "—"
+    idx = fetch_index_snapshot(benchmark_symbol) if benchmark_symbol else {}
     market_note = f" · {benchmark_name} {idx['index']:.0f} ({fmt_pct(idx.get('daily'))})" if idx else ""
     fx_note = ""
     if market != "Sverige":
@@ -5521,11 +5629,11 @@ def main() -> None:
                         if operating_change:
                             st.markdown("**Vad förändras i själva bolaget?**")
                             if operating_change == "Bred fundamental förbättring":
-                                st.success(f"{operating_change}" + (f" · {operating_quality:.0f}/100" if np.isfinite(operating_quality) else ""))
+                                st.success(f"{operating_change}")
                             elif operating_change in {"Bred fundamental försämring","Övervägande försämring"}:
-                                st.warning(f"{operating_change}" + (f" · {operating_quality:.0f}/100" if np.isfinite(operating_quality) else ""))
+                                st.warning(f"{operating_change}")
                             else:
-                                st.info(f"{operating_change}" + (f" · {operating_quality:.0f}/100" if np.isfinite(operating_quality) else ""))
+                                st.info(f"{operating_change}")
                             conflict_text = str(case.get("Förändringskonflikt","") or "")
                             if conflict_text and not conflict_text.startswith("Ingen tydlig konflikt"):
                                 st.warning(conflict_text)
@@ -5535,7 +5643,7 @@ def main() -> None:
                         cat_signal = plain_finance_text(case.get("Catalyst Signal", "Ingen tydlig händelse som kan ändra marknadens syn har verifierats"))
                         cat_conf = _num(case.get("Catalyst Confidence"))
                         if cat_signal == "Tydlig möjlig katalysator":
-                            st.success(f"**Det som kan ändra marknadens syn:** {case.get('Primary Catalyst','—')} · {case.get('Catalyst Timing','—')} · evidens {cat_conf:.0f}/100")
+                            st.success(f"**Det som kan ändra marknadens syn:** {case.get('Primary Catalyst','—')} · {case.get('Catalyst Timing','—')}")
                         elif cat_signal == "Ny risk måste verifieras först":
                             st.warning(f"**Kommande händelse eller risk:** {cat_signal}. {case.get('Catalyst Warnings','')}")
                         else:
@@ -5545,9 +5653,12 @@ def main() -> None:
                         base_req = _num(case.get("Implied EPS CAGR @ exit P/E 20"))
                         verified_growth = _num(case.get("Verifierad tillväxtproxy"))
                         if np.isfinite(base_req):
-                            st.write(f"Med 10 % årlig avkastningshurdle och P/E 20 om fem år kräver dagens värdering ungefär **{base_req:.1%} årlig EPS-tillväxt**. Verifierad tillväxtproxy ({case.get('Tillväxtkälla','—')}) är **{verified_growth:.1%}**." if np.isfinite(verified_growth) else f"Med 10 % årlig avkastningshurdle och P/E 20 om fem år kräver dagens värdering ungefär **{base_req:.1%} årlig EPS-tillväxt**. Tillräcklig verifierad tillväxtproxy saknas för jämförelse.")
+                            st.write(
+                                f"Om du vill ha ungefär 10 % avkastning per år och aktien värderas till P/E 20 om fem år, behöver vinsten per aktie växa ungefär **{base_req:.1%} per år**. "
+                                + (f"Den tillväxt Borsify faktiskt kan belägga ({case.get('Tillväxtkälla','—')}) är **{verified_growth:.1%}**." if np.isfinite(verified_growth) else "Borsify saknar tillräckligt bra tillväxtdata för att jämföra med detta.")
+                            )
                         else:
-                            st.write("Forward P/E eller annan nödvändig värderingsdata saknas, så prisets förväntningshurdle kan inte beräknas robust.")
+                            st.write("Borsify saknar tillräcklig värderingsdata för att räkna ut vilken framtida vinsttillväxt dagens aktiepris verkar kräva.")
                         st.write(f"**Verkar aktien felprissatt?** {plain_finance_text(case.get('Mispricing Signal','Kan inte bedömas'))}. {plain_finance_text(case.get('Varför marknaden kan ha fel 2.0',''))}")
                         if case.get("Inflection Gate Note"):
                             st.warning(plain_finance_text(case.get("Inflection Gate Note")))

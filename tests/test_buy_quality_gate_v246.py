@@ -28,6 +28,7 @@ def strong_row(ticker="GOOD"):
         "3 mån": .24,
         "6 mån": .34,
         "Volymkvot": 1.5,
+        "Omsättning MSEK/dag": 25.0,
         "RSI14": 62,
         "Avstånd SMA200": .10,
         "Risk": 78,

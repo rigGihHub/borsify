@@ -27,10 +27,10 @@ def test_profit_warning_vetoes_positive_headline():
     assert r['Catalyst Support'] is False
     assert 'vinst' in r['Catalyst Warnings'].lower() or 'sänkt' in r['Catalyst Warnings'].lower()
 
-def test_headline_order_is_catalyst_but_source_must_be_verified():
+def test_undated_positive_headline_is_not_current_catalyst():
     r = build_catalyst_assessment({}, {'news':[{'title':'Bolaget vinner kontrakt värt 500 MSEK'}]}, NOW)
-    assert r['Catalyst Signal'] in {'Tydlig möjlig katalysator','Möjlig katalysator'}
-    assert 'originalkällan' in r['Catalyst Evidence']
+    assert r['Catalyst Signal'] == 'Ingen tydlig katalysator verifierad'
+    assert 'utan verifierbart datum' in r['Catalyst Warnings']
 
 def test_deleveraging_can_be_catalyst():
     r = build_catalyst_assessment({'Skuldförändring': -.25}, {}, NOW)

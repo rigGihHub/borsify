@@ -10,6 +10,7 @@ from risk_reward import build_risk_reward, risk_reward_rank_value
 from relative_strength import add_relative_strength, relative_strength_label
 from market_regime import add_market_regime, filter_market_regime_eligible, market_regime_user_text
 from case_readiness import add_case_readiness, filter_top_case_ready
+from liquidity_guard import add_liquidity_guard, filter_execution_ready
 
 def _num(v: Any) -> float:
     try:
@@ -112,6 +113,13 @@ def top_three(df: pd.DataFrame, horizon: str) -> pd.DataFrame:
     out=add_market_regime(out,horizon)
     out=eligible_buys(out,horizon)
     out=filter_market_regime_eligible(out)
+    if out.empty:
+        return out
+
+    # Short-horizon recommendations must also be practically tradeable.
+    # This is a coarse turnover guard; it does not pretend to know live spread.
+    out=add_liquidity_guard(out,horizon)
+    out=filter_execution_ready(out,horizon)
     if out.empty:
         return out
 

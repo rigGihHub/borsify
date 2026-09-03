@@ -46,6 +46,16 @@ def _days_until(value: Any, now: pd.Timestamp | None = None) -> int | None:
     return int((ts.normalize() - now.normalize()).days)
 
 
+def _news_age_days(value: Any, now: pd.Timestamp | None = None) -> int | None:
+    ts = _to_ts(value)
+    if ts is None:
+        return None
+    now = now or pd.Timestamp.now(tz='UTC')
+    if now.tzinfo is None:
+        now = now.tz_localize('UTC')
+    return max(0, int((now.normalize() - ts.normalize()).days))
+
+
 POSITIVE_NEWS_RULES = [
     ('Höjd prognos/guidance', ('raises guidance','raised guidance','raises outlook','raised outlook','hojer prognos','hojd prognos','hojer utsikter','guidance raised')),
     ('Order/kontrakt', ('wins contract','won contract','new contract','awarded contract','order worth','order value','far order','vinner kontrakt','nytt kontrakt','order vard')),
@@ -159,7 +169,8 @@ def build_catalyst_assessment(case: dict[str, Any] | pd.Series, events: dict[str
             'evidence': f'FCF senaste kvartalet förändrades cirka {fcf_change:+.1%} år/år.',
         })
 
-    # 4) Recent headlines: useful triage, explicitly weaker than statements until verified.
+    # 4) Headlines are useful triage only when timing is known and reasonably fresh.
+    # An undated/old headline must never be presented as "why now".
     negative_headline = False
     for item in (events.get('news') or [])[:5]:
         if not isinstance(item, dict):
@@ -170,18 +181,58 @@ def build_catalyst_assessment(case: dict[str, Any] | pd.Series, events: dict[str
         label, direction, strength = classify_news_catalyst(title)
         if strength <= 0:
             continue
+
+        age_days = _news_age_days(item.get('published_at'), now)
+        provider = str(item.get('provider') or '').strip()
+        source_bits = [x for x in [provider, f"{age_days} dagar sedan" if age_days is not None else "datum saknas"] if x]
+        source_text = " · ".join(source_bits)
+
+        # Old headlines are context, not current catalysts.
+        if age_days is not None and age_days > 30:
+            warnings.append(f'Äldre rubrik ({label}, {age_days} dagar): “{title[:120]}”. Räknas inte som aktuell katalysator.')
+            continue
+
+        # Missing publication date means we cannot prove recency. Keep it visible as
+        # a warning/context item, but do not let it create positive catalyst support.
+        if age_days is None:
+            if direction == 'negative':
+                negative_headline = True
+                warnings.append(
+                    f'Negativ rubrik utan verifierbart datum ({label}): “{title[:120]}”. '
+                    'Risken måste kontrolleras innan ett positivt case får visas som tydligt.'
+                )
+            else:
+                warnings.append(
+                    f'Rubrik utan verifierbart datum ({label}): “{title[:120]}”. '
+                    'Kan inte användas som ”varför nu”.'
+                )
+            continue
+
+        fresh = age_days <= 14
         if direction == 'negative':
             negative_headline = True
-            warnings.append(f'Ny rubrik kan vara negativ ({label}): “{title[:130]}”. Läs originalkällan.')
+            warnings.append(
+                f'Färsk rubrik kan vara negativ ({label}, {source_text}): “{title[:130]}”. Läs originalkällan.'
+            )
             continue
+
         candidates.append({
-            'name': label, 'direction': direction, 'strength': strength,
-            'confidence': 55 if direction == 'positive' else 40,
-            'timing': 'nu / kommande månader',
+            'name': label,
+            'direction': direction,
+            'strength': strength if fresh else max(1, strength - 1),
+            'confidence': (58 if direction == 'positive' else 40) if fresh else 35,
+            'timing': f'{age_days} dagar sedan' if age_days > 0 else 'idag',
             'effect': ('Kan ge marknaden ny fundamental information om den ekonomiska betydelsen är stor.'
                        if direction == 'positive' else 'Kan ändra caset, men riktning och ekonomisk effekt kan inte avgöras från rubriken.'),
-            'evidence': f'Rubrik i extern källa: “{title[:150]}”. Måste verifieras i originalkällan.',
+            'evidence': (
+                f'Rubrik i extern källa ({source_text}): “{title[:150]}”. '
+                'Rubriken är endast en ledtråd och måste verifieras i originalkällan.'
+            ),
             'link': item.get('link'),
+            'published_at': item.get('published_at'),
+            'provider': provider,
+            'age_days': age_days,
+            'fresh': bool(fresh),
         })
 
     # De-duplicate same catalyst type and rank by evidence/direction.

@@ -23,6 +23,7 @@ def sample():
     df["Prisdatum"]=pd.Timestamp.today().date().isoformat()
     df["Skuld/eget kapital"]=35
     df["Riskflaggor"]="—"
+    df["Omsättning MSEK/dag"]=[30.0,8.0,15.0,20.0]
     df["_history"]=[_history() for _ in range(len(df))]
     return df
 
