@@ -4,6 +4,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from buy_quality_gate import eligible_buys
+from buy_card import build_buy_card
+from near_buy import assess_overextension
+from risk_reward import build_risk_reward, risk_reward_rank_value
+from relative_strength import add_relative_strength, relative_strength_label
+from market_regime import add_market_regime, filter_market_regime_eligible, market_regime_user_text
+from case_readiness import add_case_readiness, filter_top_case_ready
 
 def _num(v: Any) -> float:
     try:
@@ -102,9 +108,59 @@ def top_three(df: pd.DataFrame, horizon: str) -> pd.DataFrame:
         return pd.DataFrame()
     col={"day":"Daytrade Score","medium":"Mellan Score","long":"Lång Score","lifetime":"Livstid Score"}[horizon]
     out=add_horizon_scores(df)
+    out=add_relative_strength(out)
+    out=add_market_regime(out,horizon)
     out=eligible_buys(out,horizon)
+    out=filter_market_regime_eligible(out)
     if out.empty:
         return out
-    out=out.sort_values([col,"Datatäckning"],ascending=[False,False]).head(3).copy()
+
+    # A high score is not enough for a Top-3 slot. The case must also have
+    # sufficiently complete, fresh and internally consistent evidence.
+    out=add_case_readiness(out,horizon)
+    out=filter_top_case_ready(out)
+    if out.empty:
+        return out
+
+    extension=[assess_overextension(r,horizon) for _,r in out.iterrows()]
+    ext=pd.DataFrame(extension,index=out.index)
+    overlap=[c for c in ext.columns if c in out.columns]
+    if overlap:
+        out=out.drop(columns=overlap)
+    out=out.join(ext)
+
+    # A very short-term candidate that has already moved too far should not be
+    # presented as a fresh buy. For long horizons it remains visible with a warning.
+    if horizon in {"day","medium"}:
+        out=out[~out["För långt gången"].eq(True)].copy()
+    if out.empty:
+        return out
+
+    # Risk/reward is a secondary ranking input for the two short horizons. It can
+    # separate otherwise similar candidates, but does not override the core buy gate.
+    if horizon in {"day","medium"}:
+        rr_plans=[build_risk_reward(r,horizon) for _,r in out.iterrows()]
+        out["RR plan"]=rr_plans
+        out["RR rangvärde"]=[risk_reward_rank_value(p) for p in rr_plans]
+        # Relative strength is deliberately only a tie-break/confirmation layer.
+        # It cannot lift a failed candidate into the buy list.
+        out=out.sort_values(
+            [col,"Case Readiness","Relativ styrka","RR rangvärde","Datatäckning"],
+            ascending=[False,False,False,False,False]
+        ).head(3).copy()
+    else:
+        out=out.sort_values(
+            [col,"Case Readiness","Datatäckning"],
+            ascending=[False,False,False]
+        ).head(3).copy()
+        out["RR plan"]=[build_risk_reward(r,horizon) for _,r in out.iterrows()]
+
     out["Horisontförklaring"]=[horizon_reason(r,horizon) for _,r in out.iterrows()]
+    cards=[build_buy_card(r,horizon) for _,r in out.iterrows()]
+    out["Varför köpa"]=[c["Varför köpa"] for c in cards]
+    out["Varför nu"]=[c["Varför nu"] for c in cards]
+    out["Största risk"]=[c["Största risk"] for c in cards]
+    out["Vad ändrar Borsifys syn"]=[c["Vad skulle få Borsify att ändra sig"] for c in cards]
+    out["Relativ styrka text"]=[relative_strength_label(r) for _,r in out.iterrows()]
+    out["Marknadsläge text"]=[market_regime_user_text(r) for _,r in out.iterrows()]
     return out

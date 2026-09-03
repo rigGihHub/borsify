@@ -5,10 +5,10 @@ import numpy as np
 import pandas as pd
 
 BUY_THRESHOLDS = {
-    "day": 66.0,
-    "medium": 64.0,
-    "long": 63.0,
-    "lifetime": 66.0,
+    "day": 68.0,
+    "medium": 66.0,
+    "long": 65.0,
+    "lifetime": 68.0,
 }
 
 def _num(v: Any) -> float:
@@ -25,6 +25,38 @@ def _has_severe_risk(row: pd.Series | dict[str,Any]) -> bool:
         "fallande lång trend",
     ]
     return any(x in flags for x in severe)
+
+def _available_count(row: pd.Series | dict[str,Any], fields: list[str]) -> tuple[int,int]:
+    available=sum(1 for field in fields if np.isfinite(_num(row.get(field))))
+    return available, len(fields)
+
+def _data_requirement(row: pd.Series | dict[str,Any], horizon: str) -> tuple[bool,str]:
+    """Require enough relevant data for the selected holding period.
+
+    This prevents a high score built largely from neutral fallbacks (50) from being
+    labelled a buy when the inputs that matter for that horizon are missing.
+    """
+    if horizon=="day":
+        fields=["Dagsförändring","1 mån","Volymkvot","RSI14","Avstånd SMA200"]
+        available,total=_available_count(row,fields)
+        return available >= 4, f"{available}/{total} kortsiktiga datapunkter"
+    if horizon=="medium":
+        fields=["1 mån","3 mån","6 mån","Kvalitet","Risk"]
+        available,total=_available_count(row,fields)
+        return available >= 4, f"{available}/{total} relevanta datapunkter"
+    if horizon=="long":
+        fields=["INVEST Score","Kvalitet","Risk","Värdering"]
+        available,total=_available_count(row,fields)
+        coverage=_num(row.get("Datatäckning"))
+        enough_fields=available >= 3
+        enough_coverage=(not np.isfinite(coverage)) or coverage >= .55
+        return enough_fields and enough_coverage, f"{available}/{total} kärnpunkter"
+    fields=["Kvalitet","Risk","ROE","Vinstmarginal","Omsättningstillväxt"]
+    available,total=_available_count(row,fields)
+    coverage=_num(row.get("Datatäckning"))
+    enough_fields=available >= 4
+    enough_coverage=(not np.isfinite(coverage)) or coverage >= .60
+    return enough_fields and enough_coverage, f"{available}/{total} kvalitetsmått"
 
 def assess_buy_gate(row: pd.Series | dict[str,Any], horizon: str) -> dict[str,Any]:
     score_col={
@@ -45,8 +77,16 @@ def assess_buy_gate(row: pd.Series | dict[str,Any], horizon: str) -> dict[str,An
         supports.append("verifierad datakvalitet")
 
     coverage=_num(row.get("Datatäckning"))
+    # A broad absolute floor protects every horizon. Longer holding periods require
+    # stronger fundamental coverage via _data_requirement below.
     if np.isfinite(coverage) and coverage < .40:
-        blockers.append("för låg fundamental datatäckning")
+        blockers.append("för lite bolagsdata")
+
+    enough_data,data_text=_data_requirement(row,horizon)
+    if not enough_data:
+        blockers.append(f"för lite relevant data för tidshorisonten ({data_text})")
+    else:
+        supports.append(f"tillräckligt underlag ({data_text})")
 
     if not np.isfinite(score) or score < threshold:
         blockers.append(f"horisontscore under köpgränsen {threshold:.0f}")
@@ -80,8 +120,10 @@ def assess_buy_gate(row: pd.Series | dict[str,Any], horizon: str) -> dict[str,An
             blockers.append("för svag riskprofil")
         if np.isfinite(quality) and quality < 38:
             blockers.append("för låg kvalitet")
-        if np.isfinite(m3) and m3 > 0: supports.append("positiv 3-månaderstrend")
-        if np.isfinite(quality) and quality >= 60: supports.append("god kvalitet")
+        if np.isfinite(m3) and m3 > 0: supports.append("positiv 3-månadersutveckling")
+        if np.isfinite(quality) and quality >= 60: supports.append("god bolagskvalitet")
+        if not ((np.isfinite(m3) and m3 > 0) or (np.isfinite(quality) and quality >= 60)):
+            blockers.append("saknar tydlig positiv bekräftelse för 1–3 månader")
 
     elif horizon=="long":
         invest=_num(row.get("INVEST Score"))
@@ -93,8 +135,13 @@ def assess_buy_gate(row: pd.Series | dict[str,Any], horizon: str) -> dict[str,An
             blockers.append("för svag riskprofil för flerårsägande")
         if _has_severe_risk(row):
             blockers.append("allvarlig riskflagga")
-        if np.isfinite(invest) and invest >= 65: supports.append("stark INVEST-bedömning")
-        if np.isfinite(valuation) and valuation >= 60: supports.append("attraktiv relativ värdering")
+        if np.isfinite(invest) and invest >= 65: supports.append("stark långsiktig helhetsbedömning")
+        if np.isfinite(valuation) and valuation >= 60: supports.append("attraktiv värdering")
+        if not (
+            (np.isfinite(invest) and invest >= 65)
+            or (np.isfinite(quality) and quality >= 65)
+        ):
+            blockers.append("saknar tillräckligt stark långsiktig kärna")
 
     else:  # lifetime
         roe=_num(row.get("ROE"))
@@ -112,9 +159,17 @@ def assess_buy_gate(row: pd.Series | dict[str,Any], horizon: str) -> dict[str,An
             blockers.append("tydligt negativ omsättningstrend")
         if _has_severe_risk(row):
             blockers.append("allvarlig riskflagga")
-        if np.isfinite(quality) and quality >= 72: supports.append("mycket hög kvalitet")
+        if np.isfinite(quality) and quality >= 72: supports.append("mycket hög bolagskvalitet")
         if np.isfinite(risk) and risk >= 68: supports.append("robust riskprofil")
-        if np.isfinite(roe) and roe >= .15: supports.append("stark ROE")
+        if np.isfinite(roe) and roe >= .15: supports.append("god lönsamhet på eget kapital")
+        durable_supports=sum([
+            bool(np.isfinite(quality) and quality >= 72),
+            bool(np.isfinite(risk) and risk >= 68),
+            bool(np.isfinite(roe) and roe >= .15),
+            bool(np.isfinite(margin) and margin >= .10),
+        ])
+        if durable_supports < 2:
+            blockers.append("för få tydliga tecken på uthållig kvalitet")
 
     passed=len(blockers)==0
     return {

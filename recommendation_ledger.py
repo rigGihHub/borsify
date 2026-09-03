@@ -61,6 +61,8 @@ def snapshot_columns(horizon_type: str) -> list[str]:
     if horizon_type == "short":
         return [
             "Ticker", "Namn", "Pris", "Valuta", "Prisdatum", "Sektor",
+            "Dagsförändring", "1 mån", "3 mån", "6 mån", "Volymkvot", "RSI14",
+            "Avstånd SMA200", "Omsättning MSEK/dag", "Datatäckning",
             "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
             "ROE", "Vinstmarginal", "Skuld/eget kapital", "Risk", "Värdering", "Kvalitet",
             "Short Alpha Score", "Short Alpha Gate", "Short Alpha Confidence",
@@ -72,6 +74,8 @@ def snapshot_columns(horizon_type: str) -> list[str]:
         ]
     return [
         "Ticker", "Namn", "Pris", "Valuta", "Prisdatum", "Sektor", "INVEST Score",
+        "Kvalitet", "Risk", "Värdering", "Datatäckning",
+        "1 mån", "3 mån", "6 mån", "Avstånd SMA200",
         "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
         "ROE", "Vinstmarginal", "Skuld/eget kapital",
         "Case Gate", "Case Confidence", "Case Evidence Count", "Case Veto Count",

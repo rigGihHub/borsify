@@ -1,8 +1,21 @@
 from __future__ import annotations
 import math
+from datetime import datetime, timezone
 from typing import Any
 import numpy as np
 import pandas as pd
+
+def _price_age_days(value: Any) -> float:
+    if value is None or str(value).strip() in {"","—","nan","None"}:
+        return np.nan
+    try:
+        ts=pd.Timestamp(value)
+        if ts.tzinfo is not None:
+            ts=ts.tz_localize(None)
+        now=pd.Timestamp(datetime.now(timezone.utc)).tz_localize(None)
+        return float(max(0,(now.normalize()-ts.normalize()).days))
+    except Exception:
+        return np.nan
 
 def _num(v: Any) -> float:
     try:
@@ -28,10 +41,15 @@ def assess_universe_quality(row: dict[str,Any] | pd.Series) -> dict[str,Any]:
         positives.append("giltig kurs")
 
     price_date=str(r.get("Prisdatum") or "").strip()
-    if not price_date or price_date=="—":
+    price_age=_price_age_days(price_date)
+    if not price_date or price_date=="—" or not np.isfinite(price_age):
         issues.append("saknar verifierbart kursdatum")
+    elif price_age > 7:
+        issues.append(f"kursdatum är för gammalt ({int(price_age)} dagar)")
+    elif price_age > 4:
+        issues.append(f"kursdatum är {int(price_age)} dagar gammalt")
     else:
-        positives.append("kursdatum finns")
+        positives.append("kursdatum är färskt")
 
     hist=r.get("_history")
     hist_len=len(hist) if isinstance(hist,pd.DataFrame) else 0
@@ -63,7 +81,7 @@ def assess_universe_quality(row: dict[str,Any] | pd.Series) -> dict[str,Any]:
     # Hard exclusions are reserved for data that cannot support a reliable quote/history.
     hard = (
         not np.isfinite(price) or price <= 0 or hist_len < 20 or
-        not price_date or price_date=="—"
+        not price_date or price_date=="—" or not np.isfinite(price_age) or price_age > 7
     )
     if hard:
         status="EXKLUDERA"
@@ -83,6 +101,7 @@ def assess_universe_quality(row: dict[str,Any] | pd.Series) -> dict[str,Any]:
         "Universe QC Stöd":"; ".join(positives) if positives else "ingen verifierad kvalitetsindikator",
         "Universe QC Historikdagar":int(hist_len),
         "Universe QC Fundamental datapunkter":int(fundamental_count),
+        "Universe QC Kursålder dagar":price_age,
     }
 
 def apply_universe_quality(df: pd.DataFrame) -> pd.DataFrame:

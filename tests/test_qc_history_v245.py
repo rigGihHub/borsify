@@ -58,3 +58,26 @@ def test_summary_counts_active_quarantine():
     summary=quarantine_summary(frame,T0+timedelta(days=2,hours=1))
     assert summary["quarantined"]==1
     assert summary["verified"]==1
+
+
+def test_mass_provider_outage_three_of_586_is_not_healthy():
+    health=scan_health(3,586)
+    assert health["provider_healthy_enough"] is False
+    assert health["success_ratio"] < .01
+
+def test_small_batch_two_of_five_is_not_healthy():
+    health=scan_health(2,5)
+    assert health["provider_healthy_enough"] is False
+
+def test_small_batch_three_of_five_is_healthy():
+    health=scan_health(3,5)
+    assert health["provider_healthy_enough"] is True
+
+def test_full_small_batch_is_healthy():
+    health=scan_health(5,5)
+    assert health["provider_healthy_enough"] is True
+
+def test_empty_batch_is_neutral_healthy():
+    health=scan_health(0,0)
+    assert health["provider_healthy_enough"] is True
+    assert health["success_ratio"] == 1.0

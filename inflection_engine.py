@@ -155,12 +155,49 @@ def _latest_surprise(earnings_history: pd.DataFrame | None) -> float:
     return value
 
 
+
+def _positive_yoy_share(series: pd.Series, max_points: int = 4) -> float:
+    s = pd.to_numeric(series, errors="coerce").dropna()
+    vals = []
+    for i in range(min(max_points, max(0, len(s) - 4))):
+        latest = _num(s.iloc[i])
+        prior = _num(s.iloc[i + 4])
+        if np.isfinite(latest) and np.isfinite(prior) and prior != 0:
+            vals.append(latest / prior - 1)
+    if not vals:
+        return np.nan
+    return float(np.mean(np.array(vals) > 0))
+
+
+def _latest_change(series: pd.Series, offset: int) -> float:
+    s = pd.to_numeric(series, errors="coerce").dropna()
+    if len(s) <= offset:
+        return np.nan
+    latest, prior = _num(s.iloc[0]), _num(s.iloc[offset])
+    if np.isfinite(latest) and np.isfinite(prior) and prior != 0:
+        return latest / prior - 1
+    return np.nan
+
+
+def _net_debt_series(debt: pd.Series, cash: pd.Series) -> pd.Series:
+    if debt.empty or cash.empty:
+        return pd.Series(dtype=float)
+    common = debt.index.intersection(cash.index)
+    if len(common) == 0:
+        return pd.Series(dtype=float)
+    return (
+        pd.to_numeric(debt.loc[common], errors="coerce")
+        - pd.to_numeric(cash.loc[common], errors="coerce")
+    ).dropna().sort_index(ascending=False)
+
+
 def build_inflection_metrics(
     quarterly_income: pd.DataFrame | None,
     quarterly_cashflow: pd.DataFrame | None,
     eps_trend: pd.DataFrame | None = None,
     eps_revisions: pd.DataFrame | None = None,
     earnings_history: pd.DataFrame | None = None,
+    quarterly_balance: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     """Build change-focused evidence without inventing missing estimates.
 
@@ -178,6 +215,13 @@ def build_inflection_metrics(
         if len(common):
             cap = capex.loc[common]
             fcf = (ocf.loc[common] + cap.where(cap <= 0, -cap)).dropna().sort_index(ascending=False)
+
+    total_debt = _find_row(quarterly_balance, ["Total Debt"])
+    cash = _find_row(
+        quarterly_balance,
+        ["Cash Cash Equivalents And Short Term Investments", "Cash And Cash Equivalents", "Cash"],
+    )
+    net_debt = _net_debt_series(total_debt, cash)
 
     op_margin = _ratio_series(operating_income, revenue)
     net_margin = _ratio_series(net_income, revenue)
@@ -208,6 +252,12 @@ def build_inflection_metrics(
         "Marginal QoQ förändring": qoq_margin,
         "FCF YoY senaste kvartal": _yoy(fcf),
         "Vinst YoY senaste kvartal": _yoy(net_income),
+        "Andel senaste kvartal med positiv omsättning YoY": _positive_yoy_share(revenue),
+        "Andel senaste kvartal med positiv FCF": float((pd.to_numeric(fcf, errors="coerce").dropna().iloc[:4] > 0).mean()) if len(pd.to_numeric(fcf, errors="coerce").dropna()) else np.nan,
+        "Skuld YoY senaste kvartal": _latest_change(total_debt, 4),
+        "Skuld QoQ senaste kvartal": _latest_change(total_debt, 1),
+        "Nettoskuld YoY senaste kvartal": _latest_change(net_debt, 4),
+        "Nettoskuld QoQ senaste kvartal": _latest_change(net_debt, 1),
         "EPS-estimat förändring": eps_change,
         "EPS-estimat jämförelseperiod": eps_window,
         "EPS-revisionsbalans": revision_balance,
@@ -236,6 +286,10 @@ def assess_inflection(metrics: dict[str, Any]) -> dict[str, Any]:
     fcf_yoy = _num(metrics.get("FCF YoY senaste kvartal"))
     earnings_yoy = _num(metrics.get("Vinst YoY senaste kvartal"))
     surprise = _num(metrics.get("Senaste EPS-överraskning"))
+    revenue_positive_share = _num(metrics.get("Andel senaste kvartal med positiv omsättning YoY"))
+    fcf_positive_share = _num(metrics.get("Andel senaste kvartal med positiv FCF"))
+    debt_yoy = _num(metrics.get("Skuld YoY senaste kvartal"))
+    net_debt_yoy = _num(metrics.get("Nettoskuld YoY senaste kvartal"))
 
     if np.isfinite(eps_change):
         evidence += 1
@@ -296,12 +350,96 @@ def assess_inflection(metrics: dict[str, Any]) -> dict[str, Any]:
         elif surprise <= -.05:
             score -= 8; negative.append(f"senaste rapporterade EPS missade estimatet med cirka {abs(surprise):.1%}")
 
+    # Fundamental Inflection 2.0: distinguish observed operating changes from analyst opinions.
+    observed_signals = []
+    if np.isfinite(rev_acc):
+        observed_signals.append(1 if rev_acc >= .03 and (not np.isfinite(rev_yoy) or rev_yoy > 0) else (-1 if rev_acc <= -.05 else 0))
+    if np.isfinite(margin_yoy):
+        observed_signals.append(1 if margin_yoy >= .015 else (-1 if margin_yoy <= -.02 else 0))
+    elif np.isfinite(margin_qoq):
+        observed_signals.append(1 if margin_qoq >= .015 else (-1 if margin_qoq <= -.02 else 0))
+    if np.isfinite(fcf_yoy):
+        observed_signals.append(1 if fcf_yoy >= .15 else (-1 if fcf_yoy <= -.25 else 0))
+    if np.isfinite(earnings_yoy):
+        observed_signals.append(1 if earnings_yoy >= .10 else (-1 if earnings_yoy <= -.20 else 0))
+    debt_direction = net_debt_yoy if np.isfinite(net_debt_yoy) else debt_yoy
+    if np.isfinite(debt_direction):
+        observed_signals.append(1 if debt_direction <= -.10 else (-1 if debt_direction >= .20 else 0))
+
+    observed_count = len(observed_signals)
+    observed_positive = sum(x > 0 for x in observed_signals)
+    observed_negative = sum(x < 0 for x in observed_signals)
+    observed_quality = (
+        float(np.clip(50 + 12 * (observed_positive - observed_negative), 0, 100))
+        if observed_count else np.nan
+    )
+
+    if observed_count < 2:
+        operating_label = "För lite operativ förändringsdata"
+    elif observed_positive >= 3 and observed_negative == 0:
+        operating_label = "Bred fundamental förbättring"
+        score += 8
+        positive.append("flera operativa delar förbättras samtidigt")
+    elif observed_negative >= 3 and observed_positive == 0:
+        operating_label = "Bred fundamental försämring"
+        score -= 12
+        negative.append("flera operativa delar försämras samtidigt")
+    elif observed_positive > observed_negative:
+        operating_label = "Övervägande förbättring"
+    elif observed_negative > observed_positive:
+        operating_label = "Övervägande försämring"
+    else:
+        operating_label = "Blandad fundamental utveckling"
+
+    if np.isfinite(revenue_positive_share):
+        evidence += 1
+        if revenue_positive_share >= .75:
+            score += 4
+            positive.append("omsättningen har vuxit mot föregående år i de flesta senaste kvartalen")
+        elif revenue_positive_share <= .25:
+            score -= 5
+            negative.append("omsättningen har sällan vuxit mot föregående år i de senaste kvartalen")
+
+    if np.isfinite(fcf_positive_share):
+        evidence += 1
+        if fcf_positive_share >= .75:
+            score += 4
+            positive.append("fritt kassaflöde har varit positivt i de flesta senaste kvartalen")
+        elif fcf_positive_share <= .25:
+            score -= 5
+            negative.append("fritt kassaflöde har varit positivt i få av de senaste kvartalen")
+
+    if np.isfinite(debt_direction):
+        evidence += 1
+        if debt_direction <= -.15:
+            score += 5
+            positive.append("nettoskuld/skuld har minskat tydligt mot för ett år sedan")
+        elif debt_direction >= .25:
+            score -= 7
+            negative.append("nettoskuld/skuld har ökat tydligt mot för ett år sedan")
+
+    estimate_direction = 0
+    if np.isfinite(eps_change):
+        estimate_direction += 1 if eps_change >= .02 else (-1 if eps_change <= -.02 else 0)
+    if np.isfinite(rev_balance):
+        estimate_direction += 1 if rev_balance >= .35 else (-1 if rev_balance <= -.35 else 0)
+
+    if observed_negative >= 2 and estimate_direction > 0:
+        conflict = "Analytikernas prognoser förbättras, men bolagets senaste operativa data pekar åt motsatt håll"
+        score -= 8
+    elif observed_positive >= 2 and estimate_direction < 0:
+        conflict = "Bolagets operativa data förbättras, men analytikernas prognoser har ännu inte vänt upp"
+    else:
+        conflict = "Ingen tydlig konflikt mellan operativ utveckling och analytikernas prognoser"
+
     score = float(np.clip(score, 0, 100))
     confidence = float(np.clip(15 + evidence * 12, 0, 100))
 
     if evidence < 2:
         label = "Otillräcklig förändringsdata"
-    elif score >= 72 and len(positive) >= 2:
+    elif operating_label == "Bred fundamental försämring":
+        label = "Tydlig försämring"
+    elif score >= 72 and len(positive) >= 2 and observed_negative < 2:
         label = "Positiv inflektion"
     elif score >= 60 and positive:
         label = "Tidiga förbättringstecken"
@@ -330,6 +468,14 @@ def assess_inflection(metrics: dict[str, Any]) -> dict[str, Any]:
         "Positiva förändringar": "; ".join(positive[:4]) if positive else "inga tydliga positiva förändringar verifierade",
         "Negativa förändringar": "; ".join(negative[:4]) if negative else "inga tydliga negativa förändringar verifierade",
         "Inflection Evidence Count": evidence,
+        "Operativ förändring": operating_label,
+        "Operativ förändringskvalitet": round(observed_quality, 1) if np.isfinite(observed_quality) else np.nan,
+        "Operativa förbättringar antal": int(observed_positive),
+        "Operativa försämringar antal": int(observed_negative),
+        "Förändringskonflikt": conflict,
+        "Senaste kvartal positiv omsättning YoY andel": revenue_positive_share,
+        "Senaste kvartal positiv FCF andel": fcf_positive_share,
+        "Senaste skuld/nettoskuld YoY": debt_direction,
     }
 
 
@@ -342,7 +488,11 @@ def apply_inflection_gate(case: dict[str, Any]) -> dict[str, Any]:
 
     if gate in {"Avstå tills vidare", "Hög value-trap-risk", "Otillräcklig data"}:
         return out
-    if signal == "Tydlig försämring" or (np.isfinite(eps_change) and eps_change <= -.05):
+    operating = str(out.get("Operativ förändring", ""))
+    if operating == "Bred fundamental försämring":
+        out["Djupkontroll"] = "Kräver extra kontroll"
+        out["Inflection Gate Note"] = "Djupcaset sänktes eftersom flera observerade delar av verksamheten försämras samtidigt."
+    elif signal == "Tydlig försämring" or (np.isfinite(eps_change) and eps_change <= -.05):
         out["Djupkontroll"] = "Kräver extra kontroll"
         out["Inflection Gate Note"] = "Djupcaset sänktes eftersom färska förändrings-/estimatdata försämrats tydligt."
     elif signal == "Negativ förändring" and gate == "Klarar djupkontroll":

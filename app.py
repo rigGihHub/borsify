@@ -25,6 +25,10 @@ from case_alert import evaluate_case_alert
 from daily_focus import build_daily_focus, focus_context
 from since_last_visit import build_since_last_visit, visit_label
 from deep_case_engine import build_deep_metrics, assess_deep_case, deep_rank_key
+from earnings_quality import build_earnings_quality_metrics, assess_earnings_quality, apply_earnings_quality_gate
+from data_trust import add_data_trust
+from fundamental_cache import get_cached_fundamentals, put_cached_fundamentals, CACHE_MAX_AGE_HOURS
+from scan_pipeline import assess_price_history
 from inflection_engine import build_inflection_metrics, assess_inflection, apply_inflection_gate, inflection_rank_value
 from mispricing_engine import build_mispricing_assessment, apply_mispricing_gate, mispricing_rank_value
 from scenario_engine import build_scenarios
@@ -39,13 +43,21 @@ from daytrade_validation import (
     build_point_in_time_daytrade, evaluate_daytrade, walk_forward_fixed_gate,
     validation_grade, compare_horizons,
 )
+from daytrade_universe_validation import (
+    split_downloaded_histories, validate_universe, universe_validation_label,
+)
 from recommendation_ledger import (
     build_recommendation_records, evaluate_record_from_history,
     outcome_summary, calibration_by_gate,
 )
 from recommendation_relevance import apply_recommendation_relevance
+from recommendation_learning import (
+    learning_summary, learning_tables, score_band_monotonicity, data_limits_note,
+    MIN_COHORT,
+)
 from case_plan import apply_case_plans
-from horizon_rankings import top_three
+from horizon_rankings import top_three, add_horizon_scores
+from near_buy import near_buy_candidates
 from portfolio_advisor import assess_holding
 from market_universe import load_avanza_universe, universe_symbols, coverage_table, breadth_summary
 from universe_quality import apply_universe_quality, filter_rankable_universe, quality_summary
@@ -70,7 +82,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.47.0"
+APP_VERSION = "2.63.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -296,17 +308,25 @@ def _safe_info(ticker: yf.Ticker) -> dict[str, Any]:
             return {}
 
 
-@st.cache_data(ttl=21600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_fundamentals(symbol: str) -> dict[str, Any]:
-    """Fetch slower fundamental fields separately from price history.
+    """Fetch slower fundamental fields with a persistent 24-hour cache.
 
-    Fundamentals change much less often than prices, so they are cached for six
-    hours. This cuts Yahoo requests significantly when users rerun the radar.
+    Streamlit's in-memory cache is fast but disappears on process restarts and is
+    cleared by the normal refresh button. The SQLite cache avoids repeating the
+    same Yahoo get_info request during the same day while price data can still be
+    refreshed independently.
     """
+    cached = get_cached_fundamentals(DB_PATH, symbol, CACHE_MAX_AGE_HOURS)
+    if cached is not None:
+        cached = dict(cached)
+        cached["_Fundamental cache"] = "beständig cache"
+        return cached
+
     t = yf.Ticker(symbol)
     info = _safe_info(t)
     market_cap, fcf, target = _num(info.get("marketCap")), _num(info.get("freeCashflow")), _num(info.get("targetMeanPrice"))
-    return {
+    payload = {
         "Namn": info.get("shortName") or info.get("longName") or symbol,
         "Sektor": info.get("sector") or "Okänd",
         "Bransch": info.get("industry") or "Okänd",
@@ -326,6 +346,9 @@ def fetch_fundamentals(symbol: str) -> dict[str, Any]:
         "Antal analytiker": _num(info.get("numberOfAnalystOpinions")),
         "Fundamental hämtad": datetime.now().isoformat(timespec="seconds"),
     }
+    put_cached_fundamentals(DB_PATH, symbol, payload)
+    payload["_Fundamental cache"] = "Yahoo"
+    return payload
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -786,32 +809,90 @@ def build_daily_shortlist(df: pd.DataFrame, profile: str, limit: int = 5) -> pd.
 
 
 def scan_universe(symbols: list[str]) -> tuple[pd.DataFrame, list[str]]:
-    """Two-stage scan: one bulk price request + cached fundamental requests."""
+    """Price-first scan with persistent fundamentals caching.
+
+    Stage 1 validates quote/history data before any expensive Yahoo get_info call.
+    Stage 2 fetches fundamentals only for symbols that can actually be ranked.
+    A 24-hour SQLite cache avoids repeating unchanged fundamentals on reruns or
+    after normal Streamlit cache clears.
+    """
     symbols = list(dict.fromkeys(symbols))
     rows, errors = [], []
+    metrics = {
+        "requested": len(symbols),
+        "price_usable": 0,
+        "price_rejected_before_fundamentals": 0,
+        "fundamental_candidates": 0,
+        "fundamental_yahoo": 0,
+        "fundamental_persistent_cache": 0,
+        "single_price_fallbacks": 0,
+        "price_seconds": 0.0,
+        "fundamental_seconds": 0.0,
+    }
+
+    price_started = time.perf_counter()
     price_map = fetch_bulk_price_history(tuple(symbols))
-    fundamentals: dict[str, dict[str, Any]] = {}
-    with ThreadPoolExecutor(max_workers=min(6, max(1, len(symbols)))) as executor:
-        futures = {executor.submit(fetch_fundamentals, sym): sym for sym in symbols}
-        for future in as_completed(futures):
-            sym = futures[future]
-            try:
-                fundamentals[sym] = future.result()
-            except Exception as exc:
-                fundamentals[sym] = {"Namn": sym, "Sektor": "Okänd", "Bransch": "Okänd", "Valuta": "SEK", "Fundamental hämtad": "—"}
-                errors.append(f"{sym}: fundamentaldata {type(exc).__name__}")
+    usable_histories: dict[str, pd.DataFrame] = {}
+
     for sym in symbols:
         hist = price_map.get(sym)
         if hist is None or hist.empty:
+            metrics["single_price_fallbacks"] += 1
             hist = fetch_single_price_history(sym)
-            if hist is None or hist.empty:
-                errors.append(f"{sym}: ingen kurshistorik efter bulk + fallback")
-                continue
+
+        if hist is None or hist.empty:
+            errors.append(f"{sym}: ingen kurshistorik efter bulk + fallback")
+            metrics["price_rejected_before_fundamentals"] += 1
+            continue
+
+        price_gate = assess_price_history(hist)
+        if not bool(price_gate.get("usable")):
+            errors.append(
+                f"{sym}: prisdata stoppad före bolagsdata · "
+                f"{price_gate.get('reason','otillräcklig kursdata')}"
+            )
+            metrics["price_rejected_before_fundamentals"] += 1
+            continue
+
+        usable_histories[sym] = hist
+
+    metrics["price_seconds"] = round(time.perf_counter() - price_started, 3)
+    metrics["price_usable"] = len(usable_histories)
+    metrics["fundamental_candidates"] = len(usable_histories)
+
+    fundamentals: dict[str, dict[str, Any]] = {}
+    fundamental_started = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=min(6, max(1, len(usable_histories)))) as executor:
+        futures = {executor.submit(fetch_fundamentals, sym): sym for sym in usable_histories}
+        for future in as_completed(futures):
+            sym = futures[future]
+            try:
+                data = future.result()
+                fundamentals[sym] = data
+                source = str(data.get("_Fundamental cache") or "")
+                if source == "Yahoo":
+                    metrics["fundamental_yahoo"] += 1
+                elif source == "beständig cache":
+                    metrics["fundamental_persistent_cache"] += 1
+            except Exception as exc:
+                fundamentals[sym] = {
+                    "Namn": sym, "Sektor": "Okänd", "Bransch": "Okänd",
+                    "Valuta": "SEK", "Fundamental hämtad": "—",
+                }
+                errors.append(f"{sym}: fundamentaldata {type(exc).__name__}")
+    metrics["fundamental_seconds"] = round(time.perf_counter() - fundamental_started, 3)
+
+    for sym, hist in usable_histories.items():
         row = _price_snapshot(sym, hist, fundamentals.get(sym, {}))
         if row.get("error"):
             errors.append(f"{sym}: {row['error']}")
         else:
             rows.append(row)
+
+    try:
+        st.session_state["bq_scan_metrics"] = metrics
+    except Exception:
+        pass
     return (pd.DataFrame(rows) if rows else pd.DataFrame()), errors
 
 
@@ -838,6 +919,8 @@ def fetch_deep_statements(symbol: str) -> dict[str, Any]:
         except Exception: quarterly_income = pd.DataFrame()
         try: quarterly_cashflow = _frame(t.quarterly_cashflow)
         except Exception: quarterly_cashflow = pd.DataFrame()
+        try: quarterly_balance = _frame(t.quarterly_balance_sheet)
+        except Exception: quarterly_balance = pd.DataFrame()
 
         def _analyst_frame(*names: str) -> pd.DataFrame:
             for name in names:
@@ -899,6 +982,7 @@ def fetch_deep_statements(symbol: str) -> dict[str, Any]:
         return {
             "income": income, "cashflow": cashflow, "balance": balance,
             "quarterly_income": quarterly_income, "quarterly_cashflow": quarterly_cashflow,
+            "quarterly_balance": quarterly_balance,
             "eps_trend": eps_trend, "eps_revisions": eps_revisions,
             "earnings_history": earnings_history,
             "catalyst_events": {"earnings": earnings_date, "news": catalyst_news},
@@ -929,9 +1013,18 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
                 raw = future.result()
                 metrics = build_deep_metrics(raw.get("income"), raw.get("cashflow"), raw.get("balance"))
                 assessment = assess_deep_case(metrics, row)
+
+                earnings_quality_metrics = build_earnings_quality_metrics(
+                    raw.get("income"), raw.get("cashflow"), raw.get("balance")
+                )
+                earnings_quality = assess_earnings_quality(earnings_quality_metrics)
+                assessment.update(earnings_quality)
+                assessment = apply_earnings_quality_gate(assessment)
+
                 inflection_metrics = build_inflection_metrics(
                     raw.get("quarterly_income"), raw.get("quarterly_cashflow"),
-                    raw.get("eps_trend"), raw.get("eps_revisions"), raw.get("earnings_history")
+                    raw.get("eps_trend"), raw.get("eps_revisions"), raw.get("earnings_history"),
+                    raw.get("quarterly_balance")
                 )
                 inflection = assess_inflection(inflection_metrics)
                 assessment.update(inflection)
@@ -1024,7 +1117,8 @@ def build_short_term_longlist(df: pd.DataFrame, benchmark: dict[str, Any] | None
                 raw = future.result()
                 inflection_metrics = build_inflection_metrics(
                     raw.get("quarterly_income"), raw.get("quarterly_cashflow"),
-                    raw.get("eps_trend"), raw.get("eps_revisions"), raw.get("earnings_history")
+                    raw.get("eps_trend"), raw.get("eps_revisions"), raw.get("earnings_history"),
+                    raw.get("quarterly_balance")
                 )
                 inflection = assess_inflection(inflection_metrics)
                 catalyst = build_catalyst_assessment({**row.to_dict(), **inflection}, raw.get("catalyst_events"))
@@ -2414,6 +2508,50 @@ def beginner_term(term: str) -> str:
     return explanations.get(term, term)
 
 
+def plain_finance_text(value: Any) -> str:
+    """Make model-generated finance labels readable without changing calculations."""
+    text = str(value if value is not None else "—")
+    replacements = [
+        ("value trap", "värdefälla"),
+        ("Value Trap", "Risk för värdefälla"),
+        ("mispricing", "möjlig felprissättning"),
+        ("Mispricing", "Prisbedömning"),
+        ("inflection", "förändring i utvecklingen"),
+        ("Inflection", "Förändring i utvecklingen"),
+        ("katalysator", "händelse som kan ändra marknadens syn"),
+        ("Katalysator", "Händelse som kan ändra marknadens syn"),
+        ("estimatrevideringar", "ändrade vinstprognoser från analytiker"),
+        ("estimatrevidering", "ändrad vinstprognos från analytiker"),
+        ("EPS-estimatrevideringar", "ändringar i analytikernas vinstprognoser per aktie"),
+        ("EPS-estimat", "vinstprognos per aktie"),
+        ("EPS", "vinst per aktie"),
+        ("FCF", "fritt kassaflöde"),
+        ("CAGR", "genomsnittlig årlig förändring"),
+        ("evidens", "underlag"),
+        ("Evidence", "Underlag"),
+        ("Confidence", "Hur bra underlaget är"),
+        ("case-breaker", "sak som skulle få bedömningen att ändras"),
+        ("Case-breaker", "Sak som skulle få bedömningen att ändras"),
+        ("gate", "kontroll"),
+        ("Gate", "Kontroll"),
+        ("bear", "svagt scenario"),
+        ("Bear", "Svagt scenario"),
+        ("base", "grundscenario"),
+        ("Base", "Grundscenario"),
+        ("bull", "starkt scenario"),
+        ("Bull", "Starkt scenario"),
+        ("hurdle", "krav"),
+        ("Hurdle", "Krav"),
+        ("proxy", "ungefärligt mått"),
+        ("Proxy", "Ungefärligt mått"),
+        ("momentum", "kursstyrka den senaste tiden"),
+        ("Momentum", "Kursstyrka den senaste tiden"),
+    ]
+    for old,new in replacements:
+        text=text.replace(old,new)
+    return text
+
+
 def render_beginner_glossary(key: str = "guide") -> None:
     labels = {"overview_terms": "Överblick", "daily_terms": "Dagens fynd", "edge_terms": "Edge Lab"}
     suffix = labels.get(key, key.replace("_", " ").strip().title())
@@ -2424,11 +2562,11 @@ def render_beginner_glossary(key: str = "guide") -> None:
 **RSI:** {beginner_term("RSI")}.  
 **SMA200:** {beginner_term("SMA200")}.  
 **Direktavkastning:** {beginner_term("direktavkastning")}.  
-**Drawdown:** {beginner_term("drawdown")}.  
-**Profit factor:** {beginner_term("profit factor")}.  
+**Största fall från en tidigare topp:** {beginner_term("drawdown")}.  
+**Vinst/förlust-kvot:** {beginner_term("profit factor")}.  
 **ATR:** {beginner_term("ATR")}.  
-**Volatilitet:** {beginner_term("volatilitet")}.  
-**Likviditet:** {beginner_term("likviditet")}.  
+**Hur mycket kursen svänger:** {beginner_term("volatilitet")}.  
+**Hur lätt aktien är att köpa och sälja:** {beginner_term("likviditet")}.  
 **Stop-loss:** {beginner_term("stop-loss")}.
 """)
 
@@ -2934,11 +3072,11 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail") -> N
 
     coverage=_num(row.get("Datatäckning"))
     if np.isfinite(coverage):
-        if coverage < .60: st.warning(f"Datatäckning {coverage:.0%}. Flera fundamentala fält saknas; score bör tolkas försiktigt.")
+        if coverage < .60: st.warning(f"Underlaget är bara {coverage:.0%} komplett. Flera viktiga bolagsuppgifter saknas, så Borsifys betyg är mer osäkert än vanligt.")
         else: st.caption(f"Datatäckning i kärnmodellen: {coverage:.0%}.")
     price_date = str(row.get("Prisdatum") or "—")
     fundamental_at = str(row.get("Fundamental hämtad") or "—")
-    st.caption(f"Datastämpel · senaste kursdag: {price_date} · fundamentaldata hämtad: {fundamental_at}. Detta är hämtningstid, inte nödvändigtvis rapportperiod för varje fundamental datapunkt.")
+    st.caption(f"Senaste data · kurs från: {price_date} · bolagsdata hämtad: {fundamental_at}. Tiden visar när Borsify hämtade uppgifterna. Vissa siffror kan komma från en äldre bolagsrapport.")
 
     watched = is_watched(str(row["Ticker"]))
     if st.button("Ta bort från bevakning" if watched else "Lägg till i bevakning", key=f"{key_prefix}_watch_{row['Ticker']}"):
@@ -3051,8 +3189,13 @@ def _market_label_for_ticker(symbol: str) -> str:
 def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
     st.markdown("## 🌍 Borsify Topplistor")
     st.caption(
-        "Endast kvalificerade KÖPCASE visas. Borsify fyller inte ut en Top 3 med svagare kandidater – "
-        "om bara ett case klarar köpgränsen visas bara ett."
+        "Borsify visar bara aktier som klarar köpkraven och har ett tillräckligt bra beslutsunderlag. "
+        "Ett högt aktiebetyg räcker alltså inte om viktig data saknas eller riskbilden är oklar. "
+        "När marknaden är svag höjs köpkraven automatiskt. En stark marknad får däremot aldrig sänka grundkraven. "
+        "Varje kort förklarar varför aktien är intressant, "
+        "varför den är aktuell nu, den största risken och vad som skulle få Borsify att ändra uppfattning. "
+        "För kortare handel visas också relativ styrka och möjlig uppsida i förhållande till risk. "
+        "Om ingen aktie är tillräckligt stark visas inget köp."
     )
     avanza_catalog = load_avanza_universe(AVANZA_UNIVERSE_PATH)
     if not avanza_catalog.empty:
@@ -3062,7 +3205,7 @@ def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
             st.caption("Kärna = tidigare kuraterat universum. Bred tillägg = nya kandidater i Avanza Universe v1. Katalogen är inte verifierad som en komplett Avanza-lista ännu.")
     if "Universe QC" in scored.columns:
         qsum = quality_summary(scored)
-        with st.expander("✅ Universe Quality Control · denna körning", expanded=False):
+        with st.expander("✅ Kontroll av börsdata · denna körning", expanded=False):
             q1,q2,q3 = st.columns(3)
             q1.metric("Verifierade", qsum["verified"])
             q2.metric("Delvis verifierade", qsum["partial"])
@@ -3081,13 +3224,13 @@ def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
             if rows:
                 st.dataframe(pd.DataFrame(rows).sort_values(["Analyserbara","Land"],ascending=[False,True]), use_container_width=True, hide_index=True)
             st.caption(
-                "QC bedömer om datan räcker för ranking – inte om aktien är ett bra köp. "
-                "Aktier med ogiltig kurs, saknat kursdatum eller mycket kort historik exkluderas automatiskt."
+                "Den här kontrollen bedömer bara om Borsify har tillräckligt bra data för att jämföra aktien med andra. "
+                "Den säger inte om aktien är ett bra köp. Aktier med trasig kursdata eller för kort historik tas bort automatiskt."
             )
     persistent_qc = get_universe_qc_states()
     if not persistent_qc.empty:
         psum = quarantine_summary(persistent_qc)
-        with st.expander("🛡️ Persistent QC · historik & karantän", expanded=False):
+        with st.expander("🛡️ Datakontroll över tid · fel & karantän", expanded=False):
             p1,p2,p3,p4 = st.columns(4)
             p1.metric("Tickers med historik", psum["total"])
             p2.metric("I karantän", psum["quarantined"])
@@ -3095,11 +3238,13 @@ def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
             p4.metric("Hoppades över nu", int(st.session_state.get("bq_qc_skipped_quarantine", 0)))
             health_ratio = float(st.session_state.get("bq_qc_scan_health", 1.0))
             provider_ok = bool(st.session_state.get("bq_qc_provider_healthy", True))
+            provider_rule = str(st.session_state.get("bq_qc_provider_rule", ""))
             st.caption(
-                f"Senaste scanens träffgrad: {health_ratio:.0%}. "
-                + ("Datakällan såg tillräckligt frisk ut för att individuella misslyckanden ska räknas."
+                f"Senaste datahämtningen lyckades för {health_ratio:.0%} av aktierna. "
+                + ("Tillräckligt många fungerade för att Borsify ska kunna bedöma enskilda fel."
                    if provider_ok else
-                   "Borsify misstänkte ett bredare datakälleproblem och räknade därför inte saknade hämtningar som QC-strikes.")
+                   "Så få aktier fungerade att Borsify misstänker problem hos datakällan. Saknade aktier får därför ingen felmarkering eller karantän på grund av den här körningen.")
+                + (f" Säkerhetsregel: {provider_rule}." if provider_rule else "")
             )
             quarantine_rows = persistent_qc[persistent_qc.apply(is_quarantined, axis=1)].copy()
             if not quarantine_rows.empty:
@@ -3114,8 +3259,8 @@ def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
             else:
                 st.success("Ingen ticker ligger i aktiv karantän.")
             st.caption(
-                "Tre separata hårda QC-misslyckanden krävs innan en ticker sätts i 7 dagars karantän. "
-                "Samma fel på Streamlit-reruns räknas högst en gång per UTC-dag."
+                "En aktie måste misslyckas vid tre separata dagar innan Borsify tillfälligt slutar försöka läsa in den i sju dagar. "
+                "Om problemet verkar ligga hos datakällan räknas det inte som ett fel på aktien."
             )
     if st.session_state.get("bq_qc_state_migration_needed"):
         st.warning("Supabase saknar v2.45-tabellerna för persistent Universe QC. Kör den nya SQL-migreringen för permanent molnlagring.")
@@ -3150,21 +3295,24 @@ def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
         st.info("Välj minst ett land för att visa Topplistor.")
 
     sections = [
-        ("⚡ 1–2 dagar · Daytrader", "day", "Daytrade Score",
-         "Mycket kort horisont. Momentum, handelsaktivitet, RSI, trend och risk väger tyngst."),
-        ("📈 1 vecka–3 månader", "medium", "Mellan Score",
-         "Momentum över 1–3 månader kombineras med kvalitet, värdering och risk."),
-        ("🏗️ 1–5 år", "long", "Lång Score",
-         "INVEST, kvalitet, värdering och risk väger tyngre än kort kursmomentum."),
-        ("♾️ Resten av livet", "lifetime", "Livstid Score",
-         "Kvalitet, finansiell robusthet och lönsamhet prioriteras. Det är en livslång kandidatlista – ingen garanti att ett bolag ska ägas för alltid."),
+        ("⚡ Bästa köp · 1–2 dagar", "day", "Daytrade Score",
+         "Mycket kort sikt. Borsify vill se styrka och ovanligt aktiv handel, men försöker samtidigt undvika aktier som redan rusat så mycket att ett nytt köp riskerar att komma för sent."),
+        ("📈 Bästa köp · 1 vecka–3 månader", "medium", "Mellan Score",
+         "Borsify tittar på hur kursen gått de senaste 1–3 månaderna och väger ihop det med bolagets kvalitet, prisnivå och risk. En aktie som redan gått extremt långt kan stoppas trots ett högt betyg."),
+        ("🏗️ Bästa köp · 1–5 år", "long", "Lång Score",
+         "För flera års ägande väger bolagets kvalitet, prisnivå och risk betydligt tyngre än korta kursrörelser."),
+        ("♾️ Bästa köp · mycket lång sikt", "lifetime", "Livstid Score",
+         "Här krävs extra hög och uthållig kvalitet, god lönsamhet och en robust ekonomi. Det betyder inte att aktien ska ägas för alltid – den måste fortsätta förtjäna sin plats."),
     ]
     for title, horizon, score_col, caption in sections:
         st.markdown(f"### {title}")
         st.caption(caption)
         top3 = top_three(toplist_base, horizon)
         if top3.empty:
-            st.info("Inget köpcase klarar Borsifys minimikrav för den här horisonten just nu.")
+            st.info(
+                "Inget köpcase är både tillräckligt starkt och tillräckligt väl underbyggt för den här horisonten just nu. "
+                "Borsify lämnar hellre platsen tom än visar ett case med för svagt underlag."
+            )
             continue
         cols = st.columns(3)
         for rank, (col, (_, row)) in enumerate(zip(cols, top3.iterrows()), start=1):
@@ -3177,27 +3325,207 @@ def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
                     if np.isfinite(price):
                         st.markdown(f"**{price:.2f} {ccy}**")
                     score = _num(row.get(score_col))
-                    st.metric("Horisontscore", f"{score:.0f}/100" if np.isfinite(score) else "—")
+                    if np.isfinite(score):
+                        st.metric("Borsifys huvudbetyg", f"{score:.0f}/100")
                     if str(row.get("Köpfilter","")) == "KÖPCASE":
-                        st.success("KÖPCASE · klarar Buy Quality Gate")
-                    gate_support = str(row.get("Köpfilter stöd","") or "")
-                    if gate_support:
-                        st.caption(f"Köpfilter: {gate_support}")
-                    st.write(str(row.get("Horisontförklaring","—")))
-                    qc = str(row.get("Universe QC","") or "")
-                    if qc:
-                        qc_score = _num(row.get("Universe QC Score"))
-                        st.caption(f"Datakvalitet: {qc}" + (f" · {qc_score:.0f}/100" if np.isfinite(qc_score) else ""))
-                    if horizon == "day":
+                        st.success("KÖPCASE")
+
+                    readiness = _num(row.get("Case Readiness"))
+                    readiness_status = str(row.get("Case Readiness status","") or "")
+                    if readiness_status:
+                        st.markdown("**Hur bra är beslutsunderlaget?**")
+                        if np.isfinite(readiness) and readiness >= 78:
+                            st.success(readiness_status)
+                        else:
+                            st.info(readiness_status)
                         st.caption(
-                            f"Idag {fmt_pct(row.get('Dagsförändring'))} · Volym {fmt_num(row.get('Volymkvot'),2)}x · RSI {fmt_num(row.get('RSI14'),0)}"
+                            "Detaljpoängen för underlaget finns under ”Visa siffrorna bakom bedömningen”."
                         )
-                    elif horizon == "medium":
-                        st.caption(f"1 mån {fmt_pct(row.get('1 mån'))} · 3 mån {fmt_pct(row.get('3 mån'))}")
-                    else:
+
+                    trust_status = str(row.get("Data Trust status","") or "")
+                    if trust_status:
+                        st.markdown("**Datakoll**")
+                        if trust_status == "GOTT UNDERLAG":
+                            st.success(trust_status)
+                        elif trust_status == "STOPP":
+                            st.error(trust_status)
+                        else:
+                            st.warning(trust_status)
                         st.caption(
-                            f"Kvalitet {fmt_num(row.get('Kvalitet'),0)}/100 · Risk {fmt_num(row.get('Risk'),0)}/100 · Värdering {fmt_num(row.get('Värdering'),0)}/100"
+                            f"Källa: {row.get('Data Trust källa','Yahoo Finance via yfinance')} · "
+                            f"kursdatum: {row.get('Data Trust kursdatum','—')} · "
+                            f"bolagsdata hämtad: {row.get('Data Trust bolagsdata hämtad','—')}"
                         )
+                        trust_warn = str(row.get("Data Trust varningar","") or "")
+                        if trust_warn and trust_warn != "inga tydliga datavarningar":
+                            st.caption("Datavarning: " + trust_warn)
+
+                    st.markdown("**Varför köpa?**")
+                    st.write(str(row.get("Varför köpa","—")))
+                    st.markdown("**Varför just nu?**")
+                    st.write(str(row.get("Varför nu","—")))
+                    st.markdown("**Största risken**")
+                    st.write(str(row.get("Största risk","—")))
+                    st.markdown("**Vad skulle få Borsify att ändra sig?**")
+                    st.write(str(row.get("Vad ändrar Borsifys syn","—")))
+
+                    market_status = str(row.get("Marknadsläge","") or "")
+                    market_text = str(row.get("Marknadsläge text","") or "")
+                    if market_status:
+                        st.markdown("**Marknadsläget**")
+                        if market_status == "STARK":
+                            st.success("STARK MARKNAD")
+                        elif market_status in {"SVAG","MYCKET SVAG"}:
+                            st.warning(market_status + " MARKNAD" if market_status == "SVAG" else "MYCKET SVAG MARKNAD")
+                        elif market_status == "NEUTRAL":
+                            st.info("NEUTRAL MARKNAD")
+                        else:
+                            st.info("FÖR LITE UNDERLAG")
+                        if market_text:
+                            st.write(market_text)
+
+                    if horizon in {"day","medium"}:
+                        rel_score = _num(row.get("Relativ styrka"))
+                        rel_text = str(row.get("Relativ styrka text","") or "")
+                        rel_expl = str(row.get("Relativ styrka förklaring","") or "")
+                        rel_basis = str(row.get("Relativ styrka underlag","") or "")
+                        st.markdown("**Jämfört med marknaden och sektorn**")
+                        if rel_score >= 68:
+                            st.success(rel_text or "Starkare än jämförelsen")
+                        elif rel_score < 45:
+                            st.warning(rel_text or "Svagare än jämförelsen")
+                        else:
+                            st.info(rel_text or "Ungefär i nivå med jämförelsen")
+                        if rel_expl:
+                            st.write(rel_expl)
+                        if rel_basis:
+                            st.caption("Jämförelsen bygger på " + rel_basis + " i den aktuella Borsify-körningen.")
+
+                    rr_plan = row.get("RR plan") if isinstance(row.get("RR plan"), dict) else {}
+                    rr_status = str(rr_plan.get("RR status","") or "")
+                    if horizon in {"day","medium"} and rr_status:
+                        st.markdown("**Risk jämfört med möjlig uppsida**")
+                        if rr_status in {"ATTRAKTIVT","GODKÄNT"}:
+                            st.success(f"{rr_status}")
+                        elif rr_status in {"SVAGT","DÅLIGT"}:
+                            st.warning(f"{rr_status}")
+                        else:
+                            st.info(rr_status)
+
+                        entry_low = _num(rr_plan.get("Entry låg"))
+                        entry_high = _num(rr_plan.get("Entry hög"))
+                        stop_level = _num(rr_plan.get("Stop"))
+                        target1 = _num(rr_plan.get("Mål 1"))
+                        target2 = _num(rr_plan.get("Mål 2"))
+                        rr1 = _num(rr_plan.get("RR 1"))
+                        ccy = str(row.get("Valuta","") or "")
+                        if np.isfinite(entry_low) and np.isfinite(entry_high):
+                            st.write(f"Rimligt köpområde enligt modellen: **{entry_low:.2f}–{entry_high:.2f} {ccy}**")
+                        if np.isfinite(stop_level):
+                            st.write(f"Analysen anses fel under ungefär: **{stop_level:.2f} {ccy}**")
+                        if np.isfinite(target1):
+                            target_text=f"Första tidigare motståndsnivå: **{target1:.2f} {ccy}**"
+                            if np.isfinite(target2):
+                                target_text += f" · nästa: **{target2:.2f} {ccy}**"
+                            st.write(target_text)
+                        if np.isfinite(rr1):
+                            st.write(f"Möjlig uppsida per riskenhet: **{rr1:.1f} gånger**")
+                        st.caption(str(rr_plan.get("RR förklaring","")))
+
+                    buy_position = str(row.get("Köpläge","") or "")
+                    if buy_position == "VAR FÖRSIKTIG":
+                        st.warning("⚠️ **Har aktien redan gått långt?** " + str(row.get("Köplägesförklaring","")))
+                    elif buy_position == "FÖR SENT ATT JAGA?":
+                        st.warning("⚠️ **Risk att köpa efter en stor uppgång:** " + str(row.get("Köplägesförklaring","")))
+
+                    with st.expander("Visa siffrorna bakom bedömningen", expanded=False):
+                        st.metric("Borsifys betyg för tidshorisonten", f"{score:.0f}/100" if np.isfinite(score) else "—")
+                        gate_support = str(row.get("Köpfilter stöd","") or "")
+                        if gate_support:
+                            st.caption(f"Det som stödjer köpcaset: {gate_support}")
+                        readiness_strengths = str(row.get("Case Readiness styrkor","") or "")
+                        readiness_gaps = str(row.get("Case Readiness luckor","") or "")
+                        readiness_points = str(row.get("Case Readiness datapunkter","") or "")
+                        readiness_confirm = str(row.get("Case Readiness bekräftelser","") or "")
+                        if readiness_strengths:
+                            st.caption("Styrkor i underlaget: " + readiness_strengths)
+                        if readiness_gaps and readiness_gaps != "inga större luckor upptäckta":
+                            st.caption("Luckor i underlaget: " + readiness_gaps)
+                        if readiness_points or readiness_confirm:
+                            st.caption(
+                                "Underlagskontroll: "
+                                + (f"{readiness_points} viktiga datapunkter" if readiness_points else "")
+                                + (f" · {readiness_confirm} delar bekräftar caset" if readiness_confirm else "")
+                            )
+                        st.write(str(row.get("Horisontförklaring","—")))
+                        qc = str(row.get("Universe QC","") or "")
+                        if qc:
+                            qc_score = _num(row.get("Universe QC Score"))
+                            st.caption(f"Datakvalitet: {qc}" + (f" · {qc_score:.0f}/100" if np.isfinite(qc_score) else ""))
+                        if horizon == "day":
+                            st.caption(
+                                f"Idag {fmt_pct(row.get('Dagsförändring'))} · handelsaktivitet {fmt_num(row.get('Volymkvot'),2)} gånger normal · RSI {fmt_num(row.get('RSI14'),0)}"
+                            )
+                        elif horizon == "medium":
+                            st.caption(f"1 månad {fmt_pct(row.get('1 mån'))} · 3 månader {fmt_pct(row.get('3 mån'))}")
+                        market_required = _num(row.get("Marknadskrav"))
+                        market_adjustment = _num(row.get("Marknadsläge justering"))
+                        if np.isfinite(market_required):
+                            market_bits=[f"aktuellt köpkrav {market_required:.0f}/100"]
+                            if np.isfinite(market_adjustment) and market_adjustment > 0:
+                                market_bits.append(f"{market_adjustment:.0f} extra poäng på grund av svag marknad")
+                            st.caption("Marknadskontroll: " + " · ".join(market_bits))
+
+                        if horizon in {"day","medium"}:
+                            rel_m3 = _num(row.get("Relativ marknad 3 mån"))
+                            rel_s3 = _num(row.get("Relativ sektor 3 mån"))
+                            sec3 = _num(row.get("Sektorstyrka 3 mån"))
+                            rel_bits=[]
+                            if np.isfinite(rel_m3):
+                                rel_bits.append(f"mot marknaden 3 mån {rel_m3:+.1%}")
+                            if np.isfinite(rel_s3):
+                                rel_bits.append(f"mot sektorn 3 mån {rel_s3:+.1%}")
+                            if np.isfinite(sec3):
+                                rel_bits.append(f"sektorn mot marknaden {sec3:+.1%}")
+                            if rel_bits:
+                                st.caption("Relativ jämförelse: " + " · ".join(rel_bits))
+
+                        if horizon in {"day","medium"} and rr_plan:
+                            atr = _num(rr_plan.get("ATR14"))
+                            risk_pct = _num(rr_plan.get("Risk %"))
+                            rr2 = _num(rr_plan.get("RR 2"))
+                            extra=[]
+                            if np.isfinite(atr):
+                                extra.append(f"normal dagsrörelse {atr:.2f} {ccy}")
+                            if np.isfinite(risk_pct):
+                                extra.append(f"avstånd till fel-nivå {risk_pct:.1%}")
+                            if np.isfinite(rr2):
+                                extra.append(f"uppsida/risk till nästa motstånd {rr2:.1f}x")
+                            if extra:
+                                st.caption(" · ".join(extra))
+                        else:
+                            st.caption(
+                                f"Bolagskvalitet {fmt_num(row.get('Kvalitet'),0)}/100 · Risk {fmt_num(row.get('Risk'),0)}/100 · Prisnivå {fmt_num(row.get('Värdering'),0)}/100"
+                            )
+
+        # Also surface the strongest candidates that are close to, but do not yet
+        # meet, the real buy requirements. They are never promoted to KÖPCASE.
+        near_base = add_horizon_scores(toplist_base)
+        near = near_buy_candidates(near_base, horizon, limit=3)
+        if not near.empty:
+            with st.expander(f"👀 Nära köpsignal · {len(near)} att bevaka", expanded=False):
+                st.caption(
+                    "Det här är inte köp. Borsify visar aktier som ligger nära de köpkrav som gäller just nu och förklarar vad som fortfarande saknas. "
+                    "I en svag marknad kan en aktie därför hamna här trots att den hade klarat de vanliga grundkraven. Aktier med allvarliga risk- eller dataproblem visas inte här."
+                )
+                for _, candidate in near.iterrows():
+                    st.markdown(f"**{candidate.get('Namn', candidate.get('Ticker','—'))} · {candidate.get('Ticker','—')}**")
+                    st.write("**Vad saknas?** " + str(candidate.get("Vad saknas","—")))
+                    st.caption(
+                        f"Borsifys betyg: {fmt_num(candidate.get(score_col),0)}/100 · "
+                        f"köpgräns {fmt_num(candidate.get('Köpfilter gräns'),0)}/100"
+                    )
+                    st.divider()
 
 
 def _holding_status_style(row: pd.Series) -> list[str]:
@@ -3313,10 +3641,36 @@ def render_overview(
     benchmark_name: str,
 ) -> None:
     """Ren startsida: vad är intressant, varför och vad bör jag se upp med?"""
-    render_horizon_toplists(scored, market)
-    render_holdings_portfolio(scored, profile)
-    st.divider()
     best = daily_shortlist.iloc[0] if not daily_shortlist.empty else None
+
+    st.markdown("## Dagens bästa möjligheter")
+    st.caption(
+        "Borsify börjar med högst tre kandidater. Resten av analysen finns längre ned när du behöver den."
+    )
+    if daily_shortlist.empty:
+        st.info("Ingen kandidat är tillräckligt stark i dagens urval.")
+    else:
+        focus_cases = daily_shortlist.head(3)
+        cols = st.columns(len(focus_cases))
+        for rank, (col, (_, case)) in enumerate(zip(cols, focus_cases.iterrows()), start=1):
+            with col:
+                with st.container(border=True):
+                    st.caption(f"#{rank} · {case.get('Prioritet','')}")
+                    st.markdown(f"### {case.get('Namn', case.get('Ticker',''))}")
+                    st.caption(f"{case.get('Ticker','—')} · {case.get('Sektor','—')}")
+                    st.metric("Borsify", f"{_num(case.get('Borsify Score')):.0f}/100")
+                    st.markdown("**Varför den är intressant**")
+                    st.write(str(case.get("Varför idag","—")))
+                    st.markdown("**Kontrollera före beslut**")
+                    st.write(str(case.get("Kontrollera","—")))
+                    st.caption(
+                        f"Kursdatum {case.get('Prisdatum','—')} · datakoll {case.get('Data Trust status','—')}"
+                    )
+
+    with st.expander("Visa bästa köp efter tidshorisont", expanded=False):
+        render_horizon_toplists(scored, market)
+
+    st.divider()
     high_priority = int((daily_shortlist["Prioritet"] == "Hög").sum()) if not daily_shortlist.empty else 0
     today = datetime.now().date().isoformat()
     today_signals = signal_history[signal_history["occurred_date"].astype(str) == today] if not signal_history.empty else pd.DataFrame()
@@ -3419,31 +3773,6 @@ def render_overview(
                     st.write(str(item.get("why", "")))
                     st.caption(f"Gör så här: {item.get('action','Öppna analysen och kontrollera caset.')}")
 
-    st.markdown("## Dagens mest intressanta aktie")
-    st.caption("Borsify börjar med slutsatsen. Du kan öppna siffrorna och den fulla analysen när du vill.")
-    if best is None:
-        st.info("Ingen kandidat klarade dagens urval. Prova att lätta på filtren eller kontrollera datakällan.")
-    else:
-        with st.container(border=True):
-            title, score, price = st.columns([3.2, 1, 1.25])
-            title.markdown(f"## {best['Namn']}")
-            title.caption(f"{best['Ticker']} · {best['Sektor']} · {best['Signal']}")
-            score.metric("Borsify", f"{_num(best['Borsify Score']):.0f}/100")
-            best_price = _num(best.get("Pris"))
-            price.metric("Aktuell kurs", fmt_price_with_sek(best), fmt_pct(best.get("Dagsförändring")))
-
-            why, caution = st.columns(2)
-            with why:
-                st.markdown("**Varför den sticker ut**")
-                st.write(str(best.get("Varför idag", "—")))
-            with caution:
-                st.markdown("**Vad du bör kontrollera**")
-                st.write(str(best.get("Kontrollera", "—")))
-            changed = str(best.get("Förändrat", "")).strip()
-            if changed and changed != "—":
-                st.caption(f"Vad som förändrats: {changed}")
-            st.caption("Borsify pekar ut vad som är värt att undersöka vidare. Det är inte ett köp- eller säljråd.")
-
     s1, s2, s3 = st.columns(3)
     s1.metric("Fler med hög prioritet", high_priority)
     s2.metric("Nya Radar-signaler", unread_signals)
@@ -3461,6 +3790,9 @@ def render_overview(
                 "Dagsförändring": st.column_config.NumberColumn("Idag %", format="%.2f%%"),
             },
         )
+
+    with st.expander("Min portfölj och säljkontroll", expanded=False):
+        render_holdings_portfolio(scored, profile)
 
     if not today_signals.empty or unread_signals:
         with st.expander(f"Radar · {unread_signals} olästa signaler", expanded=False):
@@ -3481,9 +3813,21 @@ def render_overview(
 
     with st.expander("Datastatus", expanded=False):
         st.write(f"Marknad: {market} · strategi: {profile} · analyserade: {len(scored)} · efter filter: {len(filtered)} · senaste kursdag: {latest_price_date} · körtid: {elapsed:.1f} s")
+        scan_metrics = st.session_state.get("bq_scan_metrics", {})
+        if isinstance(scan_metrics, dict) and scan_metrics:
+            st.write(
+                "Scanning: "
+                f"kursdel {float(scan_metrics.get('price_seconds',0) or 0):.1f} s · "
+                f"bolagsdata {float(scan_metrics.get('fundamental_seconds',0) or 0):.1f} s · "
+                f"{int(scan_metrics.get('fundamental_persistent_cache',0) or 0)} cacheträffar · "
+                f"{int(scan_metrics.get('fundamental_yahoo',0) or 0)} nya Yahoo-anrop"
+            )
+            st.caption(
+                "Tiderna mäts i den aktuella körningen. De är diagnostik, inte ett löfte om en viss framtida laddtid."
+            )
         if idx:
             st.write(f"{benchmark_name}: {idx['index']:.2f} ({fmt_pct(idx.get('daily'))})")
-        st.caption(f"Borsify v{APP_VERSION}. Kurs- och fundamentaldata kan vara fördröjd eller ofullständig.")
+        st.caption(f"Borsify v{APP_VERSION}. Kurser och bolagsuppgifter kan ibland vara fördröjda eller saknas.")
 
 
 
@@ -3679,9 +4023,9 @@ def render_case_plan(case: pd.Series | dict[str, Any]) -> None:
         st.markdown(f"**Tes**  \n{thesis}")
         st.markdown(f"**Det som bekräftar caset**  \n{case.get('Case Plan Bekräftelse','—')}")
         st.markdown(f"**Varningssignal**  \n{case.get('Case Plan Varning','—')}")
-        st.markdown(f"**Case-breaker**  \n{case.get('Case Plan Breaker','—')}")
+        st.markdown(f"**Det som skulle kunna få Borsify att ändra uppfattning**  \n{case.get('Case Plan Breaker','—')}")
         st.markdown(f"**Nästa kontrollpunkt**  \n{case.get('Case Plan Nästa kontroll','—')}")
-        st.markdown(f"**Prisrelevans**  \n{case.get('Case Plan Prisregel','—')}")
+        st.markdown(f"**Hur priset påverkar bedömningen**  \n{case.get('Case Plan Prisregel','—')}")
         st.caption(
             "Case-planen är en regelbaserad uppföljningsplan från aktuell Borsify-data. "
             "Den är inte en riktkurs, sannolikhet eller personlig köp-/säljrekommendation."
@@ -3777,22 +4121,25 @@ def render_case_ai_qa(case: pd.Series | dict[str, Any], horizon: str, rank: int)
 
 
 def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_symbol: str | None = "^OMXS30", benchmark_name: str = "OMXS30") -> None:
-    st.subheader("Edge Lab · historiskt signaltest")
-    st.caption("Edge Lab försöker svara på en enkel fråga: om Borsify hade gett samma signaler tidigare, hur hade de gått då? Historik bevisar inte vad som händer framåt, men hjälper oss att upptäcka svaga modeller.")
+    st.subheader("Historiskt test · har Borsifys signaler fungerat tidigare?")
+    st.caption("Här testar Borsify sina regler på historiska kurser. Frågan är enkel: om samma köpsignaler hade kommit tidigare, hur hade de gått? Historik kan inte förutsäga framtiden, men den kan avslöja regler som verkar för svaga.")
     render_beginner_glossary("edge_terms")
-    st.caption("Testar tekniska signaler historiskt utan att använda dagens fundamentaldata. Det är medvetet: dagens fundamenta på gamla datum skulle skapa look-ahead bias. Grundtestet visar bruttoresultat. Längre ned kan du lägga på courtage, spread/slippage och positionsstorlek för ett mer ekonomiskt realistiskt stresstest.")
+    st.caption(
+        "Här testar Borsify sina köpsignaler på gamla kursdata. Testet använder bara information som fanns just då. "
+        "Det gör testet mer rättvist och minskar risken att framtida information råkar smyga sig in. "
+        "Du kan också räkna med kostnader för köp och försäljning."
+    )
 
     with st.expander("⚡ Daytrader 1–2 dagar · validering av köpmodellen", expanded=True):
         st.caption(
-            "Testet bygger en kausal historisk proxy för Topplistans Daytrader-score. "
-            "Signalen beräknas efter stängning dag t, köp antas ske nästa börsdags öppning och "
-            "utfall mäts efter 1 respektive 2 handelsdagar. Det undviker att modellen får köpa på "
-            "samma stängningskurs som användes för att skapa signalen."
+            "Borsify räknar först fram en köpsignal efter att en börsdag är slut. Testköpet sker sedan vid nästa "
+            "börsdags öppning. Därefter kontrolleras hur aktien gått efter 1 och 2 handelsdagar. "
+            "På så sätt får testet inte använda ett pris som det i verkligheten inte hade kunnat köpa till."
         )
         st.warning(
-            "Detta är fortfarande en proxy – inte en exakt historisk replay. Live-modellens Risk-komponent "
-            "innehåller fundamentaldata som Borsify ännu inte har point-in-time-historik för. "
-            "Valideringsmotorn använder därför endast rekonstruerbar historisk pris/volymdata för den delen."
+            "Testet är nära den riktiga Daytrader-modellen men inte exakt samma. En liten del av den riktiga modellen "
+            "använder bolagsdata som vi ännu inte har sparad historik för. Därför ersätts den delen med historisk "
+            "kurs- och handelsdata i testet."
         )
         d1,d2,d3 = st.columns([1.5,1,1])
         dt_symbol = d1.text_input(
@@ -3802,9 +4149,9 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
         ).strip().upper()
         dt_years = d2.slider("Historik · Daytrader", 3, 10, 7, key="daytrade_validation_years")
         dt_cost = d3.number_input(
-            "Roundtrip-kostnad (bps)",
+            "Kostnad för köp + försäljning (bps)",
             min_value=0.0, max_value=200.0, value=20.0, step=5.0,
-            help="Gemensamt stresstest för courtage + spread/slippage tur och retur. 20 bps = 0,20 %.",
+            help="Här räknar Borsify med avgifter och att köp/sälj inte alltid sker till exakt bästa pris. 20 bps betyder totalt 0,20 %.",
             key="daytrade_validation_cost",
         )
         run_daytrade_validation = st.button(
@@ -3836,15 +4183,20 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         test_days=126,
                     )
                     if not comparison.empty:
-                        display_cmp = comparison.copy()
-                        for c in ["Netto median","Träffsäkerhet","Median över baseline"]:
+                        display_cmp = comparison.copy().rename(columns={
+                            "Netto median":"Median efter kostnader",
+                            "Träffsäkerhet":"Andel positiva affärer",
+                            "Median över baseline":"Skillnad mot en vanlig börsdag",
+                            "Vinst/förlust-kvot":"Vinst/förlust-kvot",
+                        })
+                        for c in ["Median efter kostnader","Andel positiva affärer","Skillnad mot en vanlig börsdag"]:
                             display_cmp[c] = pd.to_numeric(display_cmp[c],errors="coerce")
                         st.dataframe(
                             display_cmp.style.format({
-                                "Netto median":"{:.2%}",
-                                "Träffsäkerhet":"{:.1%}",
-                                "Median över baseline":"{:.2%}",
-                                "Profit factor":"{:.2f}",
+                                "Median efter kostnader":"{:.2%}",
+                                "Andel positiva affärer":"{:.1%}",
+                                "Skillnad mot en vanlig börsdag":"{:.2%}",
+                                "Vinst/förlust-kvot":"{:.2f}",
                             }),
                             use_container_width=True,
                             hide_index=True,
@@ -3863,35 +4215,145 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         if int(stats.get("signals",0) or 0) > 0:
                             a,b,c,d = st.columns(4)
                             a.metric("Signaler", int(stats.get("signals",0)))
-                            b.metric("Netto median", f"{float(stats.get('net_median',0)):.2%}")
-                            c.metric("Träffsäkerhet", f"{float(stats.get('hit_rate',0)):.1%}")
+                            b.metric("Median efter kostnader", f"{float(stats.get('net_median',0)):.2%}")
+                            c.metric("Andel positiva affärer", f"{float(stats.get('hit_rate',0)):.1%}")
                             pf = float(stats.get("profit_factor")) if np.isfinite(_num(stats.get("profit_factor"))) else np.nan
-                            d.metric("Profit factor", f"{pf:.2f}" if np.isfinite(pf) else "—")
+                            d.metric("Vinst/förlust-kvot", f"{pf:.2f}" if np.isfinite(pf) else "—")
                         if isinstance(wf,pd.DataFrame) and not wf.empty:
-                            with st.expander(f"Visa walk-forward/OOS · {h} dag{'ar' if h==2 else ''}", expanded=False):
-                                wf_show=wf.copy()
+                            with st.expander(f"Visa testperioderna · {h} dag{'ar' if h==2 else ''}", expanded=False):
+                                wf_show=wf.copy().rename(columns={
+                                    "TestStart":"Period från",
+                                    "TestEnd":"Period till",
+                                    "Signals":"Köpsignaler",
+                                    "NetMedian":"Median efter kostnader",
+                                    "HitRate":"Andel positiva affärer",
+                                    "MedianExcess":"Skillnad mot vanlig börsdag",
+                                })
                                 st.dataframe(
                                     wf_show.style.format({
-                                        "NetMedian":"{:.2%}",
-                                        "HitRate":"{:.1%}",
-                                        "MedianExcess":"{:.2%}",
+                                        "Median efter kostnader":"{:.2%}",
+                                        "Andel positiva affärer":"{:.1%}",
+                                        "Skillnad mot vanlig börsdag":"{:.2%}",
                                     }),
                                     use_container_width=True,
                                     hide_index=True,
                                 )
 
                     st.caption(
-                        "Regeln och köpgränsen är frysta i detta test. Walk-forward-delen optimerar inte "
-                        "tröskeln på varje träningsfönster. Det minskar risken att vi överanpassar modellen "
-                        "till historiken."
+                        "Borsify ändrar inte reglerna mellan testperioderna för att få ett snyggare resultat. "
+                        "Samma köpgräns används hela vägen. Det gör testet tuffare men mer trovärdigt."
                     )
                     st.caption(
-                        "Kvarvarande begränsningar: survivorship bias i dagens tickeruniversum, inga historiska "
-                        "Avanza-handelsrestriktioner, ingen intradagsorderbok, inga verkliga orderfyllnader och "
-                        "ingen point-in-time fundamental Risk-komponent."
+                        "Det finns fortfarande begränsningar. Vi testar dagens lista av aktier bakåt i tiden, "
+                        "vi vet inte exakt vilka aktier som gick att handla hos Avanza varje historisk dag, och "
+                        "vi har inte gamla orderböcker som visar exakt vilket köp- eller säljpris man hade fått."
                     )
 
-    with st.expander("Short Alpha 2.0 · point-in-time validering", expanded=False):
+    with st.expander("🌍 Testa Daytrader på flera aktier och länder", expanded=True):
+        st.caption(
+            "Ett bra resultat i en enda aktie räcker inte. Här testar Borsify samma Daytrader-regel på många "
+            "aktier samtidigt för att se om mönstret verkar fungera brett – inte bara i några enstaka vinnare."
+        )
+        uv1,uv2,uv3,uv4 = st.columns([1.2,1,1,1])
+        max_universe_test = min(40, max(5, len(universe_symbols)))
+        uv_count = uv1.slider(
+            "Antal aktier att testa",
+            5, max_universe_test, min(25,max_universe_test), step=5,
+            help="Fler aktier ger ett bättre underlag men tar längre tid att hämta.",
+            key="daytrade_universe_count",
+        )
+        uv_years = uv2.slider("Antal år bakåt", 3, 10, 7, key="daytrade_universe_years")
+        uv_horizon = uv3.selectbox(
+            "Hur länge ägs aktien?",
+            [1,2], index=1,
+            format_func=lambda x: f"{x} handelsdag" + ("" if x==1 else "ar"),
+            key="daytrade_universe_horizon",
+        )
+        uv_cost = uv4.number_input(
+            "Köp + sälj (%)",
+            min_value=0.0,max_value=2.0,value=0.20,step=0.05,
+            help="Exempel: 0,20 % betyder att Borsify drar bort totalt 0,20 % för avgifter och sämre köp/säljpris.",
+            key="daytrade_universe_cost_pct",
+        )
+        run_universe_validation = st.button(
+            "Testa Daytrader på flera aktier",
+            type="primary",
+            key="run_daytrade_universe_validation",
+        )
+        if run_universe_validation:
+            test_symbols=list(dict.fromkeys(universe_symbols))[:int(uv_count)]
+            if len(test_symbols) < 5:
+                st.info("Välj ett universum med minst 5 aktier för att göra ett brett test.")
+            else:
+                with st.spinner(f"Hämtar historik och testar {len(test_symbols)} aktier…"):
+                    try:
+                        uv_data=yf.download(
+                            tickers=test_symbols,
+                            period=f"{int(uv_years)}y",
+                            interval="1d",
+                            auto_adjust=True,
+                            actions=False,
+                            group_by="ticker",
+                            threads=True,
+                            progress=False,
+                        )
+                    except Exception as exc:
+                        uv_data=pd.DataFrame()
+                        st.error(f"Kunde inte hämta historiken: {exc}")
+                histories=split_downloaded_histories(uv_data,test_symbols)
+                if len(histories) < 3:
+                    st.warning("För få aktier fick användbar historik. Prova igen senare eller välj ett mindre universum.")
+                else:
+                    per_symbol,by_country,summary=validate_universe(
+                        histories,
+                        horizon_days=int(uv_horizon),
+                        roundtrip_cost_bps=float(uv_cost)*100.0,
+                        country_fn=_market_label_for_ticker,
+                    )
+                    label,message=universe_validation_label(summary)
+                    st.markdown(f"### {label}")
+                    st.caption(message)
+                    u1,u2,u3,u4=st.columns(4)
+                    u1.metric("Aktier testade", int(summary.get("symbols_tested",0)))
+                    u2.metric("Aktier med köpsignaler", int(summary.get("symbols_with_signals",0)))
+                    u3.metric("Historiska köpsignaler", int(summary.get("signals",0)))
+                    med=_num(summary.get("median_net"))
+                    u4.metric("Median efter kostnader", f"{med:.2%}" if np.isfinite(med) else "—")
+
+                    if not by_country.empty:
+                        st.markdown("**Resultat per land**")
+                        country_show=by_country.copy()
+                        st.dataframe(
+                            country_show.style.format({
+                                "Median efter kostnader":"{:.2%}",
+                                "Andel positiva affärer":"{:.1%}",
+                            }),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+
+                    if not per_symbol.empty:
+                        with st.expander("Visa resultat för varje aktie", expanded=False):
+                            per_show=per_symbol.sort_values(
+                                ["Median efter kostnader","Signaler"],ascending=[False,False]
+                            )
+                            st.dataframe(
+                                per_show.style.format({
+                                    "Median efter kostnader":"{:.2%}",
+                                    "Andel positiva affärer":"{:.1%}",
+                                    "Skillnad mot vanlig dag":"{:.2%}",
+                                    "Vinst/förlust-kvot":"{:.2f}",
+                                }),
+                                use_container_width=True,
+                                hide_index=True,
+                            )
+                    st.caption(
+                        "Ett positivt historiskt resultat betyder inte att nästa affär går med vinst. "
+                        "Det här testet används för att kontrollera om Borsifys regel verkar hålla över många aktier, "
+                        "inte för att lova framtida avkastning."
+                    )
+
+    with st.expander("Kortsiktiga köp · historiskt test", expanded=False):
         st.caption(
             "Detta test återskapar bara de delar av Short Alpha 2.0 som faktiskt kan rekonstrueras historiskt: "
             "relativ styrka, trend, momentum och handelsaktivitet. Historiska estimatrevideringar och katalysatorer "
@@ -3911,7 +4373,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
             format_func=lambda x: f"{x} börsdagar",
             key="short_edge_spacing",
         )
-        run_short_edge = st.button("Testa Short Alpha 2.0", type="primary", key="run_short_edge")
+        run_short_edge = st.button("Testa kortsiktiga köp historiskt", type="primary", key="run_short_edge")
 
         if run_short_edge and short_symbol:
             try:
@@ -3926,7 +4388,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                     ) if benchmark_symbol else pd.DataFrame()
                 )
             except Exception as exc:
-                st.error(f"Kunde inte hämta historik för Short Alpha-testet: {exc}")
+                st.error(f"Kunde inte hämta historik för testet: {exc}")
                 short_hist = pd.DataFrame()
                 short_bench = pd.DataFrame()
 
@@ -3949,7 +4411,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
             short_bench = _edge_flat_frame(short_bench, benchmark_symbol or "")
 
             if short_hist.empty or "Close" not in short_hist:
-                st.warning("För lite prisdata för Short Alpha-testet.")
+                st.warning("Det finns för lite kurshistorik för att göra ett bra test.")
             else:
                 bench_close = (
                     short_bench["Close"].dropna().astype(float)
@@ -3981,7 +4443,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                     sm2.metric("Median 3m", f"{short_summary['median_3m']:+.1%}")
                     sm3.metric("Träff 3m", f"{short_summary['hit_rate_3m']:.0%}")
                     wf_med = short_summary.get("walk_forward_median_3m", np.nan)
-                    sm4.metric("Walk-forward median 3m", f"{wf_med:+.1%}" if np.isfinite(wf_med) else "—")
+                    sm4.metric("Median i senare testperioder · 3 mån", f"{wf_med:+.1%}" if np.isfinite(wf_med) else "—")
 
                 if not threshold_table.empty:
                     show = threshold_table.copy()
@@ -4002,7 +4464,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                     )
 
                 if not wf_short.empty:
-                    st.markdown("#### Walk-forward · tröskeln väljs bara på äldre data")
+                    st.markdown("#### Test i flera tidsperioder · reglerna bestäms från äldre data")
                     wf_show = wf_short.copy()
                     wf_show["Train median 3m %"] = (wf_show["TrainMedian3m"] * 100).round(1)
                     wf_show["Test median 3m %"] = (wf_show["TestMedian3m"] * 100).round(1)
@@ -4057,7 +4519,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                     "användas för att justera de tekniska delarna – inte som bevis för framtida avkastning."
                 )
 
-    with st.expander("Recommendation Ledger · lär av faktiska utfall", expanded=False):
+    with st.expander("Tidigare rekommendationer · hur gick de?", expanded=False):
         st.caption(
             "Borsify fryser nu de fem kort- och långsiktiga finalisterna per modellversion/dag. "
             "Även svagare finalister sparas för att undvika att framtida utvärdering bara innehåller vinnarna."
@@ -4073,7 +4535,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
             outs = get_recommendation_outcomes(limit=5000)
 
         if recs.empty:
-            st.info("Ledgern är tom. Den börjar fyllas när Borsify körs med v2.35.0.")
+            st.info("Det finns inga sparade rekommendationer att följa upp ännu. Listan fylls automatiskt när Borsify används.")
         else:
             l1, l2, l3, l4 = st.columns(4)
             l1.metric("Frysta case", len(recs))
@@ -4124,6 +4586,54 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                             cal_show[["Gate","Antal","Median %","Snitt %","Positiva %","≥ +10 %","≤ −10 %"]],
                             use_container_width=True, hide_index=True,
                         )
+
+                    st.markdown("#### Vad har Borsify lärt sig hittills?")
+                    st.caption(
+                        f"Borsify jämför bara grupper med minst {MIN_COHORT} mogna utfall. "
+                        "Det här är historiska observationer från Borsifys egna frysta rekommendationer – inte bevis på framtida avkastning."
+                    )
+                    learned = learning_summary(recs, outs, chosen_h)
+                    if learned.get("status") == "För lite historik":
+                        st.info(str(learned.get("text","För lite historik.")))
+                    elif learned.get("status") == "Möjligt historiskt mönster":
+                        st.success(str(learned.get("text","")))
+                    else:
+                        st.info(str(learned.get("text","")))
+
+                    score_check = score_band_monotonicity(recs, outs, chosen_h)
+                    if score_check.get("status") != "För lite underlag":
+                        if str(score_check.get("status","")).startswith("Varning"):
+                            st.warning(str(score_check["status"]))
+                        else:
+                            st.caption("Kontroll av Borsifys betyg: " + str(score_check["status"]) + ".")
+
+                    tables = learning_tables(recs, outs, chosen_h)
+                    table_choice = st.selectbox(
+                        "Jämför historiska utfall efter",
+                        ["Bedömning","Score","Underlag","Sektor","Modellversion"],
+                        key="recommendation_learning_dimension",
+                    )
+                    learn_table = tables.get(table_choice, pd.DataFrame())
+                    if learn_table.empty:
+                        st.caption("Det finns ännu inget användbart underlag för den här uppdelningen.")
+                    else:
+                        show = learn_table.copy()
+                        show["Median %"] = (show["Median"] * 100).round(1)
+                        show["Positiva %"] = (show["Positiva"] * 100).round(0)
+                        show["Minst +10 %"] = (show["Minst +10 %"] * 100).round(0)
+                        show["Högst −10 %"] = (show["Högst −10 %"] * 100).round(0)
+                        show["Underlag"] = show["Tillräckligt underlag"].map(
+                            {True:"Kan börja jämföras", False:"För få utfall"}
+                        )
+                        st.dataframe(
+                            show[["Grupp","Antal","Median %","Positiva %","Minst +10 %","Högst −10 %","Underlag"]],
+                            use_container_width=True, hide_index=True,
+                        )
+                    st.caption(data_limits_note(recs))
+                    st.warning(
+                        "Borsify ändrar inte vikter eller köpgränser automatiskt utifrån den här tabellen. "
+                        "Små historiska skillnader kan bero på slump, marknadsläge eller att samma bolag förekommer flera gånger."
+                    )
             else:
                 st.info(
                     "Inga utfall har hunnit mogna ännu. Kortsiktiga case börjar kunna mätas efter cirka en månad; "
@@ -4168,18 +4678,18 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
     m3.metric("Medianavkastning", f"{summary['median_return']:.2%}", f"vs {summary['baseline_median_return']:.2%}")
     m4.metric("Snittavkastning", f"{summary['mean_return']:.2%}")
     pf = summary.get("profit_factor", np.nan)
-    m5.metric("Profit factor", f"{pf:.2f}" if np.isfinite(pf) else "—", help=beginner_term("profit factor"))
+    m5.metric("Vinst/förlust-kvot", f"{pf:.2f}" if np.isfinite(pf) else "—", help=beginner_term("profit factor"))
 
     edge_win = summary["win_rate"] - summary["baseline_win_rate"]
     edge_med = summary["median_return"] - summary["baseline_median_return"]
     if int(summary["signals"]) < 30:
         st.warning("Litet stickprov. Under 30 signaler är för tunt för att dra starka slutsatser.")
     elif edge_win > .05 and edge_med > 0:
-        st.success(f"Den här proxy-signalen har historiskt slagit baslinjen för {symbol} i valt test: +{edge_win:.1%} högre träffsäkerhet och {edge_med:+.2%} bättre medianutfall. Det är inte bevis för framtida edge.")
+        st.success(f"Den här signalen har varit bättre än en enkel jämförelse för {symbol} i just detta historiska test: +{edge_win:.1%} högre andel positiva affärer och {edge_med:+.2%} bättre medianresultat. Det betyder inte att signalen kommer fungera framöver.")
     elif edge_win < 0 and edge_med <= 0:
-        st.error("Den valda signalen har inte visat historisk edge mot baslinjen i detta test. Det är ett skäl att inte höja modellvikten utan vidare.")
+        st.error("Den valda signalen har inte varit bättre än den enkla jämförelsen i detta test. Därför finns det inget bra stöd för att ge signalen större betydelse i Borsify.")
     else:
-        st.info("Resultatet är blandat. Signalen bör inte betraktas som verifierad edge utan bredare test över fler aktier och marknadsregimer.")
+        st.info("Resultatet är blandat. Vi behöver testa fler aktier och olika typer av börsperioder innan signalen kan få större betydelse.")
 
     fwd_col = f"fwd_{horizon}d"
     hits = tech[tech[score_col] >= threshold].dropna(subset=[fwd_col]).copy().tail(100)
@@ -4194,11 +4704,11 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
         })
         st.dataframe(shown.iloc[::-1], use_container_width=True, hide_index=True)
 
-    st.markdown("**Vad Edge Lab inte testar ännu:** full INVEST-modell, historiska fundamenta, estimatrevideringar, sektorrotation, skatt, likviditetsbegränsningar och verkliga orderfyllnader. Portföljdelen längre ned modellerar samtidig exponering och kapitalbindning, men är fortfarande ett diagnostiskt backtest – inte verklig exekvering.")
+    st.markdown("**Det historiska testet kan ännu inte återskapa allt:** det saknar bland annat gamla bolagsuppgifter, historiska analytikerändringar, skatt och exakt information om vilket pris en riktig order hade gått igenom till. Resultatet ska därför ses som ett test av modellen – inte som en exakt kopia av verklig handel.")
 
     st.divider()
     st.subheader("Marknadsregim · när fungerar signalen?")
-    st.caption("Samma signal delas upp efter vald marknads regim. Regimen använder bara information som fanns den dagen: jämförelseindex mot SMA200, SMA50 mot SMA200 och 60-dagars momentum. Risk-on, Neutral och Risk-off testas separat.")
+    st.caption("Borsify delar också upp testet efter hur börsen mådde just då: stark, neutral eller svag. Bedömningen bygger bara på kursinformation som fanns den dagen. På så sätt kan vi se om signalen bara fungerar när börsen redan går bra.")
     try:
         benchmark_hist = yf.download(benchmark_symbol, period=period, interval="1d", auto_adjust=False, progress=False, threads=False) if benchmark_symbol else pd.DataFrame()
     except Exception:
@@ -4210,11 +4720,11 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
     else:
         display_regime = regime_summary.copy()
         display_regime["Träffsäkerhet %"] = (display_regime["win_rate"] * 100).round(1)
-        display_regime["Baslinje %"] = (display_regime["baseline_win_rate"] * 100).round(1)
+        display_regime["Jämförelse %"] = (display_regime["baseline_win_rate"] * 100).round(1)
         display_regime["Median %"] = (display_regime["median_return"] * 100).round(2)
-        display_regime["Median edge %"] = (display_regime["median_excess"] * 100).round(2)
-        display_regime = display_regime.rename(columns={"regime":"Regim","signals":"Signaler","profit_factor":"Profit factor"})
-        st.dataframe(display_regime[["Regim","Signaler","Träffsäkerhet %","Baslinje %","Median %","Median edge %","Profit factor"]], use_container_width=True, hide_index=True)
+        display_regime["Skillnad mot jämförelse %"] = (display_regime["median_excess"] * 100).round(2)
+        display_regime = display_regime.rename(columns={"regime":"Regim","signals":"Signaler","profit_factor":"Vinst/förlust-kvot"})
+        st.dataframe(display_regime[["Regim","Signaler","Träffsäkerhet %","Jämförelse %","Median %","Skillnad mot jämförelse %","Vinst/förlust-kvot"]], use_container_width=True, hide_index=True)
         enough = regime_summary[regime_summary["signals"] >= 20].copy()
         if not enough.empty:
             best_regime = enough.sort_values(["median_excess","win_rate"], ascending=False).iloc[0]
@@ -4224,7 +4734,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
             st.warning("För få signaler per regim för att jämförelsen ska vara robust.")
 
     st.divider()
-    st.subheader("Walk-forward · fungerar signalen på osedd historik?")
+    st.subheader("Test i senare perioder · fungerar signalen även på data den inte byggdes på?")
     st.caption("Det här testet väljer scoretröskel enbart på en äldre träningsperiod och fryser sedan valet under nästa, osedda testperiod. Signaler som överlappar samma framtida utfallsfönster räknas inte som oberoende trades.")
     wf1, wf2, wf3 = st.columns(3)
     train_months = wf1.selectbox("Träningsfönster", [12, 18, 24, 36], index=2, format_func=lambda x: f"{x} månader", key="edge_wf_train")
@@ -4237,40 +4747,40 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
         min_train_signals=8, min_test_signals=2,
     )
     if int(wf.get("folds", 0)) == 0:
-        st.info("Historiken räcker inte till för vald walk-forward-konfiguration. Öka historiken eller korta tränings-/testfönstret.")
+        st.info("Det finns inte tillräckligt mycket historik för det här upplägget. Välj fler år bakåt eller kortare testperioder.")
     elif int(wf.get("signals", 0)) == 0:
-        st.warning("Walk-forward-testet kunde välja trösklar men hittade inga out-of-sample-signaler. Det är i sig ett tecken på att signalen är för selektiv eller instabil.")
+        st.warning("I de senare testperioderna kom inga köpsignaler alls. Det kan betyda att regeln är för snäv eller fungerar för ojämnt över tid.")
     else:
         w1, w2, w3, w4, w5, w6 = st.columns(6)
         w1.metric("Testfönster", int(wf["folds"]))
-        w2.metric("OOS-signaler", int(wf["signals"]))
-        w3.metric("OOS träffsäkerhet", f"{wf['win_rate']:.1%}", f"vs {wf['baseline_win_rate']:.1%}")
-        w4.metric("OOS median", f"{wf['median_return']:.2%}", f"edge {wf['median_excess']:+.2%}")
-        w5.metric("Profit factor", f"{wf['profit_factor']:.2f}" if np.isfinite(wf['profit_factor']) else "—", help=beginner_term("profit factor"))
+        w2.metric("Köpsignaler i nya testperioder", int(wf["signals"]))
+        w3.metric("Positiva affärer i nya testperioder", f"{wf['win_rate']:.1%}", f"vs {wf['baseline_win_rate']:.1%}")
+        w4.metric("Median i nya testperioder", f"{wf['median_return']:.2%}", f"edge {wf['median_excess']:+.2%}")
+        w5.metric("Vinst/förlust-kvot", f"{wf['profit_factor']:.2f}" if np.isfinite(wf['profit_factor']) else "—", help=beginner_term("profit factor"))
         w6.metric("Positiva testfönster", f"{wf['positive_fold_share']:.0%}" if np.isfinite(wf['positive_fold_share']) else "—")
         if wf["signals"] < 20 or int(wf.get("eligible_folds", 0)) < 3:
             st.warning("Out-of-sample-stickprovet är fortfarande tunt. Resultatet ska inte användas för att höja produktionsvikten ännu.")
         elif wf["median_excess"] > 0 and wf["win_rate"] > wf["baseline_win_rate"] and wf["positive_fold_share"] >= .60:
-            st.success("Signalen har klarat ett första walk-forward-test: positiv median-edge, högre träffsäkerhet än baslinjen och positiv edge i en majoritet av de testfönster som hade tillräckligt med signaler. Det är ett robusthetstecken, inte ett löfte om framtida avkastning.")
+            st.success("Signalen fungerade relativt bra även i senare testperioder: medianresultatet var bättre än jämförelsen och en större andel affärer gick åt rätt håll. Det är ett positivt tecken, men inget löfte om framtida vinst.")
         elif wf["median_excess"] <= 0 and wf["win_rate"] <= wf["baseline_win_rate"]:
-            st.error("Signalen tappar sin edge på osedd historik. Det talar för överanpassning eller en för svag signal och är ett skäl att inte optimera produktionsmodellen mot fullhistorik-resultatet.")
+            st.error("Signalen blir tydligt sämre i senare testperioder. Det tyder på att regeln kan ha passat den äldre historiken för bra och därför inte bör få större betydelse i Borsify ännu.")
         else:
-            st.info("Walk-forward-resultatet är blandat. Strategin bör betraktas som oprövad tills fler out-of-sample-fönster visar samma beteende.")
+            st.info("Resultatet varierar mellan testperioderna. Regeln bör fortfarande ses som oprövad tills fler senare perioder visar samma mönster.")
         if float(wf.get("threshold_std", 0.0)) >= 10:
             st.warning(f"Den valda tröskeln är instabil mellan träningsfönstren (standardavvikelse {wf['threshold_std']:.1f} scorepoäng). Det är ett möjligt tecken på parameterkänslighet.")
         folds = wf.get("fold_table")
         if isinstance(folds, pd.DataFrame) and not folds.empty:
-            st.markdown("#### Walk-forward per testfönster")
+            st.markdown("#### Resultat i varje senare testperiod")
             fw = folds.copy()
-            fw["OOS träff %"] = (fw["test_win_rate"] * 100).round(1)
-            fw["Baslinje %"] = (fw["test_baseline_win_rate"] * 100).round(1)
-            fw["OOS median %"] = (fw["test_median_return"] * 100).round(2)
-            fw["OOS edge %"] = (fw["test_median_excess"] * 100).round(2)
+            fw["Positiva affärer %"] = (fw["test_win_rate"] * 100).round(1)
+            fw["Jämförelse %"] = (fw["test_baseline_win_rate"] * 100).round(1)
+            fw["Median %"] = (fw["test_median_return"] * 100).round(2)
+            fw["Skillnad mot jämförelse %"] = (fw["test_median_excess"] * 100).round(2)
             fw = fw.rename(columns={"test_start":"Test från","test_end":"Test till","threshold":"Vald tröskel","test_signals":"Signaler"})
-            st.dataframe(fw[["Test från","Test till","Vald tröskel","Signaler","OOS träff %","Baslinje %","OOS median %","OOS edge %"]], use_container_width=True, hide_index=True)
+            st.dataframe(fw[["Test från","Test till","Vald tröskel","Signaler","Positiva affärer %","Jämförelse %","Median %","Skillnad mot jämförelse %"]], use_container_width=True, hide_index=True)
 
-        st.markdown("#### Handelsfriktion · överlever signalen verkliga kostnader?")
-        st.caption("Stresstestet använder endast de out-of-sample-trades som walk-forward-testet faktiskt tog. Kostnader dras från varje trade före beräkning av nettoresultat. Det är fortfarande en förenklad sekventiell simulering – inte en full portföljmotor.")
+        st.markdown("#### Vad händer när vi räknar med köp- och säljkostnader?")
+        st.caption("Här räknar Borsify bara med affärer från de senare testperioderna och drar av kostnaden för varje köp och försäljning. Det är fortfarande en förenklad simulering, inte verklig handel.")
         fc1, fc2, fc3 = st.columns(3)
         commission_bps = fc1.number_input("Courtage tur/retur (bps)", min_value=0.0, max_value=200.0, value=10.0, step=5.0, key="edge_cost_commission")
         execution_bps = fc2.number_input("Spread + slippage tur/retur (bps)", min_value=0.0, max_value=300.0, value=20.0, step=5.0, key="edge_cost_execution")
@@ -4284,15 +4794,15 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
             f1, f2, f3, f4, f5 = st.columns(5)
             f1.metric("Netto träffsäkerhet", f"{friction['net_win_rate']:.1%}")
             f2.metric("Netto median/trade", f"{friction['net_median_return']:.2%}", f"kostnad −{friction['cost_drag_per_trade']:.2%}")
-            f3.metric("Netto profit factor", f"{friction['net_profit_factor']:.2f}" if np.isfinite(friction['net_profit_factor']) else "—")
+            f3.metric("Vinst/förlust-kvot efter kostnader", f"{friction['net_profit_factor']:.2f}" if np.isfinite(friction['net_profit_factor']) else "—")
             f4.metric("Sekventiell kapitalutveckling", f"{friction['compounded_return']:+.1%}")
-            f5.metric("Max drawdown", f"{friction['max_drawdown']:.1%}", help=beginner_term("drawdown"))
+            f5.metric("Största fall från topp", f"{friction['max_drawdown']:.1%}", help=beginner_term("drawdown"))
             if friction["net_median_return"] <= 0 or (np.isfinite(friction["net_profit_factor"]) and friction["net_profit_factor"] < 1.0):
-                st.error("Efter valda handelsfriktioner försvinner den ekonomiska edgen i detta walk-forward-test. Bruttoresultatet bör då inte användas som argument för att höja modellvikten.")
+                st.error("När köp- och säljkostnader räknas med försvinner fördelen i testet. Då ska det positiva resultatet före kostnader inte användas som argument för att ge signalen större betydelse.")
             elif friction["net_median_return"] > 0 and (not np.isfinite(friction["net_profit_factor"]) or friction["net_profit_factor"] >= 1.2):
                 st.success("Signalen behåller positivt nettoresultat efter valda kostnader i detta out-of-sample-test. Det är ett bättre robusthetstecken än bruttoresultatet, men fortfarande inte ett live-validerat handelsresultat.")
             else:
-                st.info("Signalen överlever kostnaderna, men marginalen är tunn. Små förändringar i spread, slippage eller exekvering kan fortfarande äta upp resultatet.")
+                st.info("Signalen är fortfarande positiv efter våra antagna kostnader, men marginalen är liten. Ett något sämre verkligt köp- eller säljpris kan räcka för att fördelen ska försvinna.")
 
     st.divider()
     st.subheader("Universumtest · fungerar signalen över många aktier?")
@@ -4304,7 +4814,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
     max_available = max(1, len(universe_symbols))
     min_test = min(10, max_available)
     max_symbols = st.slider("Antal aktier i universumtest", min_test, max_available, min(50, max_available), 1 if max_available < 10 else 5, key="edge_uni_count")
-    run_universe = st.button("Kör universumtest", type="primary", key="run_universe_edge")
+    run_universe = st.button("Testa på många aktier", type="primary", key="run_universe_edge")
     if run_universe:
         symbols = [str(x).upper() for x in universe_symbols[:max_symbols]]
         period = f"{uni_years}y"
@@ -4339,12 +4849,12 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
             q2.metric("Signaler", int(uni["signals"]))
             q3.metric("Träffsäkerhet", f"{uni['win_rate']:.1%}", f"vs {uni['baseline_win_rate']:.1%}")
             q4.metric("Median", f"{uni['median_return']:.2%}", f"edge {uni['median_excess']:+.2%}")
-            q5.metric("Profit factor", f"{uni['profit_factor']:.2f}" if np.isfinite(uni['profit_factor']) else "—")
-            q6.metric("Aktier med positiv edge", f"{uni['positive_edge_share']:.0%}")
+            q5.metric("Vinst/förlust-kvot", f"{uni['profit_factor']:.2f}" if np.isfinite(uni['profit_factor']) else "—")
+            q6.metric("Aktier där signalen slog jämförelsen", f"{uni['positive_edge_share']:.0%}")
             if uni["signals"] < 100 or uni["symbols_with_signals"] < 10:
                 st.warning("Stickprovet är fortfarande begränsat. Jag skulle inte ändra produktionsmodellen på detta resultat ensamt.")
             elif uni["median_excess"] > 0 and uni["win_rate"] > uni["baseline_win_rate"] and uni["positive_edge_share"] >= .55:
-                st.success("Signalen visar bred positiv historisk edge i detta universumtest. Det är ett bättre tecken än ett bra resultat på en enskild aktie, men fortfarande inte ett komplett handelsbacktest.")
+                st.success("Signalen har gett ett positivt historiskt resultat i många av de testade aktierna. Det är bättre stöd än ett bra resultat i bara en aktie, men testet är fortfarande en förenklad simulering.")
             elif uni["median_excess"] <= 0 and uni["win_rate"] <= uni["baseline_win_rate"]:
                 st.error("Signalen misslyckas med att slå baslinjen brett. Det talar emot att ge den högre vikt i modellen utan omdesign.")
             else:
@@ -4354,21 +4864,21 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                 st.markdown("#### Resultat per aktie")
                 shown_uni = per_symbol.copy()
                 shown_uni["Träffsäkerhet"] = (shown_uni["win_rate"] * 100).round(1)
-                shown_uni["Baslinje %"] = (shown_uni["baseline_win_rate"] * 100).round(1)
+                shown_uni["Jämförelse %"] = (shown_uni["baseline_win_rate"] * 100).round(1)
                 shown_uni["Median %"] = (shown_uni["median_return"] * 100).round(2)
-                shown_uni["Median edge %"] = (shown_uni["median_excess"] * 100).round(2)
+                shown_uni["Skillnad mot jämförelse %"] = (shown_uni["median_excess"] * 100).round(2)
                 shown_uni = shown_uni.rename(columns={"symbol":"Ticker","signals":"Signaler"})
-                st.dataframe(shown_uni[["Ticker","Signaler","Träffsäkerhet","Baslinje %","Median %","Median edge %"]].sort_values(["Median edge %","Signaler"], ascending=[False,False]), use_container_width=True, hide_index=True)
+                st.dataframe(shown_uni[["Ticker","Signaler","Träffsäkerhet","Jämförelse %","Median %","Skillnad mot jämförelse %"]].sort_values(["Skillnad mot jämförelse %","Signaler"], ascending=[False,False]), use_container_width=True, hide_index=True)
 
             st.markdown("#### Portföljtest · flera samtidiga positioner")
-            st.caption("Här behandlas signalerna som en faktisk gemensam kapitalpool. Borsify prioriterar högst score när flera signaler kommer samma dag, blockerar dubbla samtidiga positioner i samma aktie och binder kapital tills den valda horisonten löper ut. Equity-kurvan mark-to-market-värderar varje öppen position dagligen med historisk stängningskurs, så drawdown och exponering även fångar rörelser mellan in- och utgång.")
+            st.caption("Här låtsas Borsify att alla affärer delar på samma pengar. Om flera köpsignaler kommer samma dag prioriteras de högst rankade. Pengar som redan är placerade kan inte användas igen förrän affären är avslutad. Det gör simuleringen mer lik hur en riktig portfölj skulle fungera.")
             pc1, pc2, pc3, pc4 = st.columns(4)
             portfolio_max_positions = pc1.slider("Max samtidiga positioner", 1, 15, 5, 1, key="edge_portfolio_max_positions")
             portfolio_position_pct = pc2.slider("Max allokering per position", 5, 100, 20, 5, key="edge_portfolio_position_pct")
             portfolio_commission = pc3.number_input("Portfölj · courtage t/r (bps)", min_value=0.0, max_value=200.0, value=10.0, step=5.0, key="edge_portfolio_commission")
             portfolio_execution = pc4.number_input("Portfölj · spread/slippage t/r (bps)", min_value=0.0, max_value=300.0, value=20.0, step=5.0, key="edge_portfolio_execution")
 
-            use_risk_sizing = st.toggle("Riskstyrd positionsstorlek + ATR-stop", value=True, key="edge_portfolio_risk_sizing")
+            use_risk_sizing = st.toggle("Anpassa köpets storlek efter hur mycket aktien brukar svänga", value=True, key="edge_portfolio_risk_sizing", help="Aktier som brukar svänga mycket får en mindre plats i den simulerade portföljen.")
             risk_per_trade = 1.0
             max_portfolio_risk = 5.0
             atr_stop_multiple = 2.0
@@ -4399,9 +4909,9 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                 pp1.metric("Trades", int(portfolio["trades"]), f"{int(portfolio.get('symbols_traded', 0))} aktier")
                 pp2.metric("Netto träffsäkerhet", f"{portfolio['win_rate']:.1%}")
                 pp3.metric("Total kapitalutveckling", f"{portfolio['total_return']:+.1%}")
-                pp4.metric("Daglig max drawdown", f"{portfolio['max_drawdown']:.1%}", help=beginner_term("drawdown"))
+                pp4.metric("Största fall från topp", f"{portfolio['max_drawdown']:.1%}", help=beginner_term("drawdown"))
                 pp5.metric("Snittexponering", f"{portfolio['avg_exposure']:.0%}")
-                pp6.metric("Profit factor", f"{portfolio['profit_factor']:.2f}" if np.isfinite(portfolio['profit_factor']) else "—", help=beginner_term("profit factor"))
+                pp6.metric("Vinst/förlust-kvot", f"{portfolio['profit_factor']:.2f}" if np.isfinite(portfolio['profit_factor']) else "—", help=beginner_term("profit factor"))
                 if use_risk_sizing:
                     rr1, rr2, rr3 = st.columns(3)
                     rr1.metric("Max risk vid nyöppning", f"{portfolio.get('max_entry_risk', 0.0):.1%}")
@@ -4421,8 +4931,8 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                     if benchmark_symbol:
                         st.markdown(f"#### Borsify mot {benchmark_name} · samma tidsperiod")
                     else:
-                        st.markdown("#### Benchmark")
-                        st.info("Det nordiska urvalet blandar Danmark, Norge och Finland. Borsify visar därför ingen förenklad benchmark här ännu i stället för att jämföra mot ett missvisande index.")
+                        st.markdown("#### Jämförelse med marknaden")
+                        st.info("Det nordiska urvalet innehåller aktier från Danmark, Norge och Finland. Därför visar Borsify ingen enda marknadsjämförelse här – en sådan jämförelse skulle lätt bli missvisande.")
                     try:
                         bench_raw = yf.download(benchmark_symbol, start=pd.Timestamp(eq.index.min()).date().isoformat(), end=(pd.Timestamp(eq.index.max()) + pd.Timedelta(days=2)).date().isoformat(), interval="1d", auto_adjust=False, progress=False, threads=False) if benchmark_symbol else pd.DataFrame()
                     except Exception:
@@ -4440,20 +4950,20 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                             omx_stats = _performance_stats(pd.Series(omx_index.values, index=compare_index))
                             bm1, bm2, bm3, bm4 = st.columns(4)
                             bm1.metric("Borsify total", f"{bq_stats['return']:+.1%}" if np.isfinite(bq_stats['return']) else "—", f"{benchmark_name} {omx_stats['return']:+.1%}" if np.isfinite(omx_stats['return']) else None)
-                            bm2.metric("Årstakt (CAGR)", f"{bq_stats['cagr']:+.1%}" if np.isfinite(bq_stats['cagr']) else "—", f"{benchmark_name} {omx_stats['cagr']:+.1%}" if np.isfinite(omx_stats['cagr']) else None, help="Ungefär vilken årlig tillväxttakt som skulle ge samma totalresultat över perioden.")
+                            bm2.metric("Genomsnittlig utveckling per år", f"{bq_stats['cagr']:+.1%}" if np.isfinite(bq_stats['cagr']) else "—", f"{benchmark_name} {omx_stats['cagr']:+.1%}" if np.isfinite(omx_stats['cagr']) else None, help="Ungefär vilken årlig tillväxttakt som skulle ge samma totalresultat över perioden.")
                             bm3.metric("Max fall från topp", f"{bq_stats['max_drawdown']:.1%}" if np.isfinite(bq_stats['max_drawdown']) else "—", f"{benchmark_name} {omx_stats['max_drawdown']:.1%}" if np.isfinite(omx_stats['max_drawdown']) else None, help=beginner_term("drawdown"))
-                            bm4.metric("Riskjusterad kvot", f"{bq_stats['sharpe']:.2f}" if np.isfinite(bq_stats['sharpe']) else "—", f"{benchmark_name} {omx_stats['sharpe']:.2f}" if np.isfinite(omx_stats['sharpe']) else None, help=beginner_term("Sharpe"))
+                            bm4.metric("Avkastning i förhållande till svängningar", f"{bq_stats['sharpe']:.2f}" if np.isfinite(bq_stats['sharpe']) else "—", f"{benchmark_name} {omx_stats['sharpe']:.2f}" if np.isfinite(omx_stats['sharpe']) else None, help=beginner_term("Sharpe"))
                             excess = bq_stats["return"] - omx_stats["return"] if np.isfinite(bq_stats["return"]) and np.isfinite(omx_stats["return"]) else np.nan
                             if np.isfinite(excess):
                                 if excess > .02:
-                                    st.success(f"Enkelt uttryckt: i den här historiska simuleringen slog Borsify jämförelseindexet med cirka {excess:+.1%} totalt. Kontrollera också drawdown och riskjusterad kvot – högre avkastning är mindre imponerande om vägen dit varit mycket mer riskfylld.")
+                                    st.success(f"Enkelt uttryckt: i den här historiska simuleringen gick Borsify cirka {excess:+.1%} bättre än jämförelsen totalt. Titta också på hur stora fallen varit längs vägen – hög avkastning är mindre imponerande om risken varit mycket större.")
                                 elif excess < -.02:
                                     st.warning(f"Enkelt uttryckt: i den här historiska simuleringen gav Borsify cirka {abs(excess):.1%} sämre total avkastning än {benchmark_name}. Då hade ett enkelt indexalternativ varit bättre under samma period.")
                                 else:
-                                    st.info(f"Enkelt uttryckt: Borsify och {benchmark_name} gav ungefär samma totalresultat i den här perioden. Då blir risk, drawdown och handelskostnader extra viktiga i jämförelsen.")
-                            st.caption(f"Jämförelsen normaliserar båda till 100 vid start. {benchmark_name} används som jämförelseindex och är inte nödvändigtvis ett investerbart totalavkastningsindex här; utdelningar kan därför göra jämförelsen ofullständig.")
+                                    st.info(f"Enkelt uttryckt: Borsify och {benchmark_name} gav ungefär samma totalresultat under perioden. Då blir det extra viktigt att jämföra hur stora fallen varit och hur mycket handeln kostat.")
+                            st.caption(f"Borsify och {benchmark_name} startas båda på värdet 100 för att göra utvecklingen lätt att jämföra. Utdelningar kan saknas i jämförelsen, så resultatet är ungefärligt.")
                     else:
-                        st.info("Jämförelseindexdata kunde inte hämtas för exakt samma period, så benchmarkjämförelsen visas inte i denna körning.")
+                        st.info("Borsify kunde inte hämta marknadsdata för exakt samma period. Därför visas ingen marknadsjämförelse i den här körningen.")
 
                 rejected = int(portfolio.get("rejected_capacity", 0))
                 if rejected > 0:
@@ -4461,7 +4971,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                 if portfolio["total_return"] <= 0 or (np.isfinite(portfolio["profit_factor"]) and portfolio["profit_factor"] < 1.0):
                     st.error("När signalerna konkurrerar om samma kapitalpool håller strategin inte ihop med dessa antaganden. Ett bra signaltest är alltså inte tillräckligt för att motivera modellen.")
                 elif portfolio["max_drawdown"] <= -.25:
-                    st.warning("Portföljen är historiskt lönsam i denna simulering men drawdown är hög. Riskkontroll och positionsstorlek behöver förbättras innan resultatet kan betraktas som robust.")
+                    st.warning("Den simulerade portföljen har gått med vinst historiskt, men den har också haft stora fall från tidigare toppar. Risken behöver därför förbättras innan resultatet kan ses som stabilt.")
                 else:
                     st.success("Strategin behåller positivt resultat när samtidiga positioner och kapitalbindning modelleras. Det är ett starkare diagnostiskt test, men fortfarande inte live-validerad avkastning.")
 
@@ -4495,18 +5005,18 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
             else:
                 ru = regime_uni.copy()
                 ru["Träffsäkerhet %"] = (ru["win_rate"] * 100).round(1)
-                ru["Baslinje %"] = (ru["baseline_win_rate"] * 100).round(1)
+                ru["Jämförelse %"] = (ru["baseline_win_rate"] * 100).round(1)
                 ru["Median %"] = (ru["median_return"] * 100).round(2)
-                ru["Median edge %"] = (ru["median_excess"] * 100).round(2)
-                ru = ru.rename(columns={"regime":"Regim","symbols_with_signals":"Aktier","signals":"Signaler","profit_factor":"Profit factor"})
-                st.dataframe(ru[["Regim","Aktier","Signaler","Träffsäkerhet %","Baslinje %","Median %","Median edge %","Profit factor"]], use_container_width=True, hide_index=True)
+                ru["Skillnad mot jämförelse %"] = (ru["median_excess"] * 100).round(2)
+                ru = ru.rename(columns={"regime":"Regim","symbols_with_signals":"Aktier","signals":"Signaler","profit_factor":"Vinst/förlust-kvot"})
+                st.dataframe(ru[["Regim","Aktier","Signaler","Träffsäkerhet %","Jämförelse %","Median %","Skillnad mot jämförelse %","Vinst/förlust-kvot"]], use_container_width=True, hide_index=True)
                 robust = regime_uni[(regime_uni["signals"] >= 100) & (regime_uni["symbols_with_signals"] >= 10)]
                 if len(robust) >= 2:
                     spread = float(robust["median_excess"].max() - robust["median_excess"].min())
                     if spread >= .02:
                         st.warning("Signalen är tydligt regimberoende i universumtestet. Det talar för att Borsify senare bör justera SWING/REVERSAL-kraven efter marknadsläget i stället för att använda samma tröskel hela tiden.")
                     else:
-                        st.success("Signalen ser relativt stabil ut mellan de regimer som har tillräckligt stort stickprov. Det är ett positivt robusthetstecken, men handelsfriktioner och walk-forward-test återstår.")
+                        st.success("Signalen ser ganska jämn ut i de olika typer av börsperioder där det finns tillräckligt med historik. Det är positivt, men vi behöver fortfarande kontrollera köp- och säljkostnader och senare testperioder.")
 
 
 def main() -> None:
@@ -4689,6 +5199,7 @@ def main() -> None:
     health = scan_health(len(fetched_symbols), len(scan_symbols))
     st.session_state["bq_qc_scan_health"] = float(health["success_ratio"])
     st.session_state["bq_qc_provider_healthy"] = bool(health["provider_healthy_enough"])
+    st.session_state["bq_qc_provider_rule"] = str(health.get("provider_health_rule") or "")
 
     for _, qc_row in qc_all_fetched.iterrows():
         sym = str(qc_row.get("Ticker") or "").upper()
@@ -4730,6 +5241,7 @@ def main() -> None:
         st.stop()
 
     scored = add_scores(raw_df, profile)
+    scored = add_data_trust(scored)
     save_score_history(scored, profile)
     filtered = scored.copy()
     if min_market_cap > 0:
@@ -4747,54 +5259,9 @@ def main() -> None:
         filtered = filtered[dy.notna() & (dy > 0) & (dy >= min_yield)]
     filtered = apply_discovery_intent(filtered, discovery_intent)
     top = filtered.head(top_n).copy(); daily_shortlist = build_daily_shortlist(filtered, profile, limit=min(5, len(filtered)))
-    with st.spinner("Djupkontrollerar de starkaste långsiktiga kandidaterna…"):
-        deep_longlist = build_deep_longlist(filtered, pool_size=min(6, len(filtered)), limit=min(5, len(filtered)))
-    market_cfg = MARKET_CONFIGS[market]
-    benchmark_symbol = market_cfg["benchmark"]
-    benchmark_name = market_cfg["benchmark_name"]
-    idx = fetch_index_snapshot(benchmark_symbol) if benchmark_symbol else {}
-    with st.spinner("Kontrollerar de starkaste kortsiktiga kandidaterna…"):
-        short_longlist = build_short_term_longlist(filtered, idx, pool_size=min(8, len(filtered)), limit=min(5, len(filtered)))
-    # Freeze the actual finalists once per model version/day before any future outcome is known.
-    ledger_records = build_recommendation_records(
-        short_longlist, "short", APP_VERSION, profile, market, max_records=5
-    ) + build_recommendation_records(
-        deep_longlist, "long", APP_VERSION, profile, market, max_records=5
-    )
-    save_recommendation_records(ledger_records)
-
-    # Compare today's candidates with the latest frozen recommendation from an earlier day.
-    # Same-day records are excluded by the relevance engine to avoid self-comparison on reruns.
-    try:
-        relevance_ledger = get_recommendation_records(limit=500)
-        relevance_date = pd.Timestamp.now(tz="UTC").date().isoformat()
-        short_longlist = apply_recommendation_relevance(
-            short_longlist, relevance_ledger, "short", profile, market, relevance_date
-        )
-        deep_longlist = apply_recommendation_relevance(
-            deep_longlist, relevance_ledger, "long", profile, market, relevance_date
-        )
-    except Exception:
-        # Relevance is supplemental and must never break the recommendation flow.
-        pass
-
-    # Turn each finalist into an explicit monitoring plan. This is deterministic:
-    # no invented targets, catalysts or probabilities.
-    try:
-        short_longlist = apply_case_plans(short_longlist, "short")
-        deep_longlist = apply_case_plans(deep_longlist, "long")
-    except Exception:
-        pass
-
-    # Cheap background maintenance: only mature records are fetched, max a few per run.
-    try:
-        refresh_due_recommendation_outcomes(max_records=6)
-    except Exception:
-        pass
-
     elapsed = time.perf_counter() - start
     if market == "Alla marknader":
-        st.caption("Global jämförelse använder ETF:n VT som praktisk proxy för en bred världsmarknad. Det är inte ett exakt totalavkastningsindex och ska tolkas som referens, inte facit.")
+        st.caption("Jämförelse med världsmarknaden: Borsify använder fonden VT, som äger aktier från många olika länder, för att få en enkel jämförelse. Det hjälper dig att se om Borsifys resultat varit bättre eller sämre än världsmarknaden i stort. Jämförelsen är ungefärlig, inte ett facit.")
 
     price_dates = sorted({str(x) for x in raw_df.get("Prisdatum", pd.Series(dtype=str)).dropna().tolist() if str(x) != "—"})
     latest_price_date = price_dates[-1] if price_dates else "—"
@@ -4804,6 +5271,15 @@ def main() -> None:
         converted = int(pd.to_numeric(raw_df.get("Pris SEK", pd.Series(dtype=float)), errors="coerce").notna().sum())
         fx_note = f" · SEK-omräkning {converted}/{len(raw_df)} aktier"
     st.caption(f"{len(raw_df)} aktier analyserade · {len(filtered)} kvar efter dina val · kursdata {latest_price_date}{market_note}{fx_note}")
+    scan_metrics = st.session_state.get("bq_scan_metrics", {})
+    if isinstance(scan_metrics, dict) and scan_metrics:
+        cache_hits = int(scan_metrics.get("fundamental_persistent_cache", 0) or 0)
+        yahoo_fund = int(scan_metrics.get("fundamental_yahoo", 0) or 0)
+        rejected_early = int(scan_metrics.get("price_rejected_before_fundamentals", 0) or 0)
+        st.caption(
+            f"Bolagsdata denna körning: {cache_hits} från 24-timmarscache · {yahoo_fund} nya Yahoo-hämtningar"
+            + (f" · {rejected_early} aktier stoppades redan på kursdata" if rejected_early else "")
+        )
     if errors:
         with st.expander(f"Datakällan saknade {len(errors)} ticker(s) — övriga analyserades"):
             st.caption("Detta beror oftast på tillfälliga Yahoo-problem, ändrad ticker eller otillräcklig kurshistorik. Det påverkar inte aktier som redan har lästs in.")
@@ -4828,30 +5304,86 @@ def main() -> None:
     unread_signals = int((~signal_history_global["is_read"].astype(bool)).sum()) if not signal_history_global.empty else 0
     save_radar_history(filtered.head(max(20, top_n)), profile)
 
-    nav_overview, nav_discover, nav_watch, nav_analyse, nav_method = st.tabs([
-        "Överblick", "Upptäck", f"Bevakning ({len(watch_df_global)})", "Analysera", "Metod"
-    ])
-    with nav_overview:
+    page = st.radio(
+        "Välj vy",
+        ["Överblick", "Upptäck", f"Bevakning ({len(watch_df_global)})", "Analysera", "Metod"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key="main_page",
+    )
+    if page == "Överblick":
         render_overview(daily_shortlist, filtered, scored, watch_df_global, signal_history_global, unread_signals, profile, idx, elapsed, latest_price_date, market, benchmark_name)
-    with nav_discover:
+    elif page == "Upptäck":
+        st.caption(
+            "Fördjupad kandidatgranskning körs först när du öppnar Upptäck. "
+            "Det gör startsidan snabbare utan att ta bort analysen."
+        )
+        with st.spinner("Fördjupar de starkaste kandidaterna…"):
+            deep_longlist = build_deep_longlist(
+                filtered, pool_size=min(6, len(filtered)), limit=min(5, len(filtered))
+            )
+            deep_longlist = add_data_trust(deep_longlist)
+            short_longlist = build_short_term_longlist(
+                filtered, idx, pool_size=min(8, len(filtered)), limit=min(5, len(filtered))
+            )
+            short_longlist = add_data_trust(short_longlist)
+
+        # Freeze only analyses that were actually run. This preserves point-in-time
+        # history without forcing every homepage visit to perform deep Yahoo requests.
+        ledger_records = build_recommendation_records(
+            short_longlist, "short", APP_VERSION, profile, market, max_records=5
+        ) + build_recommendation_records(
+            deep_longlist, "long", APP_VERSION, profile, market, max_records=5
+        )
+        save_recommendation_records(ledger_records)
+
+        try:
+            relevance_ledger = get_recommendation_records(limit=500)
+            relevance_date = pd.Timestamp.now(tz="UTC").date().isoformat()
+            short_longlist = apply_recommendation_relevance(
+                short_longlist, relevance_ledger, "short", profile, market, relevance_date
+            )
+            deep_longlist = apply_recommendation_relevance(
+                deep_longlist, relevance_ledger, "long", profile, market, relevance_date
+            )
+        except Exception:
+            pass
+
+        try:
+            short_longlist = apply_case_plans(short_longlist, "short")
+            deep_longlist = apply_case_plans(deep_longlist, "long")
+        except Exception:
+            pass
+
+        try:
+            refresh_due_recommendation_outcomes(max_records=6)
+        except Exception:
+            pass
+
         discover_daily, discover_ideas, discover_radar = st.tabs(["Dagens fynd", "Idéflöde", f"Radar ({unread_signals})"])
         with discover_daily:
             st.info(f"Du letar efter: **{discovery_intent}**. {intent_plain_text(discovery_intent)}")
 
             st.subheader("Bästa kortsiktiga case · 1–6 månader")
-            st.caption("Short-Term Alpha 2.0 kräver marknadsbekräftelse: relativ styrka, trend, momentum och aktivitet, kompletterat med färska vinst-/estimatsignaler och katalysatorer där data finns. Ett stort kursfall ger inga pluspoäng i sig.")
+            st.caption("För kortsiktiga köp vill Borsify se flera saker samtidigt: att kursen utvecklas bra jämfört med marknaden, att trenden ser positiv ut och att handeln i aktien är aktiv. Om färska vinstprognoser eller tydliga kommande händelser finns vägs de också in. Ett stort kursfall räcker inte för att aktien ska bli ett köpcase.")
             if short_longlist.empty:
                 st.info("Ingen kortsiktig kandidat kunde analyseras.")
             else:
                 for rank, (_, case) in enumerate(short_longlist.iterrows(), start=1):
                     with st.container(border=True):
-                        s1, s2, s3, s4, s5 = st.columns([2.7, .9, .9, .9, 1.0])
+                        s1, s2 = st.columns([4.0, 1.0])
                         s1.markdown(f"### {rank}. {case.get('Namn', case.get('Ticker'))} · {case.get('Ticker')}")
                         s1.caption(f"{case.get('Sektor','—')} · horisont cirka 1–6 månader")
-                        s2.metric("Short Alpha", f"{_num(case.get('Short Alpha Score')):.0f}/100")
-                        s3.metric("Confidence", f"{_num(case.get('Short Alpha Confidence')):.0f}/100", help="Datatäckning/evidens, inte sannolikheten att kursen stiger.")
-                        s4.metric("Relativ styrka", f"{_num(case.get('Short Relative Strength')):.0f}/100", help=f"Mot vald benchmark: {case.get('Short Relative Text','—')}")
-                        s5.metric("Bekräftelser", f"{int(_num(case.get('Short Confirmation Count')) if np.isfinite(_num(case.get('Short Confirmation Count'))) else 0)}/6")
+                        short_score = _num(case.get("Short Alpha Score"))
+                        s2.metric("Borsifys huvudbetyg", f"{short_score:.0f}/100" if np.isfinite(short_score) else "—")
+                        short_conf = _num(case.get("Short Alpha Confidence"))
+                        short_confirm = int(_num(case.get("Short Confirmation Count"))) if np.isfinite(_num(case.get("Short Confirmation Count"))) else 0
+                        if np.isfinite(short_conf) and short_conf >= 75 and short_confirm >= 4:
+                            st.caption("**Underlag:** gott · flera separata delar bekräftar caset")
+                        elif np.isfinite(short_conf) and short_conf >= 55:
+                            st.caption("**Underlag:** användbart men inte komplett")
+                        else:
+                            st.caption("**Underlag:** begränsat – kontrollera datan extra noga")
                         render_recommendation_price(case)
                         render_recommendation_relevance(case)
                         gate = str(case.get("Short Alpha Gate", "Svag kortsiktig signal"))
@@ -4867,28 +5399,30 @@ def main() -> None:
                         st.write(str(case.get("Short Why Now", "Ingen stark kombination av bekräftande signaler.")))
                         x1, x2 = st.columns(2)
                         with x1:
-                            st.markdown("**Katalysator / revisionsbild**")
-                            st.write(f"{case.get('Catalyst Signal','Ingen tydlig katalysator verifierad')} · {case.get('Inflection Signal','Otillräcklig förändringsdata')}")
+                            st.markdown("**Vad kan få marknaden att ändra syn?**")
+                            st.write(plain_finance_text(f"{case.get('Catalyst Signal','Ingen tydlig händelse verifierad')} · {case.get('Inflection Signal','För lite data om förändringar')}"))
                             if str(case.get("Primary Catalyst", "Ingen verifierad")) != "Ingen verifierad":
-                                st.caption(f"{case.get('Primary Catalyst')} · {case.get('Catalyst Timing','—')}")
+                                st.caption(plain_finance_text(f"{case.get('Primary Catalyst')} · {case.get('Catalyst Timing','—')}"))
                         with x2:
                             st.markdown("**Viktigaste motargumentet**")
-                            st.write(str(case.get("Short Counterargument", "—")))
+                            st.write(plain_finance_text(case.get("Short Counterargument", "—")))
                         cautions = str(case.get("Short Cautions", "—"))
                         vetoes = str(case.get("Short Vetoes", "—"))
                         if vetoes != "—":
-                            st.warning(f"Stoppsignal: {vetoes}")
+                            st.warning(f"Det här kan stoppa köpcaset: {plain_finance_text(vetoes)}")
                         elif cautions != "—":
-                            st.caption(f"Kontrollera: {cautions}")
-                        with st.expander("Visa kortsiktiga delsignaler"):
+                            st.caption(f"Det här behöver kontrolleras: {plain_finance_text(cautions)}")
+                        with st.expander("Visa kortsiktiga delsignaler och underlag"):
                             st.write({
-                                "Trend": case.get("Short Trend", "—"),
+                                "Underlagets detaljpoäng": case.get("Short Alpha Confidence", "—"),
+                                "Antal separata bekräftelser": case.get("Short Confirmation Count", "—"),
                                 "Relativ styrka": case.get("Short Relative Strength", "—"),
-                                "Momentum": case.get("Short Momentum", "—"),
+                                "Trend": case.get("Short Trend", "—"),
+                                "Kursstyrka den senaste tiden": case.get("Short Momentum", "—"),
                                 "Handelsaktivitet": case.get("Short Participation", "—"),
-                                "Vinst/estimat": case.get("Short Revisions", "—"),
-                                "Katalysator": case.get("Short Catalyst", "—"),
-                                "Katalysatorevidens": case.get("Catalyst Evidence", "—"),
+                                "Ändringar i vinstprognoser": plain_finance_text(case.get("Short Revisions", "—")),
+                                "Händelse som kan ändra marknadens syn": plain_finance_text(case.get("Short Catalyst", "—")),
+                                "Underlag för den händelsen": plain_finance_text(case.get("Catalyst Evidence", "—")),
                             })
                         render_case_plan(case)
                         render_case_ai_qa(case, "short", rank)
@@ -4896,53 +5430,117 @@ def main() -> None:
             st.divider()
 
             st.subheader("Bästa långsiktiga case · flerårig djupkontroll")
-            st.caption("Borsify tar först fram INVEST-finalister och kräver därefter stöd från flera oberoende håll: flerårsdata, färsk inflektion, möjlig felprissättning, Bear/Base/Bull-risk/reward och konkret katalysator. En hård motsignal eller för svag datatäckning kan stoppa ett toppcase. Ingen ny viktad mega-score används.")
+            st.caption("Borsify väljer först ut starka långsiktiga kandidater. Därefter krävs stöd från flera olika håll: bolagets utveckling över flera år, om något nyligen blivit bättre eller sämre, om priset verkar rimligt och om det finns en tydlig händelse som kan ändra marknadens syn. En allvarlig varning eller för lite data kan stoppa ett toppcase.")
             if deep_longlist.empty:
                 st.info("Ingen kandidat kunde djupkontrolleras.")
             else:
                 for rank, (_, case) in enumerate(deep_longlist.iterrows(), start=1):
                     with st.container(border=True):
-                        a, b, c, d, e, f = st.columns([2.55, .78, .9, .9, 1.05, .9])
+                        a, b = st.columns([4.0, 1.0])
                         a.markdown(f"### {rank}. {case.get('Namn', case.get('Ticker'))} · {case.get('Ticker')}")
                         a.caption(f"{case.get('Sektor','—')} · flerårsdata t.o.m. {case.get('Rapportdatum','—')}")
-                        b.metric("INVEST", f"{_num(case.get('INVEST Score')):.0f}/100")
+                        invest_score = _num(case.get("INVEST Score"))
+                        b.metric("Borsifys huvudbetyg", f"{invest_score:.0f}/100" if np.isfinite(invest_score) else "—")
                         trap = _num(case.get('Value Trap Risk')); conf = _num(case.get('Deep Confidence'))
                         infl = _num(case.get('Inflection Score'))
-                        c.metric("Value Trap", f"{trap:.0f}/100" if np.isfinite(trap) else "—", help="Högre = fler konkreta varningssignaler i tillgänglig flerårsdata. Inte en sannolikhet.")
-                        d.metric("Inflection", f"{infl:.0f}/100" if np.isfinite(infl) else "—", help="Förändringsindex för kvartalstrender och, där Yahoo har data, EPS-estimatrevideringar. Det är inte en prognos för kursavkastning.")
-                        e.metric("Mispricing", str(case.get("Mispricing Signal", "—")).replace("Tydlig möjlig ", "Tydlig ").replace("Marknaden kan vara mer rimlig än caset", "Krävande"), help="Jämför transparenta avkastnings-/värderingshurdlar med verifierad tillväxt. Detta är inte en sannolikhet eller DCF.")
-                        f.metric("Confidence", f"{conf:.0f}/100" if np.isfinite(conf) else "—", help="Mäter datatäckning och historiklängd, inte sannolikheten att kursen stiger.")
+                        case_conf_preview = _num(case.get("Case Confidence"))
+                        evidence_preview = int(_num(case.get("Case Evidence Count"))) if np.isfinite(_num(case.get("Case Evidence Count"))) else 0
+                        if np.isfinite(case_conf_preview) and case_conf_preview >= 75 and evidence_preview >= 4:
+                            st.caption("**Underlag:** gott · flera oberoende delar stödjer caset")
+                        elif np.isfinite(conf) and conf >= 55:
+                            st.caption("**Underlag:** användbart men kräver fortsatt kontroll")
+                        else:
+                            st.caption("**Underlag:** begränsat")
+                        with st.expander("Visa delbedömningar"):
+                            st.write({
+                                "Risk för värdefälla": round(trap,1) if np.isfinite(trap) else "—",
+                                "Förändringsbedömning": round(infl,1) if np.isfinite(infl) else "—",
+                                "Prisbedömning": plain_finance_text(case.get("Mispricing Signal","—")),
+                                "Underlagets detaljpoäng": round(conf,1) if np.isfinite(conf) else "—",
+                                "Oberoende stöd": evidence_preview,
+                            })
                         render_recommendation_price(case)
                         render_recommendation_relevance(case)
-                        gate = str(case.get('Djupkontroll','Otillräcklig data'))
-                        signal = str(case.get('Inflection Signal','Otillräcklig förändringsdata'))
+                        gate = plain_finance_text(case.get('Djupkontroll','Otillräcklig data'))
+                        signal = plain_finance_text(case.get('Inflection Signal','För lite data om förändringar'))
                         if gate == "Klarar djupkontroll": st.success(f"{gate} · {signal}")
                         elif gate in {"Avstå tills vidare", "Hög value-trap-risk"}: st.error(f"{gate} · {signal}")
                         elif gate == "Otillräcklig data": st.warning(f"{gate} · {signal}")
                         else: st.info(f"{gate} · {signal}")
-                        case_gate = str(case.get("Case Gate", "Bevaka"))
+                        case_gate = plain_finance_text(case.get("Case Gate", "Bevaka"))
                         case_conf = _num(case.get("Case Confidence"))
                         evidence_count = int(_num(case.get("Case Evidence Count"))) if np.isfinite(_num(case.get("Case Evidence Count"))) else 0
                         if case_gate == "Toppcase":
-                            st.success(f"🏆 **{case_gate}** · {evidence_count}/5 oberoende stöd · evidenstäckning {case_conf:.0f}/100")
+                            st.success(f"🏆 **{case_gate}** · flera oberoende stöd")
                         elif case_gate == "Starkt case":
-                            st.success(f"**{case_gate}** · {evidence_count}/5 oberoende stöd · evidenstäckning {case_conf:.0f}/100")
+                            st.success(f"**{case_gate}** · flera delar stödjer samma slutsats")
                         elif case_gate in {"Ej toppcase", "Bevaka – motbevis finns"}:
-                            st.warning(f"**{case_gate}** · {evidence_count}/5 oberoende stöd · evidenstäckning {case_conf:.0f}/100")
+                            st.warning(f"**{case_gate}**")
                         else:
-                            st.info(f"**{case_gate}** · {evidence_count}/5 oberoende stöd · evidenstäckning {case_conf:.0f}/100")
-                        st.caption("Confidence här betyder hur mycket verifierbar evidens analysen vilar på – inte sannolikheten att aktien stiger.")
+                            st.info(f"**{case_gate}**")
+                        st.caption("Detaljer om hur många stöd och hur komplett underlaget är finns under delbedömningarna.")
+                        trust_status = str(case.get("Data Trust status","") or "")
+                        if trust_status:
+                            st.markdown("**Datakoll**")
+                            trust_line = (
+                                f"{trust_status} · källa: {case.get('Data Trust källa','Yahoo Finance via yfinance')} · "
+                                f"kurs: {case.get('Data Trust kursdatum','—')} · {case.get('Data Trust rapportstatus','Rapportdatum saknas')}"
+                            )
+                            if trust_status == "GOTT UNDERLAG":
+                                st.success(trust_line)
+                            elif trust_status == "STOPP":
+                                st.error(trust_line)
+                            else:
+                                st.warning(trust_line)
+
+                        earnings_quality_status = str(case.get("Vinstkvalitet status","") or "")
+                        earnings_quality_score = _num(case.get("Vinstkvalitet"))
+                        if earnings_quality_status:
+                            st.markdown("**Blir vinsten faktiskt pengar?**")
+                            if earnings_quality_status == "STARK VINSTKVALITET":
+                                st.success(
+                                    f"{earnings_quality_status}"
+                                )
+                            elif earnings_quality_status in {"SVAG VINSTKVALITET","KRÄVER KONTROLL"}:
+                                st.warning(
+                                    f"{earnings_quality_status}"
+                                )
+                            else:
+                                st.info(
+                                    f"{earnings_quality_status}"
+                                )
+                            eq_warn = str(case.get("Vinstkvalitet varningar","") or "")
+                            if eq_warn and eq_warn != "inga tydliga varningssignaler i tillgängliga data":
+                                st.caption(eq_warn)
+                            st.caption(
+                                "Borsify jämför redovisad vinst med verkligt kassaflöde och kontrollerar om kundfordringar eller lager växer snabbare än försäljningen."
+                            )
+
+                        operating_change = str(case.get("Operativ förändring","") or "")
+                        operating_quality = _num(case.get("Operativ förändringskvalitet"))
+                        if operating_change:
+                            st.markdown("**Vad förändras i själva bolaget?**")
+                            if operating_change == "Bred fundamental förbättring":
+                                st.success(f"{operating_change}" + (f" · {operating_quality:.0f}/100" if np.isfinite(operating_quality) else ""))
+                            elif operating_change in {"Bred fundamental försämring","Övervägande försämring"}:
+                                st.warning(f"{operating_change}" + (f" · {operating_quality:.0f}/100" if np.isfinite(operating_quality) else ""))
+                            else:
+                                st.info(f"{operating_change}" + (f" · {operating_quality:.0f}/100" if np.isfinite(operating_quality) else ""))
+                            conflict_text = str(case.get("Förändringskonflikt","") or "")
+                            if conflict_text and not conflict_text.startswith("Ingen tydlig konflikt"):
+                                st.warning(conflict_text)
+                            st.caption("Detta bygger på observerad försäljning, marginal, vinst, kassaflöde och skuld när uppgifterna finns – separat från analytikernas prognoser.")
                         st.markdown("**VARFÖR NU?**")
-                        st.write(str(case.get('Catalyst Why Now') or case.get('Varför nu','Ingen tydlig färsk inflektion kan verifieras.')))
-                        cat_signal = str(case.get("Catalyst Signal", "Ingen tydlig katalysator verifierad"))
+                        st.write(plain_finance_text(case.get('Catalyst Why Now') or case.get('Varför nu','Borsify kan inte verifiera någon tydlig ny förändring just nu.')))
+                        cat_signal = plain_finance_text(case.get("Catalyst Signal", "Ingen tydlig händelse som kan ändra marknadens syn har verifierats"))
                         cat_conf = _num(case.get("Catalyst Confidence"))
                         if cat_signal == "Tydlig möjlig katalysator":
-                            st.success(f"**Katalysator:** {case.get('Primary Catalyst','—')} · {case.get('Catalyst Timing','—')} · evidens {cat_conf:.0f}/100")
+                            st.success(f"**Det som kan ändra marknadens syn:** {case.get('Primary Catalyst','—')} · {case.get('Catalyst Timing','—')} · evidens {cat_conf:.0f}/100")
                         elif cat_signal == "Ny risk måste verifieras först":
-                            st.warning(f"**Katalysator/risk:** {cat_signal}. {case.get('Catalyst Warnings','')}")
+                            st.warning(f"**Kommande händelse eller risk:** {cat_signal}. {case.get('Catalyst Warnings','')}")
                         else:
-                            st.info(f"**Katalysator:** {cat_signal} · {case.get('Primary Catalyst','—')} · {case.get('Catalyst Timing','—')}")
-                        st.caption(str(case.get("Catalyst Evidence", "Otillräcklig katalysatordata.")))
+                            st.info(f"**Det som kan ändra marknadens syn:** {cat_signal} · {case.get('Primary Catalyst','—')} · {case.get('Catalyst Timing','—')}")
+                        st.caption(plain_finance_text(case.get("Catalyst Evidence", "Det finns för lite data om kommande händelser.")))
                         st.markdown("**VAD VERKAR PRISET KRÄVA?**")
                         base_req = _num(case.get("Implied EPS CAGR @ exit P/E 20"))
                         verified_growth = _num(case.get("Verifierad tillväxtproxy"))
@@ -4950,78 +5548,89 @@ def main() -> None:
                             st.write(f"Med 10 % årlig avkastningshurdle och P/E 20 om fem år kräver dagens värdering ungefär **{base_req:.1%} årlig EPS-tillväxt**. Verifierad tillväxtproxy ({case.get('Tillväxtkälla','—')}) är **{verified_growth:.1%}**." if np.isfinite(verified_growth) else f"Med 10 % årlig avkastningshurdle och P/E 20 om fem år kräver dagens värdering ungefär **{base_req:.1%} årlig EPS-tillväxt**. Tillräcklig verifierad tillväxtproxy saknas för jämförelse.")
                         else:
                             st.write("Forward P/E eller annan nödvändig värderingsdata saknas, så prisets förväntningshurdle kan inte beräknas robust.")
-                        st.write(f"**Mispricing-bedömning:** {case.get('Mispricing Signal','Kan inte bedömas')}. {case.get('Varför marknaden kan ha fel 2.0','')}")
+                        st.write(f"**Verkar aktien felprissatt?** {plain_finance_text(case.get('Mispricing Signal','Kan inte bedömas'))}. {plain_finance_text(case.get('Varför marknaden kan ha fel 2.0',''))}")
                         if case.get("Inflection Gate Note"):
-                            st.warning(str(case.get("Inflection Gate Note")))
+                            st.warning(plain_finance_text(case.get("Inflection Gate Note")))
                         if case.get("Mispricing Gate Note"):
-                            st.warning(str(case.get("Mispricing Gate Note")))
-                        st.markdown("**RISK/REWARD · BEAR / BASE / BULL**")
+                            st.warning(plain_finance_text(case.get("Mispricing Gate Note")))
+                        st.markdown("**TRE MÖJLIGA FRAMTIDSBILDER**")
                         if str(case.get("Scenario Status", "")) == "OK":
                             s1, s2, s3, s4 = st.columns(4)
-                            s1.metric("Bear", fmt_pct(case.get("Bear upside")), help=f"Antagande: EPS-tillväxt {fmt_pct(case.get('Bear EPS growth'))}, exit P/E {_num(case.get('Bear exit P/E')):.1f}")
-                            s2.metric("Base", fmt_pct(case.get("Base upside")), help=f"Antagande: EPS-tillväxt {fmt_pct(case.get('Base EPS growth'))}, exit P/E {_num(case.get('Base exit P/E')):.1f}")
-                            s3.metric("Bull", fmt_pct(case.get("Bull upside")), help=f"Antagande: EPS-tillväxt {fmt_pct(case.get('Bull EPS growth'))}, exit P/E {_num(case.get('Bull exit P/E')):.1f}")
+                            s1.metric("Svagt scenario", fmt_pct(case.get("Bear upside")), help=f"Antagande: EPS-tillväxt {fmt_pct(case.get('Bear EPS growth'))}, exit P/E {_num(case.get('Bear exit P/E')):.1f}")
+                            s2.metric("Grundscenario", fmt_pct(case.get("Base upside")), help=f"Antagande: EPS-tillväxt {fmt_pct(case.get('Base EPS growth'))}, exit P/E {_num(case.get('Base exit P/E')):.1f}")
+                            s3.metric("Starkt scenario", fmt_pct(case.get("Bull upside")), help=f"Antagande: EPS-tillväxt {fmt_pct(case.get('Bull EPS growth'))}, exit P/E {_num(case.get('Bull exit P/E')):.1f}")
                             asym = _num(case.get("Scenario Asymmetry"))
-                            s4.metric("Asymmetri", f"{asym:.1f}×" if np.isfinite(asym) else "—", help="Base-uppsida relativt Bear-nedsida. En förenklad scenarioindikator, inte en sannolikhet.")
-                            st.caption(f"{case.get('Scenario Verdict','—')} · {case.get('Scenario Risk Label','—')}. Scenarioanalys – inte kursmål eller prognos.")
+                            s4.metric("Uppsida jämfört med nedsida", f"{asym:.1f}×" if np.isfinite(asym) else "—", help="Jämför möjlig uppsida i grundscenariot med möjlig nedsida i det svaga scenariot. Det är bara en förenklad jämförelse, inte en sannolikhet.")
+                            st.caption(plain_finance_text(f"{case.get('Scenario Verdict','—')} · {case.get('Scenario Risk Label','—')}. Det här är möjliga framtidsbilder – inte kursmål eller en prognos."))
                         else:
-                            st.info(f"Scenarioanalys: {case.get('Scenario Note','Otillräcklig data')}")
+                            st.info("Framtidsbilder: " + plain_finance_text(case.get('Scenario Note','Otillräcklig data')))
                         if str(case.get("Case Vetoes", "")).strip() and str(case.get("Case Vetoes")) != "inga hårda motbevis i gate-modellen":
-                            st.warning("**Vad stoppar eller sänker caset:** " + str(case.get("Case Vetoes")))
+                            st.warning("**Det här kan stoppa eller sänka köpcaset:** " + plain_finance_text(case.get("Case Vetoes")))
                         x1, x2, x3 = st.columns(3)
                         x1.markdown("**Varför marknaden kan ha fel**"); x1.write(str(case.get('Varför marknaden kan ha fel','—')))
                         x2.markdown("**Vad data stödjer**"); x2.write(str(case.get('Fleråriga styrkor','—')) + "\n\n" + str(case.get('Positiva förändringar','—')))
-                        x3.markdown("**Devil's Advocate**"); x3.write(str(case.get("Devil's Advocate",'—')) + "\n\n" + str(case.get('Negativa förändringar','—')))
+                        x3.markdown("**Starkaste argumentet emot**"); x3.write(plain_finance_text(case.get("Devil's Advocate",'—')) + "\n\n" + plain_finance_text(case.get('Negativa förändringar','—')))
                         with st.expander("Visa flerårsdata + färska förändringar"):
                             st.write({
-                                "Omsättning CAGR": fmt_pct(case.get("Omsättning CAGR")),
-                                "Vinst CAGR": fmt_pct(case.get("Vinst CAGR")),
-                                "FCF CAGR": fmt_pct(case.get("FCF CAGR")),
+                                "Försäljning · genomsnittlig förändring per år": fmt_pct(case.get("Omsättning CAGR")),
+                                "Vinst · genomsnittlig förändring per år": fmt_pct(case.get("Vinst CAGR")),
+                                "Fritt kassaflöde · genomsnittlig förändring per år": fmt_pct(case.get("FCF CAGR")),
                                 "Flerårig marginalförändring": fmt_pct(case.get("Rörelsemarginal trend")),
                                 "Skuldförändring": fmt_pct(case.get("Skuldförändring")),
-                                "Positiv FCF-andel": fmt_pct(case.get("Positiv FCF-andel")),
-                                "Omsättning YoY senaste kvartal": fmt_pct(case.get("Omsättning YoY senaste kvartal")),
+                                "Andel år med positivt fritt kassaflöde": fmt_pct(case.get("Positiv FCF-andel")),
+                                "Försäljning jämfört med samma kvartal förra året": fmt_pct(case.get("Omsättning YoY senaste kvartal")),
                                 "Omsättningsacceleration": fmt_pct(case.get("Omsättning acceleration")),
                                 "Marginal YoY-förändring": fmt_pct(case.get("Marginal YoY förändring")),
-                                "FCF YoY senaste kvartal": fmt_pct(case.get("FCF YoY senaste kvartal")),
-                                "EPS-estimat förändring": fmt_pct(case.get("EPS-estimat förändring")),
-                                "EPS-estimat jämfört med": case.get("EPS-estimat jämförelseperiod", "—"),
-                                "EPS-revisionsbalans": fmt_pct(case.get("EPS-revisionsbalans")),
-                                "Senaste EPS-överraskning": fmt_pct(case.get("Senaste EPS-överraskning")),
-                                "EPS-hurdle vid exit P/E 15": fmt_pct(case.get("Implied EPS CAGR @ exit P/E 15")),
-                                "EPS-hurdle vid exit P/E 20": fmt_pct(case.get("Implied EPS CAGR @ exit P/E 20")),
-                                "EPS-hurdle vid exit P/E 25": fmt_pct(case.get("Implied EPS CAGR @ exit P/E 25")),
-                                "FCF growth hurdle": fmt_pct(case.get("FCF growth hurdle")),
-                                "Verifierad tillväxtproxy": fmt_pct(case.get("Verifierad tillväxtproxy")),
+                                "Fritt kassaflöde jämfört med samma kvartal förra året": fmt_pct(case.get("FCF YoY senaste kvartal")),
+                                "Andel senaste kvartal med försäljningstillväxt": fmt_pct(case.get("Senaste kvartal positiv omsättning YoY andel")),
+                                "Andel senaste kvartal med positivt fritt kassaflöde": fmt_pct(case.get("Senaste kvartal positiv FCF andel")),
+                                "Skuld/nettoskuld jämfört med för ett år sedan": fmt_pct(case.get("Senaste skuld/nettoskuld YoY")),
+                                "Operativ förändring": str(case.get("Operativ förändring","—")),
+                                "Vinstkvalitet": str(case.get("Vinstkvalitet status","—")),
+                                "Kassaflöde / redovisad vinst, senaste": fmt_num(case.get("Kassaflöde/vinst senaste"),2),
+                                "Kassaflöde / redovisad vinst, median": fmt_num(case.get("Kassaflöde/vinst median"),2),
+                                "Fritt kassaflöde / vinst, median": fmt_num(case.get("FCF/vinst median"),2),
+                                "Förändring kundfordringar relativt försäljning": fmt_pct(case.get("Kundfordringar/omsättning trend")),
+                                "Förändring lager relativt försäljning": fmt_pct(case.get("Lager/omsättning trend")),
+                                "Konflikt mellan bolagsdata och analytiker": str(case.get("Förändringskonflikt","—")),
+                                "Förändring i analytikernas vinstprognos per aktie": fmt_pct(case.get("EPS-estimat förändring")),
+                                "Vinstprognosen jämförs med": case.get("EPS-estimat jämförelseperiod", "—"),
+                                "Balans mellan höjda och sänkta vinstprognoser": fmt_pct(case.get("EPS-revisionsbalans")),
+                                "Senaste vinst per aktie jämfört med förväntan": fmt_pct(case.get("Senaste EPS-överraskning")),
+                                "Krav på årlig vinsttillväxt om P/E är 15 om fem år": fmt_pct(case.get("Implied EPS CAGR @ exit P/E 15")),
+                                "Krav på årlig vinsttillväxt om P/E är 20 om fem år": fmt_pct(case.get("Implied EPS CAGR @ exit P/E 20")),
+                                "Krav på årlig vinsttillväxt om P/E är 25 om fem år": fmt_pct(case.get("Implied EPS CAGR @ exit P/E 25")),
+                                "Krav på tillväxt i fritt kassaflöde": fmt_pct(case.get("FCF growth hurdle")),
+                                "Tillväxt Borsify faktiskt kan se": fmt_pct(case.get("Verifierad tillväxtproxy")),
                                 "Tillväxtkälla": case.get("Tillväxtkälla", "—"),
-                                "Mispricing-stöd": case.get("Mispricing Evidence", "—"),
-                                "Mispricing-motbevis": case.get("Mispricing Cautions", "—"),
-                                "Case Gate": case.get("Case Gate", "—"),
+                                "Det som talar för att priset kan vara fel": case.get("Mispricing Evidence", "—"),
+                                "Det som talar emot att priset är fel": case.get("Mispricing Cautions", "—"),
+                                "Slutlig kontroll": case.get("Case Gate", "—"),
                                 "Oberoende stöd": case.get("Case Supports", "—"),
                                 "Neutrala/oklara delar": case.get("Case Neutrals", "—"),
                                 "Hårda motbevis": case.get("Case Vetoes", "—"),
-                                "Case Confidence": case.get("Case Confidence", "—"),
-                                "Katalysatorsignal": case.get("Catalyst Signal", "—"),
-                                "Primär katalysator": case.get("Primary Catalyst", "—"),
-                                "Katalysator – tid": case.get("Catalyst Timing", "—"),
-                                "Katalysator – möjlig effekt": case.get("Catalyst Effect", "—"),
-                                "Katalysator – evidens": case.get("Catalyst Evidence", "—"),
-                                "Katalysatorvarningar": case.get("Catalyst Warnings", "—"),
-                                "Bear EPS growth": fmt_pct(case.get("Bear EPS growth")),
-                                "Bear exit P/E": case.get("Bear exit P/E", "—"),
-                                "Bear upp-/nedsida": fmt_pct(case.get("Bear upside")),
-                                "Base EPS growth": fmt_pct(case.get("Base EPS growth")),
-                                "Base exit P/E": case.get("Base exit P/E", "—"),
-                                "Base upp-/nedsida": fmt_pct(case.get("Base upside")),
-                                "Bull EPS growth": fmt_pct(case.get("Bull EPS growth")),
-                                "Bull exit P/E": case.get("Bull exit P/E", "—"),
-                                "Bull upp-/nedsida": fmt_pct(case.get("Bull upside")),
-                                "Scenarioasymmetri": case.get("Scenario Asymmetry", "—"),
+                                "Hur bra underlaget är": case.get("Case Confidence", "—"),
+                                "Finns en händelse som kan ändra marknadens syn?": case.get("Catalyst Signal", "—"),
+                                "Viktigaste möjliga händelsen": case.get("Primary Catalyst", "—"),
+                                "Ungefär när kan den hända?": case.get("Catalyst Timing", "—"),
+                                "Vad skulle den kunna förändra?": case.get("Catalyst Effect", "—"),
+                                "Underlag för händelsen": case.get("Catalyst Evidence", "—"),
+                                "Osäkerheter kring händelsen": case.get("Catalyst Warnings", "—"),
+                                "Svagt scenario · vinsttillväxt per aktie": fmt_pct(case.get("Bear EPS growth")),
+                                "Svagt scenario · P/E om fem år": case.get("Bear exit P/E", "—"),
+                                "Svagt scenario · möjlig utveckling": fmt_pct(case.get("Bear upside")),
+                                "Grundscenario · vinsttillväxt per aktie": fmt_pct(case.get("Base EPS growth")),
+                                "Grundscenario · P/E om fem år": case.get("Base exit P/E", "—"),
+                                "Grundscenario · möjlig utveckling": fmt_pct(case.get("Base upside")),
+                                "Starkt scenario · vinsttillväxt per aktie": fmt_pct(case.get("Bull EPS growth")),
+                                "Starkt scenario · P/E om fem år": case.get("Bull exit P/E", "—"),
+                                "Starkt scenario · möjlig utveckling": fmt_pct(case.get("Bull upside")),
+                                "Uppsida jämfört med nedsida": case.get("Scenario Asymmetry", "—"),
                                 "Fleråriga varningar": case.get("Fleråriga varningar", "—"),
                             })
                         render_case_plan(case)
                         render_case_ai_qa(case, "long", rank)
-                st.caption("Djupkontrollen kan sänka ett billigt bolag om kassaflöde, marginaler, omsättning, skuld, färska estimat eller prisets framtidskrav utvecklas fel. Case Gate kräver flera oberoende stöd och låter motbevis väga tungt. Bear/Base/Bull visar scenarioasymmetri med synliga antaganden; det är inte kursmål, sannolikheter eller en DCF. Saknade data lämnas som saknade.")
+                st.caption("Ett lågt aktiepris eller lågt P/E räcker inte. Borsify kan sänka ett bolag om pengar in och ut, lönsamhet, försäljning, skuld eller färska prognoser utvecklas åt fel håll. Analysen kräver flera olika styrkor samtidigt och låter tydliga varningar väga tungt. De tre framtidsbilderna är exempel på vad som kan hända – inte kursmål eller sannolikheter.")
 
             st.divider()
             render_discovery_shortlist(filtered, discovery_intent)
@@ -5165,17 +5774,17 @@ def main() -> None:
                         st.success("E-postinställningarna är sparade.")
                 st.caption("Leverans sker från den schemalagda serverkörningen. Resend/API-nyckeln ligger bara i GitHub Secrets/servermiljö, aldrig i klientappen.")
 
-    with nav_watch:
+    elif page.startswith("Bevakning"):
         st.subheader("Min bevakning")
         watch_meta = watch_meta_global
         watched = watched_global
         if st.session_state.get("bq_case_breaker_migration_needed"):
-            st.info("Case-breaker är tillgängligt, men Supabase behöver v2.21-migreringen innan reglerna kan sparas i molnet. Övrig bevakning fungerar som tidigare.")
+            st.info("Regler för när du ska tänka om fungerar i appen, men databasen behöver uppdateras innan de kan sparas permanent i molnet. Övrig bevakning fungerar som tidigare.")
         if not watched:
             st.info("Bevakningslistan är tom. Lägg till en aktie från detaljanalysen.")
         else:
             st.markdown("#### Case Alert · intern utveckling + nya bolagshändelser")
-            st.caption("Case Alert kopplar ihop Case Journal, dina egna case-breakers och den publika mediabevakningen. Media ändrar aldrig Borsify Score. Rubriker används som varnings- och läsuppslag och ska verifieras i originalkällan.")
+            st.caption("Bevakningen kopplar ihop dina egna anteckningar, dina regler för när du ska tänka om och nyhetsrubriker. Nyheter ändrar aldrig Borsifys betyg automatiskt. Rubriker används bara som tips om vad du kan behöva läsa vidare om.")
             refresh_watch_media = st.button("Kontrollera senaste media för bevakade case", key="watch_case_alert_refresh", use_container_width=False)
             if refresh_watch_media:
                 watch_feed, watch_feed_errors = fetch_idea_flow_cached()
@@ -5250,7 +5859,7 @@ def main() -> None:
                     else:
                         st.caption("Case Journal börjar byggas när aktien har analyserats och sparats i bevakningen.")
 
-                    st.markdown("**Case-breaker · vad skulle få dig att tänka om?**")
+                    st.markdown("**Vad skulle få dig att tänka om kring aktien?**")
                     st.caption("Sätt bara gränser som faktiskt skulle få dig att ompröva caset. 0 betyder att regeln är avstängd. Det här är en kontrollista, inte en automatisk säljorder.")
                     b1, b2 = st.columns(2)
                     breaker_min_score = b1.number_input("Minsta Borsify Score", 0.0, 100.0, float(_num(meta.get("breaker_min_score"))) if np.isfinite(_num(meta.get("breaker_min_score"))) else 0.0, 1.0, key=f"breaker_score_{sym}")
@@ -5328,8 +5937,8 @@ def main() -> None:
                 clear_watchlist()
                 st.rerun()
         st.caption("Inloggad användare: bevakning, scorehistorik, radarhistorik och signalhistorik lagras i Supabase. Gäst/lokalt läge: SQLite används på aktuell dator.")
-    with nav_analyse:
-        analyse_market, analyse_edge = st.tabs(["Marknad", "Edge Lab"])
+    elif page == "Analysera":
+        analyse_market, analyse_edge = st.tabs(["Marknad", "Historiska tester"])
         with analyse_market:
             st.subheader("Marknad · hela analysuniversumet")
             st.caption("Här finns rålistan för jämförelser och egen analys. Överblick och Dagens fynd är de rekommenderade startpunkterna.")
@@ -5337,7 +5946,7 @@ def main() -> None:
         with analyse_edge:
             default_edge_symbol = str(filtered.iloc[0]["Ticker"]) if not filtered.empty else "INVE-B.ST"
             render_edge_lab(default_edge_symbol, list(symbols), benchmark_symbol, benchmark_name)
-    with nav_method:
+    else:  # Metod
         w = PROFILE_WEIGHTS[profile]
         st.subheader("Så räknas Borsify Score")
         with st.expander("Risk på vanlig svenska · det viktigaste före ett köp", expanded=False):

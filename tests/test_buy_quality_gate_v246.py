@@ -1,13 +1,27 @@
+import numpy as np
 import pandas as pd
 from buy_quality_gate import assess_buy_gate, eligible_buys
 from horizon_rankings import add_horizon_scores, top_three
+
+def _history():
+    idx=pd.date_range(end=pd.Timestamp.today().normalize(),periods=80,freq="B")
+    close=np.linspace(90,100,80)
+    high=close+1.2
+    low=close-1.0
+    high[-12]=106
+    return pd.DataFrame({"Open":close-.2,"High":high,"Low":low,"Close":close},index=idx)
 
 def strong_row(ticker="GOOD"):
     return {
         "Ticker": ticker,
         "Namn": ticker,
         "Universe QC": "VERIFIERAD",
+        "Universe QC Score": 95,
         "Datatäckning": .9,
+        "Pris": 100.0,
+        "Prisdatum": pd.Timestamp.today().date().isoformat(),
+        "Skuld/eget kapital": 35,
+        "_history": _history(),
         "Riskflaggor": "—",
         "Dagsförändring": .025,
         "1 mån": .12,

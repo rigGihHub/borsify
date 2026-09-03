@@ -97,11 +97,29 @@ def evolve_qc_state(
 
 def scan_health(success_count: int, attempted_count: int) -> dict[str, Any]:
     attempted=max(0,int(attempted_count))
-    success=max(0,int(success_count))
+    success=max(0,min(int(success_count), attempted if attempted else int(success_count)))
     ratio=(success/attempted) if attempted else 1.0
-    # Prevent a Yahoo/provider outage from quarantining hundreds of healthy tickers.
-    healthy = attempted == 0 or success >= 3 or ratio >= 0.20
-    return {"success_ratio":ratio, "provider_healthy_enough":healthy}
+
+    # Safety first: a provider-wide outage must never create hundreds of ticker strikes.
+    # Small batches need at least half of requested symbols to work. Larger batches use
+    # a 20% floor, so 3/586 is correctly treated as a provider problem while 20/100 is
+    # enough evidence that individual missing symbols may genuinely be broken.
+    if attempted == 0:
+        healthy = True
+        rule = "ingen hämtning gjord"
+    elif attempted <= 10:
+        required = max(1, math.ceil(attempted * 0.50))
+        healthy = success >= required
+        rule = f"minst {required} av {attempted} behöver fungera"
+    else:
+        healthy = ratio >= 0.20
+        rule = "minst 20 % av hämtningarna behöver fungera"
+
+    return {
+        "success_ratio": ratio,
+        "provider_healthy_enough": bool(healthy),
+        "provider_health_rule": rule,
+    }
 
 def quarantine_summary(states: pd.DataFrame, now: datetime | None = None) -> dict[str,int]:
     if states is None or states.empty:

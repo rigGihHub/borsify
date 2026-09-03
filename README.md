@@ -530,12 +530,12 @@ SQLite fungerar direkt. För Supabase krävs de nya tabellerna `recommendation_l
 utan ledger i molnet och visar migration-needed-status internt i stället för att krascha.
 
 
-## v2.47.0 – Hotfix för djupanalys
+## v2.51.0 – Hotfix för djupanalys
 
 Byter scalar cell-assignments i deep/short finalist pipelines från `DataFrame.loc` till `DataFrame.at`. Detta gör att list-/dictvärden som Catalyst Candidates och stöd/veto-listor lagras som ett objekt i en cell i stället för att Pandas försöker tolka värdet som en kolumniterabel. Fixar kraschen `Must have equal len keys and value when setting with an iterable`.
 
 
-## v2.47.0 – Pandas iterable assignment hotfix
+## v2.51.0 – Pandas iterable assignment hotfix
 
 Hotfix for Streamlit/Pandas runtime crash in deep and short finalist builders.
 `.at` alone was insufficient when a new column did not yet exist because Pandas
@@ -544,7 +544,7 @@ created first as object dtype, then populated cell-by-cell. This safely supports
 lists and dictionaries such as Case Supports, Catalyst Candidates and similar
 structured evidence fields.
 
-## v2.47.0 – Runtime hotfix for structured assessment fields
+## v2.51.0 – Runtime hotfix for structured assessment fields
 
 Replaced all cell-by-cell writes of deep/short assessment dictionaries with a separate
 object-typed DataFrame followed by index join. This completely avoids Pandas scalar
@@ -552,7 +552,7 @@ assignment for list/dict fields and fixes the Streamlit Cloud crash path shown a
 build_deep_longlist line 891.
 
 
-## v2.47.0 – Fråga Borsify AI på varje rekommendation
+## v2.51.0 – Fråga Borsify AI på varje rekommendation
 
 Varje kort- och långsiktig rekommendation har nu en egen fråga/svar-yta:
 `Fråga Borsify AI om rekommendationen`.
@@ -584,7 +584,7 @@ gränssnittet förklarar att extern AI inte är aktiverad. API-nyckeln skickas a
 webbläsaren eller lagras i GitHub.
 
 
-## v2.47.0 – Aktuell kurs på alla rekommendationer
+## v2.51.0 – Aktuell kurs på alla rekommendationer
 
 Alla rekommendationskort visar nu senaste tillgängliga kurs tydligt direkt i headern,
 tillsammans med dagsförändring där den finns. Detta gäller både Short Alpha 1–6 månader,
@@ -594,7 +594,7 @@ Syftet är att användaren direkt ska kunna bedöma om ett case fortfarande är 
 och undvika att behöva öppna detaljanalysen bara för att se priset.
 
 
-## v2.47.0 – AI-kostnadsmätare
+## v2.51.0 – AI-kostnadsmätare
 
 Borsify visar nu uppskattad kostnad för varje lyckad AI-fråga och ackumulerad kostnad
 för innevarande kalendermånad. Beräkningen använder faktisk tokenanvändning som returneras
@@ -604,14 +604,14 @@ Mätaren visar USD och, när USD/SEK kan hämtas via Borsifys befintliga Yahoo-F
 även ungefärlig kostnad i SEK.
 
 Inloggade Supabase-användares usage sparas i den nya tabellen `ai_usage`.
-Kör v2.47.0-delen i `supabase_schema.sql` för molnpersistens. Om tabellen saknas eller
+Kör v2.51.0-delen i `supabase_schema.sql` för molnpersistens. Om tabellen saknas eller
 användaren inte är inloggad faller appen säkert tillbaka till lokal SQLite.
 
 Kostnadsmätaren är en uppskattning, inte OpenAI-fakturan. Den lagrar endast lyckade
 Borsify-AI-anrop och prisar dem enligt den taxa som finns i appversionen.
 
 
-## v2.47.0 – Prisrelevans i AI + renare rekommendationskort
+## v2.51.0 – Prisrelevans i AI + renare rekommendationskort
 
 - Aktuell kurs visas nu på en egen fullbreddsrad på kort- och långsiktiga rekommendationer
   för att undvika Streamlits avkortning av exempelvis `134,00 SEK`.
@@ -627,7 +627,7 @@ Borsify-AI-anrop och prisar dem enligt den taxa som finns i appversionen.
   USD, tokens och modell ligger bakom detaljexpanders.
 
 
-## v2.47.0 – Rekommendationens relevans nu
+## v2.51.0 – Rekommendationens relevans nu
 
 Varje kort- och långsiktigt finalistcase jämförs nu med den senaste frysta
 rekommendationen från en tidigare dag för samma ticker, horisont, profil och marknad.
@@ -645,7 +645,7 @@ den tidigare frysta rekommendationen. En kursuppgång gör inte automatiskt akti
 Om kursen har stigit tydligt utan motsvarande förstärkning i modellstödet markeras i
 stället att värderingen bör kontrolleras på nytt.
 
-Från v2.47.0 fryser Recommendation Ledger dessutom relevanta värderingsfält
+Från v2.51.0 fryser Recommendation Ledger dessutom relevanta värderingsfält
 (P/E, Forward P/E, P/B, EV/EBITDA, FCF-yield m.fl.) så framtida jämförelser kan beskriva
 om värderingsbilden faktiskt har förändrats, inte bara kursen.
 
@@ -653,7 +653,7 @@ Samma dags frysta poster används aldrig som jämförelse för samma dags rerun,
 förhindrar meningslös självjämförelse.
 
 
-## v2.47.0 – Case Plan: vad måste hända härifrån?
+## v2.51.0 – Case Plan: vad måste hända härifrån?
 
 Varje kort- och långsiktigt finalistcase får nu en explicit uppföljningsplan:
 - Tes
@@ -680,7 +680,7 @@ Case-planen skickas också med till Borsify AI så användaren kan fråga varfö
 bekräftelse, varningssignal eller case-breaker är viktig.
 
 
-## v2.47.0 – Global startsida med fyra Top 3-listor + Mina aktieköp
+## v2.51.0 – Global startsida med fyra Top 3-listor + Mina aktieköp
 
 Överblick börjar nu med fyra separata topp 3-rankningar:
 1. 1–2 dagar / Daytrader
@@ -705,10 +705,10 @@ modellstatus och Borsifys skäl. Statusarna är BEHÅLL, BEVAKA, VINSTSÄKRA? oc
 Detta är en modellbaserad beslutsindikator och inte personlig finansiell rådgivning.
 
 Innehav sparas lokalt i SQLite eller privat per inloggad användare i Supabase efter att
-v2.47.0-migreringen i supabase_schema.sql har körts.
+v2.51.0-migreringen i supabase_schema.sql har körts.
 
 
-## v2.47.0 – Landfilter i Topplistor + bredare Avanza-inspirerad marknadstäckning
+## v2.51.0 – Landfilter i Topplistor + bredare Avanza-inspirerad marknadstäckning
 
 De fyra Top 3-listorna på Överblick har nu ett gemensamt multiselect-filter för land.
 Användaren kan välja ett eller flera länder och samtliga fyra horisonter räknas om inom
@@ -729,7 +729,7 @@ Italien, Spanien, Schweiz och Portugal. Befintliga listor för Sverige, USA, Nor
 Tyskland och Storbritannien finns kvar.
 
 
-## v2.47.0 – Avanza Universe v1
+## v2.51.0 – Avanza Universe v1
 
 Borsifys marknadsuniversum har flyttats till en separat skalbar katalog
 `avanza_universe.csv` med ticker, land och nivå. Första breda versionen innehåller
@@ -751,7 +751,7 @@ Arkitekturen gör att katalogen kan växa mot tusentals värdepapper utan att al
 behöver hårdkodas i app.py.
 
 
-## v2.47.0 – Universe Quality Control
+## v2.51.0 – Universe Quality Control
 
 Det breda marknadsuniversumet får nu en separat datakvalitetskontroll innan en aktie
 tillåts delta i ranking. Kontrollen bedömer bland annat:
@@ -779,7 +779,7 @@ QC är strikt separerad från investeringsbedömningen: VERIFIERAD betyder att d
 att använda, inte att aktien är ett bra köp.
 
 
-## v2.47.0 – Persistent Universe QC & Quarantine
+## v2.51.0 – Persistent Universe QC & Quarantine
 
 Universe Quality Control är nu beständig över tid i stället för att börja om från noll
 vid varje scanning.
@@ -810,7 +810,7 @@ och scanens träffgrad. SQLite fungerar lokalt. För beständig molnlagring per 
 ska v2.45-migreringen i `supabase_schema.sql` köras.
 
 
-## v2.47.0 – Buy Quality Gate
+## v2.51.0 – Buy Quality Gate
 
 De fyra horisontlistorna är nu strikt köp-orienterade. Borsify rankar inte längre bara
 de tre högsta relativa kandidaterna och kallar dem Top 3. Varje kandidat måste först
@@ -835,7 +835,7 @@ modellen behöver fortfarande valideras point-in-time i Edge Lab innan den kan b
 som en verifierad trading-edge.
 
 
-## v2.47.0 – Daytrader Validation Lab
+## v2.51.0 – Daytrader Validation Lab
 
 Edge Lab har fått en separat valideringsmotor för förstasidans köpmodell
 "1–2 dagar · Daytrader".
@@ -873,3 +873,591 @@ Ytterligare begränsningar som visas i UI:
 
 Detta steg ändrar INTE produktionsvikterna automatiskt. Syftet är att falsifiera eller
 stödja modellen innan en framtida kalibrering görs.
+
+
+## v2.51.0 – Bred Daytrader-validering + enklare svenska
+
+Daytrader Validation Lab kan nu testa samma frysta 1–2-dagarsregel på flera aktier
+samtidigt. Användaren väljer antal aktier, historiklängd, 1 eller 2 handelsdagars
+innehavstid och en total kostnad för köp + försäljning.
+
+Resultatet visas både samlat, per land och per aktie. Syftet är att se om signalen
+verkar fungera brett i stället för att dra slutsatser från enstaka aktier. Ett positivt
+historiskt resultat beskrivs alltid försiktigt och får inte framställas som garanti för
+framtida vinst.
+
+v2.48 gör också en första bred språkgenomgång av användargränssnittet. Exempel:
+- "ETF/proxy/totalavkastningsindex" i världsmarknadsförklaringen har ersatts med en
+  konkret förklaring av att fonden VT äger aktier från många länder och används som en
+  ungefärlig jämförelse.
+- momentum förklaras som hur kursen utvecklats den senaste tiden
+- fundamentaldata skrivs som bolagsuppgifter där det går
+- profit factor visas som vinst/förlust-kvot
+- drawdown visas som största fall från en tidigare topp
+- OOS/walk-forward förklaras som nya testperioder med oförändrade regler
+- spread/slippage förklaras som att verkligt köp/säljpris kan bli lite sämre än det
+  pris man ser på skärmen
+
+Grundregel för Borsifys UI: en person som aldrig köpt en aktie ska kunna förstå
+huvudbudskapet utan att öppna en ordlista. Tekniska termer kan finnas i fördjupning
+när de behövs, men ska då förklaras direkt på vanlig svenska.
+
+
+## v2.51.0 – Enkel svenska i hela Borsify
+
+Den här versionen gör en systematisk språkgenomgång av appens huvuddelar:
+Överblick, Upptäck, Bevakning, Analysera och Metod.
+
+Målet är att huvudbudskapet ska gå att förstå även för en person som aldrig har köpt
+en aktie och inte känner till ekonomiska facktermer.
+
+Exempel på ändringar:
+- Buy Quality Gate visas som Borsifys minimikrav för köp.
+- Edge Lab visas som Historiska tester.
+- walk-forward/OOS förklaras som senare testperioder där reglerna inte ändras för att
+  göra resultatet snyggare.
+- benchmark förklaras som jämförelse med marknaden.
+- Case-breaker visas som "Vad skulle få dig att tänka om kring aktien?".
+- Bear/Base/Bull visas som Svagt scenario, Grundscenario och Starkt scenario.
+- Value Trap visas som risk för värdefälla.
+- Mispricing beskrivs som frågan om aktiens pris kan vara fel.
+- Confidence beskrivs som hur bra underlaget är.
+- katalysator beskrivs i huvudflödet som en händelse som kan ändra marknadens syn.
+- EPS förklaras som vinst per aktie och FCF som fritt kassaflöde i fördjupade texter.
+- CAGR visas som genomsnittlig förändring per år.
+- tekniska portfölj- och backtesttexter har skrivits om med konkreta exempel på vad
+  testet faktiskt gör.
+
+En ny hjälpfunktion `plain_finance_text()` förenklar även text som skapas av analys-
+motorerna innan den visas. Beräkningarna och de interna datanycklarna ändras inte.
+
+Tekniska termer får fortfarande finnas i metodfördjupning när de behövs för
+transparens, men de ska inte vara ett krav för att förstå Borsifys slutsats.
+
+
+## v2.50.0 – Säkrare datakontroll + skarpare köpkrav
+
+### Datakällan får inte sätta aktier i karantän av misstag
+Den tidigare skyddsregeln kunde bedöma en stor hämtning som tillräckligt frisk om bara
+tre aktier lyckades, även om hundratals andra misslyckades. Exempel: 3 av 586 kunde
+felaktigt räcka.
+
+Ny regel:
+- 0 försök: neutralt, inget fel.
+- högst 10 aktier: minst 50 procent måste fungera.
+- fler än 10 aktier: minst 20 procent måste fungera.
+- om datakällan inte klarar detta behandlas saknade aktier som ett tillfälligt
+  datakälleproblem och får ingen felmarkering som kan leda till karantän.
+
+Detta gör persistent QC fail-safe vid breda Yahoo-problem.
+
+### Hårdare krav för att kallas KÖPCASE
+Köpgränserna höjs:
+- 1–2 dagar: 66 -> 68
+- 1 vecka–3 månader: 64 -> 66
+- 1–5 år: 63 -> 65
+- mycket lång sikt: 66 -> 68
+
+Borsify kräver dessutom tillräckligt med relevant data för respektive tidshorisont.
+En hög score som till stor del bygger på neutrala standardvärden för saknade data får
+inte längre lika lätt bli ett köpcase.
+
+Krav på underlag:
+- 1–2 dagar: minst 4 av 5 centrala kurs/handelsmått.
+- 1 vecka–3 månader: minst 4 av 5 relevanta trend/kvalitetsmått.
+- 1–5 år: minst 3 av 4 kärnmått och minst 55 procent total datatäckning.
+- mycket lång sikt: minst 4 av 5 kvalitetsmått och minst 60 procent datatäckning.
+
+Dessutom:
+- 1–3 månader måste ha minst en tydlig positiv bekräftelse via positiv tremånaders-
+  utveckling eller god bolagskvalitet.
+- 1–5 år måste ha en tillräckligt stark långsiktig kärna.
+- mycket lång sikt kräver minst två tydliga tecken på uthållig kvalitet.
+
+Topplistorna heter nu "Bästa köp" och fylls fortfarande aldrig ut med svagare kandidater.
+Noll godkända kandidater betyder noll köp.
+
+Viktigt: de skarpare gränserna är kvalitetsregler, inte bevisad historisk alpha.
+De ska utvärderas mot rekommendationsutfall innan ytterligare kalibrering.
+
+
+## v2.51.0 – Köpkorten svarar på fyra frågor
+
+Topplistornas kort har gjorts om för att hjälpa en oerfaren användare fatta vad
+Borsify faktiskt menar utan att först tolka poäng, RSI eller andra börsord.
+
+Varje KÖPCASE svarar nu direkt på:
+1. Varför köpa?
+2. Varför just nu?
+3. Största risken.
+4. Vad skulle få Borsify att ändra sig?
+
+Svar byggs regelbaserat från den data Borsify redan har. Funktionen hittar inte på
+nyheter, framtida händelser eller bolagsfakta.
+
+De mer tekniska siffrorna finns kvar, men ligger bakom "Visa siffrorna bakom
+bedömningen". Där finns Borsifys betyg för tidshorisonten, datakvalitet och relevanta
+kurs-/kvalitetsmått.
+
+Detta ändrar inte rankingformeln eller köpgränserna från v2.50.0. Syftet är att göra
+beslutsunderlaget begripligare och låta användaren börja med slutsatsen och sedan
+öppna siffrorna vid behov.
+
+
+## v2.52.0 – Nära köpsignal + undvik att jaga aktier
+
+Borsify kan nu visa aktier som ännu inte klarar köpkraven men ligger nära. Dessa visas
+separat som "Nära köpsignal" och får aldrig blandas ihop med riktiga KÖPCASE.
+
+För att få visas som nära köp måste aktien:
+- ligga högst fem poäng under den riktiga köpgränsen,
+- sakna allvarliga data- och riskproblem,
+- inte redan vara kraftigt översträckt,
+- fortfarande vara underkänd av det vanliga köpfiltret.
+
+Borsify visar sedan "Vad saknas?" med högst två konkreta saker som behöver förbättras,
+till exempel högre handelsaktivitet, förbättrad kort trend eller starkare långsiktig
+helhetsbedömning.
+
+### För sent att köpa?
+En ny regelbaserad kontroll letar efter tecken på att aktien redan rört sig ovanligt
+långt, till exempel:
+- extremt hög kortsiktig kursstyrka,
+- mer än 7 procent upp på en dag,
+- mer än 25 procent upp på en månad,
+- mer än 55 procent upp på tre månader,
+- kurs långt över sin långsiktiga trend.
+
+För 1–2 dagar och 1 vecka–3 månader kan en tydligt översträckt aktie stoppas från
+köplistan trots ett högt betyg. För längre tidshorisonter visas i stället en tydlig
+varning så att stark långsiktig kvalitet inte försvinner enbart på grund av en snabb
+kursuppgång.
+
+Detta är en riskkontroll, inte en prognos om att kursen måste falla. Trösklarna är
+avsiktligt försiktiga och ska senare utvärderas mot sparade rekommendationsutfall
+innan de kalibreras.
+
+
+## v2.53.0 – Risk jämfört med möjlig uppsida
+
+För de två kortaste tidshorisonterna bygger Borsify nu en regelbaserad handelsplan
+från faktisk kurshistorik. AI används inte för att skapa några prisnivåer.
+
+Planen innehåller när tillräcklig data finns:
+- ett ungefärligt köpområde med dagens kurs som utgångspunkt,
+- en nivå där den kortsiktiga analysen kan betraktas som fel,
+- första och eventuellt andra tidigare kurstopp ovanför dagens pris,
+- avståndet till fel-nivån,
+- möjlig uppsida dividerad med möjlig nedsida.
+
+Fel-nivån utgår från en nylig botten och aktiens normala dagsrörelse. Modellen begränsar
+också hur långt bort nivån får hamna så att en gammal extrem botten inte skapar ett
+meningslöst upplägg.
+
+Målnivåerna måste vara priser som aktien faktiskt tidigare har handlats vid. Om ingen
+tidigare tydlig kurstopp finns ovanför dagens kurs visar Borsify "Ingen tydlig målnivå"
+i stället för att konstruera en artificiell riktkurs.
+
+Status:
+- Attraktivt: minst 2,0 gånger möjlig uppsida per riskenhet till första nivån.
+- Godkänt: minst 1,4 gånger.
+- Svagt: minst 1,0 gånger.
+- Dåligt: under 1,0 gånger.
+
+Risk/uppsida används som sekundär sortering mellan redan godkända kort- och
+medelfristiga köpcase. Den får inte ensam göra en underkänd aktie till KÖPCASE.
+
+Viktigt: nivåerna är tekniska referenspunkter från historisk kursdata, inte prognoser,
+riktkurser eller garantier. Trösklarna är ännu inte bevisade och bör senare utvärderas
+mot Borsifys sparade rekommendationsutfall.
+
+
+## v2.54.0 – Relativ styrka + sektorstyrka
+
+För korta och medelfristiga köpcase jämför Borsify nu aktiens kursutveckling med:
+- andra aktier på samma marknad i den aktuella körningen,
+- andra aktier i samma sektor och på samma marknad,
+- hur sektorn som helhet går jämfört med marknaden.
+
+Exempel: en aktie som har stigit 5 procent är inte automatiskt stark om jämförbara
+aktier på samma marknad har stigit mer. Borsify försöker därför skilja verklig
+relativ styrka från en allmän börsuppgång.
+
+Jämförelsen använder medianen för de aktier som faktiskt finns i den aktuella
+Borsify-körningen. Sektorjämförelse kräver minst tre aktier med data i samma sektor
+och marknad. Om underlaget är för litet lämnas jämförelsen tom i stället för att
+Borsify gissar.
+
+Relativ styrka används bara som ett bekräftelse- och sorteringslager efter att
+aktien redan har klarat de ordinarie köpkraven. Den kan alltså inte ensam göra en
+underkänd aktie till ett KÖPCASE.
+
+För användaren visas detta på enkel svenska under "Jämfört med marknaden och sektorn",
+med en förklaring av vad aktien och sektorn faktiskt gjort bättre eller sämre.
+
+
+## v2.55.0 – Marknadslägesfilter
+
+Borsify bedömer nu marknadsläget separat för varje marknad i den aktuella körningen.
+Bedömningen bygger på:
+- medianutvecklingen för aktierna på 1 månad,
+- medianutvecklingen på 3 månader,
+- hur stor andel av aktierna som faktiskt stiger.
+
+Marknaden klassas som Stark, Neutral, Svag, Mycket svag eller För lite underlag.
+
+Den viktigaste säkerhetsprincipen är asymmetrisk:
+- en svag marknad kan höja kravet för att bli KÖPCASE,
+- en stark marknad får aldrig sänka Borsifys vanliga köpkrav.
+
+Vid Svag marknad höjs köpgränsen med:
+- +2 poäng för 1–2 dagar,
+- +3 poäng för 1 vecka–3 månader,
+- +2 poäng för 1–5 år,
+- +1 poäng för mycket lång sikt.
+
+Vid Mycket svag marknad höjs kraven ytterligare till +4, +5, +3 respektive +2 poäng.
+
+Om färre än fem aktier har användbar kursdata ändras inga köpkrav. Borsify visar då
+att underlaget är för litet.
+
+Aktier som klarar det vanliga köpfiltret men stoppas av ett svagt marknadsläge kan
+visas under Nära köpsignal. Där förklaras att aktien i sig klarar grundkraven men
+behöver ett högre betyg så länge marknaden är svag.
+
+Marknadsläget är ett riskfilter och inte en prognos. Trösklarna är konservativa
+heuristiker och ska senare utvärderas mot sparade rekommendationsutfall innan de
+kalibreras.
+
+
+## v2.56.0 – Borsify lär av gamla rekommendationer
+
+Borsify kan nu sammanfatta vad som faktiskt hänt efter tidigare frysta
+rekommendationer. Syftet är att hitta återkommande styrkor och svagheter i
+Borsifys egna case – utan att automatiskt optimera modellen på ett litet sample.
+
+Under Historiska tester → Tidigare rekommendationer finns nu
+"Vad har Borsify lärt sig hittills?".
+
+Borsify kan jämföra mogna utfall efter:
+- den bedömning/gate som fanns när caset skapades,
+- scoregrupp,
+- hur bra underlaget var,
+- sektor,
+- modellversion.
+
+Varje historisk grupp måste ha minst 8 mogna utfall innan den får användas i en
+jämförelse. Grupper med färre observationer visas som "För få utfall".
+
+Om minst två tillräckligt stora grupper skiljer sig tydligt kan Borsify beskriva
+ett möjligt historiskt mönster, till exempel att en viss scoregrupp hittills haft
+bättre medianutfall än en annan. Texten säger uttryckligen att detta är en
+observation och inte ett bevis på framtida avkastning.
+
+Borsify kontrollerar också om högre frysta scoregrupper faktiskt tenderat att ge
+bättre utfall. Om högre score i stället konsekvent följts av sämre utfall visas
+en varning.
+
+### Ingen efterhandskonstruktion
+
+Lärandet använder bara data som fanns i den frysta rekommendationen när den
+skapades. Om en ny Borsify-funktion inte fanns i äldre snapshots kan den inte
+testas retroaktivt med dagens värden. Saknade historiska uppgifter lämnas saknade.
+
+Från v2.56 sparas dessutom fler befintliga datafält i nya snapshots, bland annat
+1/3/6-månadersutveckling, handelsaktivitet, RSI, avstånd till lång trend,
+datatäckning samt fler kvalitets-/riskmått. Detta förbättrar möjligheten att göra
+mer detaljerade analyser när dessa rekommendationer senare har hunnit mogna.
+
+### Ingen automatisk viktoptimering
+
+v2.56 ändrar inte modellvikter, köpgränser eller scoring automatiskt. Resultaten
+är deskriptiv kvalitetskontroll. En eventuell framtida ändring ska kräva större
+sample, stabilt mönster över tid och separat historisk validering.
+
+
+## v2.57.0 – Case Quality Program
+
+Den här releasen fokuserar på kvaliteten i beslutsunderlaget i stället för att
+lägga till ännu en köpsignal.
+
+Ett högt Borsify-betyg räcker inte längre för att få en plats i Top 3. Caset måste
+också klara en separat kontroll av hur väl analysen är underbyggd.
+
+### Case Readiness 0–100
+
+Case Readiness mäter fem saker:
+
+1. **Datagrund**
+   - verifierad marknadsdata,
+   - hur komplett bolagsdatan är,
+   - hur många av de viktigaste datapunkterna för vald tidshorisont som faktiskt finns.
+
+2. **Oberoende bekräftelser**
+   - flera olika delar av analysen måste peka åt samma håll.
+   - exakt vilka delar som används beror på om horisonten är dagar, månader eller år.
+
+3. **Tydlig riskbild**
+   - allvarliga riskflaggor stoppar caset,
+   - för kortare handel måste Borsify kunna räkna fram en användbar riskplan från
+     verklig kurshistorik. Saknas den får caset inte en Top-3-plats.
+
+4. **Tydlig investeringstes**
+   - Borsify kontrollerar att det finns mer än ett konkret skäl som faktiskt bär caset.
+
+5. **Aktuell kursdata**
+   - gammal eller odaterad kursdata sänker kvaliteten på beslutsunderlaget.
+
+### Separat från avkastningsprognosen
+
+Case Readiness är inte en prognos för hur mycket aktien ska stiga. Ett bolag kan ha
+ett högt aktiebetyg men ett svagt beslutsunderlag, eller ett mycket bra underlag men
+ändå inte vara tillräckligt attraktivt för köp.
+
+För Top 3 krävs minst 60/100 i Case Readiness och inga hårda underlagsstopp.
+Från 78/100 märks caset som "Mycket väl underbyggt".
+
+Om inget case klarar både köpkraven och underlagskontrollen visar Borsify hellre en
+tom Top-3-lista än fyller den med ett sämre case.
+
+### Vad användaren ser
+
+Varje rekommendationskort visar:
+- hur väl caset är underbyggt,
+- styrkorna i underlaget,
+- luckor som fortfarande finns,
+- antal centrala datapunkter som finns,
+- hur många separata delar som bekräftar caset.
+
+Detta är en konservativ kvalitetskontroll. Gränsen 60 och poängfördelningen är
+heuristiker och ska utvärderas mot sparade framtida rekommendationsutfall innan
+de kalibreras.
+
+
+## v2.58.0 – Fundamental Inflection Engine 2.0
+
+Den här releasen försöker förbättra frågan "Vad håller faktiskt på att förändras i
+bolaget?" i stället för att bara läsa statiska nyckeltal.
+
+Borsify skiljer nu tydligare mellan två typer av information:
+
+- **observerad utveckling i bolaget** – försäljning, marginaler, vinst, fritt
+  kassaflöde och skuld/nettoskuld när data finns,
+- **analytikernas prognoser** – ändrade vinstestimat och revisionsbalans.
+
+Det är viktigt eftersom höjda analytikerprognoser inte får dölja att den faktiska
+verksamheten försämras.
+
+### Bred fundamental förbättring/försämring
+
+För de djupanalyserade kandidaterna räknar Borsify hur många oberoende operativa
+delar som förbättras respektive försämras. När flera delar rör sig åt samma håll
+klassas utvecklingen exempelvis som:
+
+- Bred fundamental förbättring
+- Övervägande förbättring
+- Blandad fundamental utveckling
+- Övervägande försämring
+- Bred fundamental försämring
+- För lite operativ förändringsdata
+
+En bred fundamental försämring kan sänka ett annars godkänt djupcase till
+"Kräver extra kontroll". Positiva analytikerestimat får inte rädda ett sådant case.
+
+### Mer kvartalsdata
+
+När Yahoo tillhandahåller uppgifterna använder v2.58 även kvartalsbalansräkningen
+för att mäta förändring i skuld och nettoskuld. Den följer också hur stor andel av
+de senaste kvartalen som haft positiv försäljningstillväxt respektive positivt
+fritt kassaflöde.
+
+Saknade balans- eller kvartalsuppgifter förblir saknade. Borsify konstruerar inte
+historik från dagens värden.
+
+### Konfliktkontroll
+
+Borsify markerar nu uttryckligen när:
+- analytikernas prognoser förbättras samtidigt som flera observerade delar av
+  verksamheten försämras, eller
+- verksamheten förbättras samtidigt som analytikernas prognoser ännu är svaga.
+
+Den första konflikten är särskilt viktig och ger ett avdrag i förändringsbedömningen.
+
+Detta är fortfarande regelbaserade heuristiker. De nya förändringsmåtten är inte
+bevisade som framtida avkastningssignaler och ska senare utvärderas mot den
+frysta rekommendationshistoriken.
+
+
+## v2.59.0 – Vinstkvalitet och kassaflöde
+
+Borsify kontrollerar nu om redovisad vinst faktiskt stöds av pengar som kommer in
+i verksamheten.
+
+För djupanalyserade långsiktiga case mäts bland annat:
+- kassaflöde från verksamheten i förhållande till redovisad vinst,
+- fritt kassaflöde i förhållande till redovisad vinst,
+- om det senaste året avviker negativt från flerårsmönstret,
+- hur stor påverkan förändringar i rörelsekapitalet har på kassaflödet,
+- om kundfordringar växer snabbare än försäljningen,
+- om lager växer snabbare än försäljningen.
+
+Borsify klassar underlaget som Stark vinstkvalitet, Normal vinstkvalitet,
+Kräver kontroll, Svag vinstkvalitet eller För lite underlag.
+
+Svag vinstkvalitet kan sänka ett annars godkänt djupcase till "Kräver extra
+kontroll". Saknade redovisningsrader lämnas saknade och fylls inte med antaganden.
+
+Detta är ett kvalitetsfilter, inte en avkastningsprognos. Trösklarna är
+regelbaserade heuristiker och ska senare utvärderas mot frysta utfall.
+
+
+## v2.60.0 – Datakoll och färskhetsgräns
+
+Borsify visar nu ett separat datapass för rekommendationer. Syftet är att göra det
+svårare för ett gammalt eller ofullständigt underlag att se mer säkert ut än det är.
+
+Datakollen visar:
+- källa för bred marknads- och bolagsdata: Yahoo Finance via yfinance,
+- senaste kursdatum,
+- när Borsify hämtade bolagsdatan,
+- om rapportdatum faktiskt är verifierat i djupanalysen,
+- varningar för låg datatäckning eller delvis verifierad data.
+
+Viktigt: hämtningstiden för bolagsdata är inte samma sak som rapportdatum. I den
+breda scanningen säger Borsify därför uttryckligen att rapportdatum inte är
+verifierat i stället för att låta en färsk hämtningstid se ut som färsk rapportdata.
+
+Universe QC har också skärpts:
+- kursdatum 0–4 kalenderdagar gammalt behandlas normalt som färskt,
+- 5–7 dagar ger en kvalitetsvarning,
+- mer än 7 dagar gammal kursdata hårdexkluderas från ranking.
+
+Kalenderdagar används eftersom Borsify inte har en fullständig handelskalender för
+alla 15 marknader. Gränsen är därför medvetet generös för helger och enstaka
+helgdagar. Den ska inte beskrivas som en exakt börsdagskontroll.
+
+
+## v2.61.0 – Focused Borsify
+
+Den här releasen tar bort konkurrens om uppmärksamheten på startsidan och skjuter
+upp dyra analyser tills användaren faktiskt behöver dem.
+
+### Första skärmen
+
+Överblick börjar nu med "Dagens bästa möjligheter" och visar högst tre kandidater.
+Varje kort fokuserar på:
+- varför aktien är intressant,
+- vad användaren bör kontrollera före beslut,
+- senaste kursdatum,
+- status för datakollen.
+
+De fyra separata listorna för olika tidshorisonter finns kvar, men ligger bakom
+"Visa bästa köp efter tidshorisont". Portföljens säljkontroll ligger också bakom
+en expander. Funktionaliteten är alltså kvar utan att konkurrera med huvuduppgiften.
+
+### Riktig sidnavigation i stället för fem Streamlit-tabs
+
+De fem huvudvyerna använder nu en horisontell sidväljare. Bara den valda sidans
+kod körs. Detta är viktigt eftersom Streamlit-tabs normalt beräknar innehållet i
+alla tabs även när användaren bara tittar på en.
+
+### Djupanalys körs först i Upptäck
+
+Före v2.61 byggdes både den långsiktiga djupanalysen och den kortsiktiga
+fördjupningen innan huvudnavigationen visades.
+
+Från v2.61 körs dessa Yahoo-baserade fördjupningar först när användaren väljer
+Upptäck. Överblick, Bevakning, Analysera och Metod slipper därför dessa
+djupförfrågningar.
+
+Rekommendationshistoriken fryser bara de djupa finalister som faktiskt analyserats.
+Det är en medveten avvägning: vanlig användning blir lättare, medan point-in-time-
+historiken för djupmodeller fylls när Upptäck används. Den schemalagda scannerns
+beteende är inte ändrat i denna release.
+
+Detta är en verifierad arkitekturförändring, men den faktiska förbättringen i
+sekunder på Streamlit/Yahoo måste mätas i live-miljön innan en prestandavinst i
+procent eller sekunder kan påstås.
+
+
+## v2.62.0 – Färre siffror, tydligare beslut
+
+Borsify har många interna delmodeller, men användaren ska inte behöva tolka alla
+deras 0–100-tal samtidigt.
+
+Från v2.62 följer rekommendationsvyerna en tydligare hierarki:
+
+1. **Borsifys huvudbetyg** – den enda stora numeriska score som visas först.
+2. **Underlag** – visas i första hand som en begriplig status, till exempel
+   "gott", "användbart men inte komplett" eller "begränsat".
+3. **Beslut och motargument** – varför caset är intressant, varför nu, vad som
+   talar emot och vad som skulle ändra bedömningen.
+4. **Delpoäng** – relativ styrka, bekräftelseantal, detaljerad confidence,
+   value-trap-risk och andra interna mått finns kvar bakom "Visa..."-sektioner.
+
+Ingen scoringlogik eller gate har tagits bort i denna release. Förändringen är
+avsiktligt en UX-förenkling: samma analyser arbetar under huven, men färre siffror
+konkurrerar om användarens uppmärksamhet.
+
+På de långsiktiga djupcasen har den tidigare raden med INVEST, value-trap-risk,
+inflection, mispricing och confidence ersatts av ett huvudbetyg och en enkel
+underlagsstatus. Delmåtten finns kvar under "Visa delbedömningar".
+
+På kortsiktiga case visas inte längre score, confidence, relativ styrka och antal
+bekräftelser som fyra parallella huvudmått. Huvudbetyget visas först och övriga
+mått är fördjupning.
+
+Case Readiness finns också kvar internt och i detaljvyn, men huvudkortet visar
+dess begripliga status i stället för ytterligare ett 0–100-tal.
+
+
+## v2.63.0 – Snabbare bred scanning
+
+Den breda scanningen har byggts om för att undvika onödiga bolagsdata-anrop.
+
+### Prisdata först
+
+Tidigare startade Borsify Yahoo-hämtning av bolagsdata för samtliga valda tickers
+samtidigt som kurshistoriken hämtades. Det innebar att en trasig, gammal eller
+oanvändbar ticker kunde orsaka ett dyrt fundamental-anrop trots att aktien senare
+ändå skulle exkluderas.
+
+Från v2.63 sker scanningen i två tydliga steg:
+
+1. Borsify hämtar kurshistoriken i bulk och gör den hårda kvalitetskontroll som
+   redan kan avgöras från pris, kursdatum och historiklängd.
+2. Bara aktier som klarar denna första kontroll får gå vidare till Yahoo
+   `get_info` för bolagsdata.
+
+Detta ändrar inte vilka prisgiltiga aktier som får fundamentaldata och är därför
+inte en ny rankingheuristik.
+
+### 24-timmars beständig cache för bolagsdata
+
+Fundamentala Yahoo-fält förändras normalt inte minut för minut. Borsify sparar
+därför ett lyckat fundamental-svar i lokal SQLite-cache i upp till 24 timmar.
+
+Detta kompletterar Streamlits vanliga minnescache. Den beständiga cachen kan
+fortfarande användas efter en vanlig `st.cache_data.clear()` och minskar därför
+risken att samma hundratals `get_info`-anrop görs om flera gånger samma dag.
+
+Kursdata har fortfarande den betydligt kortare cachen och kan uppdateras separat.
+24-timmarsgränsen gäller alltså bolagsdata, inte aktiekursen.
+
+### Mätning i appen
+
+Datastatus visar nu faktisk tid i den aktuella körningen för:
+- kursdelen,
+- bolagsdatadelen,
+- antal träffar i den beständiga cachen,
+- antal nya Yahoo-anrop,
+- antal aktier som stoppades redan på kursdata.
+
+Dessa siffror ska användas för nästa optimeringsbeslut. Borsify påstår inte någon
+procentuell prestandaförbättring innan live-mätningar finns.
+
+### Begränsning
+
+En kall första scanning av ett stort och helt giltigt universum behöver fortfarande
+hämta bolagsdata för många aktier. v2.63 reducerar upprepade anrop och slösade
+anrop till ogiltiga tickers, men löser inte hela cold-start-problemet.
