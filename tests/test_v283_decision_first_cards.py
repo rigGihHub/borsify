@@ -3,7 +3,7 @@ from pathlib import Path
 APP = (Path(__file__).parents[1] / "app.py").read_text(encoding="utf-8")
 
 def test_v283_decision_first_toplist_copy():
-    assert 'APP_VERSION = "2.83.0"' in APP
+    assert 'APP_VERSION = "2.83.1"' in APP
     assert '## Borsifys bästa köp' in APP
     assert 'Bara köp som klarar Borsifys krav.' in APP
     assert '**Vad ska du kontrollera?**' in APP

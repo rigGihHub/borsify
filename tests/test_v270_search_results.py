@@ -10,7 +10,7 @@ APP = Path('app.py').read_text(encoding='utf-8')
 
 
 def test_version_and_search_result_ui_present():
-    assert 'APP_VERSION = "2.83.0"' in APP
+    assert 'APP_VERSION = "2.83.1"' in APP
     assert 'st.subheader("Bäst för dina val")' in APP
     assert 'Varför den passar' in APP
     assert 'Viktigaste risk' in APP

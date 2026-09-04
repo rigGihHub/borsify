@@ -96,13 +96,26 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.83.0"
+APP_VERSION = "2.83.1"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
 DB_PATH = APP_DIR / "borsify.db"
 UNIVERSE_PATH = APP_DIR / "universe.csv"
 AVANZA_UNIVERSE_PATH = APP_DIR / "avanza_universe.csv"
+
+# Beginner-friendly discovery goals used by the sidebar search.
+# Keep this as one shared source of truth so the UI cannot reference an
+# undefined name after copy/refactor changes.
+DISCOVERY_INTENTS = [
+    "Bästa möjligheter just nu",
+    "Bra långsiktig investering",
+    "Utdelningsaktier",
+    "Billiga kvalitetsbolag",
+    "Aktier som fallit mycket",
+    "Kortsiktigt köpläge",
+    "Stabilare aktier",
+]
 
 OMXS30_TICKERS = [
     "ABB.ST", "ADDT-B.ST", "ALFA.ST", "ASSA-B.ST", "AZN.ST", "ATCO-A.ST",
