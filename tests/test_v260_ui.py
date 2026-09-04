@@ -6,6 +6,6 @@ def test_version_is_260_or_newer():
 
 def test_data_trust_is_visible_on_recommendations():
     assert "**Datakoll**" in APP
-    assert "Källa:" in APP
+    assert 'st.caption(f"Datakoll: {trust_status}' in APP
     assert "Datavarning:" in APP
     assert "Yahoo Finance via yfinance" in APP

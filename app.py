@@ -96,7 +96,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "2.80.0"
+APP_VERSION = "2.83.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 APP_DIR = Path(__file__).resolve().parent
@@ -2619,35 +2619,14 @@ def plain_finance_text(value: Any) -> str:
 
 
 def render_beginner_glossary(key: str = "guide") -> None:
-    labels = {"overview_terms": "Överblick", "daily_terms": "Dagens fynd", "edge_terms": "Edge Lab"}
-    suffix = labels.get(key, key.replace("_", " ").strip().title())
-    with st.expander(f"Förklara börsorden enkelt · {suffix}", expanded=False):
-        st.markdown(f"""
-**P/E:** {beginner_term("P/E")}.  
-**ROE:** {beginner_term("ROE")}.  
-**RSI:** {beginner_term("RSI")}.  
-**SMA200:** {beginner_term("SMA200")}.  
-**Direktavkastning:** {beginner_term("direktavkastning")}.  
-**Största fall från en tidigare topp:** {beginner_term("drawdown")}.  
-**Vinst/förlust-kvot:** {beginner_term("profit factor")}.  
-**ATR:** {beginner_term("ATR")}.  
-**Hur mycket kursen svänger:** {beginner_term("volatilitet")}.  
-**Hur lätt aktien är att köpa och sälja:** {beginner_term("likviditet")}.  
-**Stop-loss:** {beginner_term("stop-loss")}.
-""")
-
-
-
-DISCOVERY_INTENTS = [
-    "Bästa möjligheter just nu",
-    "Bra långsiktig investering",
-    "Utdelningsaktier",
-    "Billiga kvalitetsbolag",
-    "Aktier som fallit mycket",
-    "Kortsiktigt köpläge",
-    "Stabilare aktier",
-]
-
+    with st.expander("Vad betyder börsorden?", expanded=False):
+        st.markdown(
+            "**P/E:** priset jämfört med bolagets vinst.  \\n"
+            "**RSI:** om kursen nyligen gått ovanligt starkt eller svagt.  \\n"
+            "**SMA200:** kursen jämfört med sitt långa genomsnitt.  \\n"
+            "**ATR:** hur mycket kursen brukar röra sig per dag.  \\n"
+            "**Direktavkastning:** utdelningen jämfört med aktiens pris."
+        )
 
 def apply_discovery_intent(df: pd.DataFrame, intent: str) -> pd.DataFrame:
     """Rank the already screened universe by a beginner-friendly goal without changing core scores."""
@@ -2981,8 +2960,8 @@ def dataframe_for_display(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def render_discovery_shortlist(df: pd.DataFrame, intent: str, horizon: str = "Alla tidshorisonter") -> None:
-    st.subheader("Matchar din sökning")
-    st.caption("Här visas de aktier som bäst passar dina val. Matchningen styr ordningen men ersätter inte Borsifys köpkrav eller datakontroller.")
+    st.subheader("Bäst för dina val")
+    st.caption("Borsify visar de starkaste matchningarna först.")
     picks = df.head(5)
     if picks.empty:
         st.info("Inga aktier matchar din sökning tillsammans med de övriga filtren.")
@@ -3018,14 +2997,14 @@ def render_discovery_shortlist(df: pd.DataFrame, intent: str, horizon: str = "Al
 
             with st.expander("Visa mer om matchningen", expanded=False):
                 st.write(str(r.get("Varför", "Borsify har rankat aktien högt utifrån dina val.")))
-                st.caption("Match är en sökordning, inte en sannolikhet för avkastning och inte ett nytt köpbevis.")
+                st.caption("Placeringen visar hur bra aktien passar dina val – inte hur säkert ett köp är.")
 
     if len(df) > len(picks):
         near = df.iloc[len(picks)]
         with st.expander("Varför fick en annan aktie inte plats?", expanded=False):
             st.markdown(f"**{_stock_identity(near)}**")
             st.write(near_miss_reason(near, intent, horizon))
-            st.caption("Det betyder inte att aktien är dålig. Den rankades bara lägre för den sökning du gjort nu.")
+            st.caption("Den passade dina val sämre just nu.")
 
 def investment_analysis_text(row: pd.Series, horizon: str = "INVEST") -> str:
     """Grounded explanation in plain Swedish for users without finance background."""
@@ -3064,8 +3043,8 @@ def investment_analysis_text(row: pd.Series, horizon: str = "INVEST") -> str:
 
 
 def render_engine_board(df: pd.DataFrame) -> None:
-    st.subheader("Tre motorer · olika tidshorisonter")
-    st.caption("INVEST söker långsiktig kvalitet till rimligt pris. SWING söker tekniska lägen för dagar–veckor. REVERSAL söker möjliga överreaktioner. Modellerna ska inte blandas ihop.")
+    st.subheader("Olika sätt att hitta köplägen")
+    st.caption("Välj tidsperspektiv. Borsify letar på olika sätt beroende på hur länge du tänker äga aktien.")
     specs=[("INVEST", "INVEST Score", "Lång sikt · ca 1–5 år"), ("SWING", "SWING Score", "Kort sikt · ca 2 dagar–8 veckor"), ("REVERSAL", "REVERSAL Score", "Överreaktion · dagar–månader") ]
     cols=st.columns(3)
     for col,(label,score_col,horizon) in zip(cols,specs):
@@ -3094,12 +3073,12 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail") -> N
     c1.metric("Borsify Score", f"{row['Borsify Score']:.0f}/100", f"{score_delta:+.1f}" if score_delta is not None else None)
     c2.metric("Pris", fmt_price_with_sek(row), fmt_pct(row.get("Dagsförändring")))
     c3.metric("Värdering", f"{row['Värdering']:.0f}")
-    st.markdown("### Varför kan detta vara en bra investering?")
+    st.markdown("### Varför är aktien intressant?")
     st.write(investment_analysis_text(row, "INVEST"))
     qrp_score, qrp_pos, qrp_cautions = quality_at_fair_price_snapshot(row)
-    with st.expander("Kvalitet till rätt pris · enkel långsiktig kontroll"):
-        st.metric("Kvalitet/pris", f"{qrp_score:.0f}/100")
-        st.write("**Vad betyder det?** Borsify tittar på om bolaget verkar lönsamt och finansiellt rimligt samtidigt som aktien inte ser för dyr ut. Det är en nulägeskontroll, inte ett bevis på att kvaliteten hållit i många år.")
+    with st.expander("Är bolaget bra utan att aktien verkar för dyr?"):
+        st.metric("Helhetsbedömning", f"{qrp_score:.0f}/100")
+        st.write("Borsify kontrollerar om bolaget tjänar pengar, har rimlig ekonomi och om aktien verkar rimligt prissatt.")
         if qrp_pos: st.write("**Talar för:** " + " ".join(qrp_pos))
         if qrp_cautions: st.write("**Behöver kollas:** " + " ".join(qrp_cautions))
     render_beginner_glossary(f"{key_prefix}_terms")
@@ -3107,7 +3086,7 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail") -> N
     e1.metric("INVEST", f"{_num(row.get('INVEST Score')):.0f}/100")
     e2.metric("SWING", f"{_num(row.get('SWING Score')):.0f}/100")
     e3.metric("REVERSAL", f"{_num(row.get('REVERSAL Score')):.0f}/100")
-    with st.expander("Visa analys för kort sikt och överreaktion"):
+    with st.expander("Visa andra tidsperspektiv"):
         st.markdown("**SWING · dagar–veckor**")
         st.write(investment_analysis_text(row, "SWING"))
         st.markdown("**REVERSAL · möjlig överreaktion**")
@@ -3117,8 +3096,9 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail") -> N
     st.markdown(f"**Bedömning:** {row['Signal']}  \n**Kort förklaring:** {row['Varför']}  \n**Riskflaggor:** {row['Riskflaggor']}")
 
     factor_df, strengths, weaknesses = _score_explanation(row, profile)
-    st.markdown("#### Varför får aktien den här poängen?")
-    st.caption(f"Strategin {profile} väger delarna olika. Tänk på 50 som ett neutralt utgångsläge: en del över 50 hjälper aktien upp i rankingen och en del under 50 drar ned den. Tabellen visar ungefär hur stor påverkan varje del har.")
+    with st.expander("Visa hur Borsify räknat", expanded=False):
+        st.markdown("#### Så räknar Borsify")
+        st.caption("Detaljer för dig som vill gå djupare.")
     st.dataframe(
         factor_df, use_container_width=True, hide_index=True,
         column_config={
@@ -3136,7 +3116,7 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail") -> N
     q1.metric("Viktad grundscore", f"{base_score:.1f}")
     q2.metric("Datatäckningsfaktor", f"{coverage_factor:.3f}")
     q3.metric("Beräknad slutscore", f"{calc_final:.1f}")
-    st.caption("Enkelt uttryckt: Borsify väger ihop delbetygen och sänker sedan slutbetyget lite om viktig information saknas. Därför kan en aktie med bra delbetyg ändå få en försiktigare totalscore när datatäckningen är låg.")
+    st.caption("Saknad data gör Borsify mer försiktigt.")
     sx, wx = st.columns(2)
     with sx:
         st.markdown("**Styrkor modellen ser**")
@@ -3171,7 +3151,7 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail") -> N
         else: st.caption(f"Datatäckning i kärnmodellen: {coverage:.0%}.")
     price_date = str(row.get("Prisdatum") or "—")
     fundamental_at = str(row.get("Fundamental hämtad") or "—")
-    st.caption(f"Senaste data · kurs från: {price_date} · bolagsdata hämtad: {fundamental_at}. Tiden visar när Borsify hämtade uppgifterna. Vissa siffror kan komma från en äldre bolagsrapport.")
+    st.caption(f"Data: kurs {price_date} · bolagsdata hämtad {fundamental_at}")
 
     watched = is_watched(str(row["Ticker"]))
     if st.button("Ta bort från bevakning" if watched else "Lägg till i bevakning", key=f"{key_prefix}_watch_{row['Ticker']}"):
@@ -3303,16 +3283,8 @@ def _stock_identity(row: pd.Series | dict[str, Any], include_name: bool = True) 
 
 
 def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
-    st.markdown("## 🌍 Borsify Topplistor")
-    st.caption(
-        "Borsify visar bara aktier som klarar köpkraven och har ett tillräckligt bra beslutsunderlag. "
-        "Ett högt aktiebetyg räcker alltså inte om viktig data saknas eller riskbilden är oklar. "
-        "När marknaden är svag höjs köpkraven automatiskt. En stark marknad får däremot aldrig sänka grundkraven. "
-        "Varje kort förklarar varför aktien är intressant, "
-        "varför den är aktuell nu, den största risken och vad som skulle få Borsify att ändra uppfattning. "
-        "För kortare handel visas också relativ styrka och möjlig uppsida i förhållande till risk. "
-        "Om ingen aktie är tillräckligt stark visas inget köp."
-    )
+    st.markdown("## Borsifys bästa köp")
+    st.caption("Bara köp som klarar Borsifys krav. Är inget tillräckligt bra lämnas listan tom.")
     avanza_catalog = load_avanza_universe(AVANZA_UNIVERSE_PATH)
     if not avanza_catalog.empty:
         summary = breadth_summary(avanza_catalog)
@@ -3440,40 +3412,6 @@ def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
                     if np.isfinite(price):
                         st.markdown(f"**{price:.2f} {ccy}**")
                     score = _num(row.get(score_col))
-                    if np.isfinite(score):
-                        st.metric("Borsifys huvudbetyg", f"{score:.0f}/100")
-                    if str(row.get("Köpfilter","")) == "KÖPCASE":
-                        st.success("KÖPCASE")
-
-                    readiness = _num(row.get("Case Readiness"))
-                    readiness_status = str(row.get("Case Readiness status","") or "")
-                    if readiness_status:
-                        st.markdown("**Hur bra är beslutsunderlaget?**")
-                        if np.isfinite(readiness) and readiness >= 78:
-                            st.success(readiness_status)
-                        else:
-                            st.info(readiness_status)
-                        st.caption(
-                            "Detaljpoängen för underlaget finns under ”Visa siffrorna bakom bedömningen”."
-                        )
-
-                    trust_status = str(row.get("Data Trust status","") or "")
-                    if trust_status:
-                        st.markdown("**Datakoll**")
-                        if trust_status == "GOTT UNDERLAG":
-                            st.success(trust_status)
-                        elif trust_status == "STOPP":
-                            st.error(trust_status)
-                        else:
-                            st.warning(trust_status)
-                        st.caption(
-                            f"Källa: {row.get('Data Trust källa','Yahoo Finance via yfinance')} · "
-                            f"kursdatum: {row.get('Data Trust kursdatum','—')} · "
-                            f"bolagsdata hämtad: {row.get('Data Trust bolagsdata hämtad','—')}"
-                        )
-                        trust_warn = str(row.get("Data Trust varningar","") or "")
-                        if trust_warn and trust_warn != "inga tydliga datavarningar":
-                            st.caption("Datavarning: " + trust_warn)
 
                     st.markdown("**Varför köpa?**")
                     st.write(str(row.get("Varför köpa","—")))
@@ -3481,7 +3419,7 @@ def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
                     st.write(str(row.get("Varför nu","—")))
                     st.markdown("**Största risken**")
                     st.write(str(row.get("Största risk","—")))
-                    st.markdown("**Vad skulle få Borsify att ändra sig?**")
+                    st.markdown("**Vad ska du kontrollera?**")
                     st.write(str(row.get("Vad ändrar Borsifys syn","—")))
 
                     if horizon in {"day","medium"}:
@@ -3570,8 +3508,18 @@ def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
                     elif buy_position == "FÖR SENT ATT JAGA?":
                         st.warning("⚠️ **Risk att köpa efter en stor uppgång:** " + str(row.get("Köplägesförklaring","")))
 
-                    with st.expander("Visa siffrorna bakom bedömningen", expanded=False):
+                    with st.expander("Visa mer om bedömningen", expanded=False):
                         st.metric("Borsifys betyg för tidshorisonten", f"{score:.0f}/100" if np.isfinite(score) else "—")
+                        readiness = _num(row.get("Case Readiness"))
+                        readiness_status = str(row.get("Case Readiness status","") or "")
+                        if readiness_status:
+                            st.caption(f"Underlaget: {readiness_status}" + (f" · {readiness:.0f}/100" if np.isfinite(readiness) else ""))
+                        trust_status = str(row.get("Data Trust status","") or "")
+                        if trust_status:
+                            st.caption(f"Datakoll: {trust_status} · källa {row.get('Data Trust källa','Yahoo Finance via yfinance')} · kursdatum {row.get('Data Trust kursdatum','—')}")
+                            trust_warn = str(row.get("Data Trust varningar","") or "")
+                            if trust_warn and trust_warn != "inga tydliga datavarningar":
+                                st.caption("Datavarning: " + trust_warn)
                         gate_support = str(row.get("Köpfilter stöd","") or "")
                         if gate_support:
                             st.caption(f"Det som stödjer köpcaset: {gate_support}")
@@ -4290,7 +4238,7 @@ def render_case_ai_qa(case: pd.Series | dict[str, Any], horizon: str, rank: int)
                         st.caption(f"AI-kostnad för svaret: ≈ {one_sek:.3f} kr".replace(".", ","))
                     else:
                         st.caption(f"AI-kostnad för svaret: {format_cost_usd(one_usd)}")
-                    with st.expander("Visa token- och kostnadsdetaljer", expanded=False):
+                    with st.expander("Tekniska AI-detaljer", expanded=False):
                         st.caption(
                             f"{token_total:,} tokens · {format_cost_usd(one_usd)} · modell {usage_meta.get('model','—')}".replace(",", " ")
                         )
@@ -4300,8 +4248,8 @@ def render_case_ai_qa(case: pd.Series | dict[str, Any], horizon: str, rank: int)
 
 
 def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_symbol: str | None = "^OMXS30", benchmark_name: str = "OMXS30") -> None:
-    st.subheader("Historiskt test · har Borsifys signaler fungerat tidigare?")
-    st.caption("Här testar Borsify sina regler på historiska kurser. Frågan är enkel: om samma köpsignaler hade kommit tidigare, hur hade de gått? Historik kan inte förutsäga framtiden, men den kan avslöja regler som verkar för svaga.")
+    st.subheader("Har Borsify fungerat tidigare?")
+    st.caption("Här ser du hur liknande signaler hade gått tidigare. Historik är ingen garanti för framtiden.")
     render_beginner_glossary("edge_terms")
     st.caption(
         "Här testar Borsify sina köpsignaler på gamla kursdata. Testet använder bara information som fanns just då. "
@@ -5734,8 +5682,8 @@ def main() -> None:
         with discover_daily:
             st.info(f"Du letar efter: **{discovery_intent}**. {intent_plain_text(discovery_intent)}")
 
-            st.subheader("Bästa kortsiktiga case · 1–6 månader")
-            st.caption("För kortsiktiga köp vill Borsify se flera saker samtidigt: att kursen utvecklas bra jämfört med marknaden, att trenden ser positiv ut och att handeln i aktien är aktiv. Om färska vinstprognoser eller tydliga kommande händelser finns vägs de också in. Ett stort kursfall räcker inte för att aktien ska bli ett köpcase.")
+            st.subheader("Bästa köp på kortare sikt")
+            st.caption("Borsify letar efter flera positiva tecken samtidigt – inte bara en aktie som nyligen fallit.")
             if short_longlist.empty:
                 st.info("Ingen kortsiktig kandidat kunde analyseras.")
             else:
@@ -5803,8 +5751,8 @@ def main() -> None:
 
             st.divider()
 
-            st.subheader("Bästa långsiktiga case · flerårig djupkontroll")
-            st.caption("Borsify väljer först ut starka långsiktiga kandidater. Därefter krävs stöd från flera olika håll: bolagets utveckling över flera år, om något nyligen blivit bättre eller sämre, om priset verkar rimligt och om det finns en tydlig händelse som kan ändra marknadens syn. En allvarlig varning eller för lite data kan stoppa ett toppcase.")
+            st.subheader("Bästa köp på längre sikt")
+            st.caption("Borsify kräver flera styrkor samtidigt och stoppar case med tydliga varningar eller för lite data.")
             if deep_longlist.empty:
                 st.info("Ingen kandidat kunde djupkontrolleras.")
             else:
@@ -5852,7 +5800,7 @@ def main() -> None:
                             st.warning(f"**{case_gate}**")
                         else:
                             st.info(f"**{case_gate}**")
-                        st.caption("Detaljer om hur många stöd och hur komplett underlaget är finns under delbedömningarna.")
+                        st.caption("Mer detaljer finns under Visa mer.")
                         trust_status = str(case.get("Data Trust status","") or "")
                         if trust_status:
                             st.markdown("**Datakoll**")
@@ -5920,7 +5868,7 @@ def main() -> None:
                             conflict_text = str(case.get("Förändringskonflikt","") or "")
                             if conflict_text and not conflict_text.startswith("Ingen tydlig konflikt"):
                                 st.warning(conflict_text)
-                            st.caption("Detta bygger på observerad försäljning, marginal, vinst, kassaflöde och skuld när uppgifterna finns – separat från analytikernas prognoser.")
+                            st.caption("Bygger på bolagets faktiska utveckling, när data finns.")
                         st.markdown("**VARFÖR NU?**")
                         st.write(plain_finance_text(case.get('Catalyst Why Now') or case.get('Varför nu','Borsify kan inte verifiera någon tydlig ny förändring just nu.')))
                         catalyst_source = str(case.get("Catalyst Source","") or "")
@@ -5932,7 +5880,7 @@ def main() -> None:
                         if catalyst_verification:
                             st.caption(f"Källkontroll: {plain_finance_text(catalyst_verification)}")
                         if not bool(case.get("Catalyst Independent Support", case.get("Catalyst Support", False))):
-                            st.caption("Detta kan förklara varför caset är aktuellt, men räknas inte som ett separat oberoende stöd i toppcase-bedömningen.")
+                            st.caption("Det kan förklara varför aktien är intressant just nu.")
                         cat_signal = plain_finance_text(case.get("Catalyst Signal", "Ingen tydlig händelse som kan ändra marknadens syn har verifierats"))
                         cat_conf = _num(case.get("Catalyst Confidence"))
                         if cat_signal == "Tydlig möjlig katalysator":
@@ -6037,7 +5985,7 @@ def main() -> None:
                             })
                         render_case_plan(case)
                         render_case_ai_qa(case, "long", rank)
-                st.caption("Ett lågt aktiepris eller lågt P/E räcker inte. Borsify kan sänka ett bolag om pengar in och ut, lönsamhet, försäljning, skuld eller färska prognoser utvecklas åt fel håll. Analysen kräver flera olika styrkor samtidigt och låter tydliga varningar väga tungt. De tre framtidsbilderna är exempel på vad som kan hända – inte kursmål eller sannolikheter.")
+                st.caption("Billigt räcker inte. Borsify vill även se ett bra bolag, rimlig risk och tydliga skäl till varför aktien kan vara intressant.")
 
             st.divider()
             render_discovery_shortlist(filtered, discovery_intent, search_horizon)
@@ -6050,8 +5998,8 @@ def main() -> None:
                 st.divider()
             render_engine_board(filtered)
             st.divider()
-            st.subheader("Dagens fynd · snabbaste beslutsunderlaget")
-            st.caption("Dagens relevans är en separat triage ovanpå Borsify Score. Den väger in aktuellt marknadsläge och scoreförändring, och kan begränsas av grova riskflaggor. Den är inte ett köp- eller säljråd.")
+            st.subheader("Dagens bästa möjligheter")
+            st.caption("Här visas de case Borsify tycker är mest värda att titta på just nu.")
             if daily_shortlist.empty:
                 st.info("Ingen kandidat kunde byggas från dagens filtrerade universum.")
             else:
@@ -6094,7 +6042,7 @@ def main() -> None:
                     "Risk": st.column_config.ProgressColumn("Risk", min_value=0, max_value=100, format="%.0f"),
                 })
 
-            st.divider(); st.subheader("Topplista enligt ditt val")
+            st.divider(); st.subheader("Fler aktier som passar")
             display = dataframe_for_display(top)
             st.dataframe(display, use_container_width=True, hide_index=True, column_config={
                 "Match Score": st.column_config.ProgressColumn("Match", min_value=0, max_value=100, format="%.0f"),
@@ -6106,7 +6054,7 @@ def main() -> None:
                 "Marknadsläge": st.column_config.ProgressColumn("Setup", min_value=0, max_value=100, format="%.0f"), "Risk": st.column_config.ProgressColumn("Risk", min_value=0, max_value=100, format="%.0f"),
             })
             st.download_button("Ladda ner topplistan som CSV", data=display.to_csv(index=False).encode("utf-8-sig"), file_name=f"borsify_{datetime.now():%Y-%m-%d}.csv", mime="text/csv")
-            st.divider(); st.subheader("Detaljanalys")
+            st.divider(); st.subheader("Läs mer om aktien")
             choices = {f"{r['Ticker']} · {r['Namn']} · {r['Borsify Score']:.0f}/100": i for i,r in top.iterrows()}
             selected = st.selectbox("Välj aktie", list(choices)); render_detail(top.loc[choices[selected]], profile, key_prefix="daily")
         with discover_ideas:

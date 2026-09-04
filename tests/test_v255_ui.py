@@ -6,6 +6,6 @@ def test_version_is_255_or_newer():
 
 def test_market_regime_is_explained_in_plain_swedish():
     assert "**Marknadsläget**" in APP
-    assert "När marknaden är svag höjs köpkraven automatiskt" in APP
-    assert "En stark marknad får däremot aldrig sänka grundkraven" in APP
+    assert "**Marknadsläget**" in APP
+    assert "aktuellt köpkrav" in APP
     assert "Marknadskontroll:" in APP

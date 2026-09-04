@@ -11,7 +11,7 @@ def test_main_tabs_use_plain_historical_test_name():
     assert '["Marknad", "Edge Lab"]' not in APP
 
 def test_buy_gate_is_explained_in_swedish():
-    assert 'st.success("KÖPCASE")' in APP
+    assert "Bara köp som klarar Borsifys krav" in APP
     assert "Buy Quality Gate" not in APP
 
 def test_case_breaker_visible_heading_is_plain():
