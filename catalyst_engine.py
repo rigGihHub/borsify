@@ -71,6 +71,36 @@ UNCERTAIN_NEWS_RULES = [
     ('Utdelning', ('dividend','utdelning')),
 ]
 
+
+
+HIGH_QUALITY_SOURCE_HINTS = (
+    "reuters", "associated press", "ap news", "bloomberg", "dow jones",
+    "globenewswire", "business wire", "cision", "pr newswire", "accesswire",
+    "sec", "nasdaq", "nyse", "london stock exchange", "euronext",
+)
+LOW_QUALITY_SOURCE_HINTS = (
+    "yahoo", "benzinga", "seeking alpha", "motley fool", "investorplace",
+    "zacks", "simply wall", "tipranks", "stocktwits", "reddit",
+)
+
+def assess_catalyst_source_quality(provider: str) -> tuple[str, int, bool]:
+    """Classify source quality conservatively from the provider label only.
+
+    This is intentionally not a truth score. It only decides whether a headline source
+    is strong enough to earn *independent catalyst support*. Unknown sources stay useful
+    as context but must be verified before they strengthen a top case.
+    """
+    raw = str(provider or "").strip()
+    p = _norm(raw)
+    if not p:
+        return "Källa saknas", 0, False
+    if any(_norm(x) in p for x in HIGH_QUALITY_SOURCE_HINTS):
+        return "Stark källa", 3, True
+    if any(_norm(x) in p for x in LOW_QUALITY_SOURCE_HINTS):
+        return "Sekundär källa", 1, False
+    return "Okänd källkvalitet", 1, False
+
+
 NEGATIVE_NEWS_RULES = [
     ('Sänkt prognos/vinstvarning', ('profit warning','cuts guidance','cut guidance','lowers guidance','lowered outlook','vinstvarning','sanker prognos','sankt prognos')),
     ('Emission/finansieringsrisk', ('rights issue','share issue','equity raise','new shares','nyemission','foretradesemission','riktad emission')),
@@ -121,6 +151,10 @@ def build_catalyst_assessment(case: dict[str, Any] | pd.Series, events: dict[str
             'confidence': 90, 'timing': timing,
             'effect': 'Kan bekräfta eller motbevisa den pågående vinst-/marginaltrenden.',
             'evidence': 'Schemalagt rapportdatum från bolagskalender/datafeed.',
+            'evidence_kind': 'Schemalagd bolagshändelse',
+            'source_label': 'Bolagskalender/datafeed',
+            'independent_support': False,
+            'verification': 'Tid verifierad, riktning okänd',
         })
 
     # 2) Fundamental/estimate inflection: data-derived, not headline-derived.
@@ -147,6 +181,10 @@ def build_catalyst_assessment(case: dict[str, Any] | pd.Series, events: dict[str
             'timing': 'nästa 1–2 rapporter',
             'effect': 'Fortsatt förbättring kan tvinga marknaden att höja sina vinst- eller kvalitetsantaganden.',
             'evidence': ', '.join(evidence_bits) if evidence_bits else 'Flera färska förändringssignaler pekar åt rätt håll.',
+            'evidence_kind': 'Rapporterade siffror och estimat',
+            'source_label': 'Bolagsdata/analytikerdata',
+            'independent_support': False,
+            'verification': 'Databaserad förändring – samma signalfamilj som inflektionsanalysen',
         })
     elif infl_signal in {'Negativ förändring', 'Tydlig försämring'}:
         warnings.append('Färska estimat/kvartalstrender försämras – positiv katalysator får inte överskugga detta.')
@@ -160,6 +198,10 @@ def build_catalyst_assessment(case: dict[str, Any] | pd.Series, events: dict[str
             'confidence': 75, 'timing': '6–18 månader',
             'effect': 'Fortsatt skuldminskning kan sänka finansiell risk och förbättra marknadens värdering av bolaget.',
             'evidence': f'Rapporterad skuldtrend cirka {debt_change:+.1%}.',
+            'evidence_kind': 'Rapporterade bolagssiffror',
+            'source_label': 'Bolagsrapport/datafeed',
+            'independent_support': False,
+            'verification': 'Rapporterad bolagsdata – inte oberoende katalysatorstöd',
         })
     if np.isfinite(fcf_change) and fcf_change > 0.20 and (not np.isfinite(positive_fcf_share) or positive_fcf_share >= 0.5):
         candidates.append({
@@ -167,6 +209,10 @@ def build_catalyst_assessment(case: dict[str, Any] | pd.Series, events: dict[str
             'confidence': 70, 'timing': 'nästa 1–3 rapporter',
             'effect': 'Om förbättringen håller i sig kan marknaden börja värdera vinsten som mer uthållig och finansieringsrisken som lägre.',
             'evidence': f'FCF senaste kvartalet förändrades cirka {fcf_change:+.1%} år/år.',
+            'evidence_kind': 'Rapporterade bolagssiffror',
+            'source_label': 'Bolagsrapport/datafeed',
+            'independent_support': False,
+            'verification': 'Rapporterad bolagsdata – inte oberoende katalysatorstöd',
         })
 
     # 4) Headlines are useful triage only when timing is known and reasonably fresh.
@@ -184,7 +230,8 @@ def build_catalyst_assessment(case: dict[str, Any] | pd.Series, events: dict[str
 
         age_days = _news_age_days(item.get('published_at'), now)
         provider = str(item.get('provider') or '').strip()
-        source_bits = [x for x in [provider, f"{age_days} dagar sedan" if age_days is not None else "datum saknas"] if x]
+        source_quality, source_quality_score, source_support_ok = assess_catalyst_source_quality(provider)
+        source_bits = [x for x in [provider, source_quality, f"{age_days} dagar sedan" if age_days is not None else "datum saknas"] if x]
         source_text = " · ".join(source_bits)
 
         # Old headlines are context, not current catalysts.
@@ -233,6 +280,17 @@ def build_catalyst_assessment(case: dict[str, Any] | pd.Series, events: dict[str
             'provider': provider,
             'age_days': age_days,
             'fresh': bool(fresh),
+            'evidence_kind': 'Daterad extern rubrik',
+            'source_label': provider or 'Extern källa',
+            'source_quality': source_quality,
+            'source_quality_score': source_quality_score,
+            # v2.75: a fresh headline is not independent evidence merely because a
+            # provider name exists. Only a recognised strong source can earn the
+            # separate catalyst pillar. Secondary/unknown sources remain context.
+            'independent_support': bool(direction == 'positive' and fresh and source_support_ok),
+            'verification': ('Färsk daterad signal från stark källa – originalkällan måste ändå läsas'
+                             if direction == 'positive' and fresh and source_support_ok
+                             else f'{source_quality} – verifiera originalkällan innan signalen får stärka toppcaset'),
         })
 
     # De-duplicate same catalyst type and rank by evidence/direction.
@@ -264,7 +322,12 @@ def build_catalyst_assessment(case: dict[str, Any] | pd.Series, events: dict[str
 
     positive_strength = max([c['strength'] for c in positives], default=0)
     positive_conf = max([c['confidence'] for c in positives], default=0)
-    catalyst_support = signal in {'Tydlig möjlig katalysator', 'Möjlig katalysator'} and not negative_headline
+    independent_positives = [c for c in positives if c.get('independent_support')]
+    # v2.74: do not count the same fundamental/estimate improvement twice. The
+    # separate catalyst pillar is earned only by an independent, fresh, dated
+    # external signal from a named source. Data-derived inflection still improves
+    # the Why Now explanation, but remains part of the inflection pillar.
+    catalyst_support = bool(independent_positives) and not negative_headline
 
     if primary:
         why_now = f"{primary['name']} · {primary['timing']}. {primary['effect']}"
@@ -272,12 +335,22 @@ def build_catalyst_assessment(case: dict[str, Any] | pd.Series, events: dict[str
         primary_timing = primary['timing']
         primary_effect = primary['effect']
         primary_evidence = primary['evidence']
+        primary_evidence_kind = primary.get('evidence_kind', 'Blandat underlag')
+        primary_source_label = primary.get('source_label', 'Okänd källa')
+        primary_verification = primary.get('verification', 'Underlaget behöver verifieras')
+        primary_source_quality = primary.get('source_quality', 'Ej tillämpligt')
+        primary_source_quality_score = int(primary.get('source_quality_score', 0) or 0)
     else:
         why_now = 'Ingen konkret katalysator kan verifieras med tillgänglig data. Ett bra bolag kan därför förbli felprissatt länge.'
         primary_name = 'Ingen verifierad'
         primary_timing = '—'
         primary_effect = 'Ingen tydlig omvärderingsmekanism kan beläggas ännu.'
         primary_evidence = 'Otillräcklig katalysatordata.'
+        primary_evidence_kind = 'För lite underlag'
+        primary_source_label = '—'
+        primary_verification = 'Ingen separat katalysator verifierad'
+        primary_source_quality = 'Källa saknas'
+        primary_source_quality_score = 0
 
     return {
         'Catalyst Signal': signal,
@@ -288,6 +361,12 @@ def build_catalyst_assessment(case: dict[str, Any] | pd.Series, events: dict[str
         'Catalyst Timing': primary_timing,
         'Catalyst Effect': primary_effect,
         'Catalyst Evidence': primary_evidence,
+        'Catalyst Evidence Type': primary_evidence_kind,
+        'Catalyst Source': primary_source_label,
+        'Catalyst Verification': primary_verification,
+        'Catalyst Source Quality': primary_source_quality,
+        'Catalyst Source Quality Score': primary_source_quality_score,
+        'Catalyst Independent Support': bool(catalyst_support),
         'Catalyst Why Now': why_now,
         'Catalyst Warnings': '; '.join(dict.fromkeys(warnings)) if warnings else 'inga tydliga katalysatorrelaterade varningar',
         'Catalyst Candidates': candidates[:4],

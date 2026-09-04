@@ -72,6 +72,8 @@ def prepare_learning_data(
         on="record_id",how="inner",
     )
     merged["return_pct"]=pd.to_numeric(merged["return_pct"],errors="coerce")
+    if "excess_return_pct" in merged.columns:
+        merged["excess_return_pct"]=pd.to_numeric(merged["excess_return_pct"],errors="coerce")
     merged=merged.dropna(subset=["return_pct"]).copy()
     if merged.empty:
         return merged
@@ -92,22 +94,45 @@ def prepare_learning_data(
     merged["loss_10"]=merged["return_pct"]<=-.10
     return merged
 
+def learning_metric_basis(data: pd.DataFrame) -> str:
+    """Use benchmark-relative outcomes only when the selected sample is complete.
+
+    Older frozen outcomes may predate benchmark tracking. We deliberately avoid
+    mixing raw and benchmark-relative returns inside the same cohort comparison.
+    """
+    if data is not None and not data.empty and "excess_return_pct" in data.columns:
+        rel=pd.to_numeric(data["excess_return_pct"],errors="coerce")
+        if rel.notna().all():
+            return "relative"
+    return "raw"
+
+
+def _evaluation_returns(data: pd.DataFrame) -> pd.Series:
+    if learning_metric_basis(data)=="relative":
+        return pd.to_numeric(data["excess_return_pct"],errors="coerce")
+    return pd.to_numeric(data["return_pct"],errors="coerce")
+
+
 def _cohort_rows(data: pd.DataFrame, column: str, min_count: int=MIN_COHORT) -> pd.DataFrame:
     if data is None or data.empty or column not in data.columns:
         return pd.DataFrame()
     work=data.copy()
     work[column]=work[column].fillna("Saknas").astype(str)
     rows=[]
+    basis=learning_metric_basis(work)
+    metric_col="excess_return_pct" if basis=="relative" else "return_pct"
     for name,g in work.groupby(column,dropna=False):
         n=len(g)
+        metric=pd.to_numeric(g[metric_col],errors="coerce")
         rows.append({
             "Grupp":str(name),
             "Antal":int(n),
-            "Median":float(g["return_pct"].median()),
-            "Snitt":float(g["return_pct"].mean()),
-            "Positiva":float((g["return_pct"]>0).mean()),
-            "Minst +10 %":float((g["return_pct"]>=.10).mean()),
-            "Högst −10 %":float((g["return_pct"]<=-.10).mean()),
+            "Median":float(metric.median()),
+            "Snitt":float(metric.mean()),
+            "Positiva":float((metric>0).mean()),
+            "Minst +10 %":float((metric>=.10).mean()),
+            "Högst −10 %":float((metric<=-.10).mean()),
+            "Mätning":"Mot index" if basis=="relative" else "Rå kursutveckling",
             "Tillräckligt underlag":bool(n>=min_count),
         })
     return pd.DataFrame(rows).sort_values(["Tillräckligt underlag","Median","Antal"],ascending=[False,False,False])

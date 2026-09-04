@@ -74,12 +74,16 @@ def snapshot_columns(horizon_type: str) -> list[str]:
         ]
     return [
         "Ticker", "Namn", "Pris", "Valuta", "Prisdatum", "Sektor", "INVEST Score",
+        "Djupurval", "Djupurval Nyckel", "Djupurval Linser", "Djupurval Linser text",
+        "Lång Score", "Livstid Score", "REVERSAL Score",
         "Kvalitet", "Risk", "Värdering", "Datatäckning",
         "1 mån", "3 mån", "6 mån", "Avstånd SMA200",
         "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
         "ROE", "Vinstmarginal", "Skuld/eget kapital",
         "Case Gate", "Case Confidence", "Case Evidence Count", "Case Veto Count",
         "Djupkontroll", "Value Trap Risk", "Deep Confidence",
+        "Fundamental Data status", "Fundamental Data senaste rapportperiod",
+        "Vinstkvalitet status",
         "Inflection Signal", "Inflection Score",
         "Mispricing Signal", "Mispricing Confidence",
         "Scenario Verdict", "Scenario Asymmetry", "Scenario Confidence",
@@ -161,6 +165,48 @@ def build_recommendation_records(
     return records
 
 
+def deep_selection_outcome_summary(
+    recommendations: pd.DataFrame, outcomes: pd.DataFrame, horizon: str = "1y"
+) -> pd.DataFrame:
+    """Summarise realised outcomes by the frozen primary deep-selection path.
+
+    This is descriptive audit data only. It must not automatically retune model
+    weights; small samples are particularly easy to over-interpret.
+    """
+    columns = ["selection_path", "evaluated", "positive_rate", "mean_return", "median_return"]
+    if recommendations is None or recommendations.empty or outcomes is None or outcomes.empty:
+        return pd.DataFrame(columns=columns)
+    if "snapshot_json" not in recommendations.columns or "record_id" not in recommendations.columns:
+        return pd.DataFrame(columns=columns)
+
+    recs = recommendations.copy()
+    def path_from_snapshot(raw: Any) -> str:
+        try:
+            snap = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            return str(snap.get("Djupurval Nyckel") or "unknown")
+        except Exception:
+            return "unknown"
+    recs["selection_path"] = recs["snapshot_json"].map(path_from_snapshot)
+    recs = recs[recs["selection_path"] != "unknown"]
+    if recs.empty:
+        return pd.DataFrame(columns=columns)
+
+    outs = outcomes.copy()
+    if "horizon" in outs.columns:
+        outs = outs[outs["horizon"].astype(str) == str(horizon)]
+    merged = outs.merge(recs[["record_id", "selection_path"]], on="record_id", how="inner")
+    merged["return_pct"] = pd.to_numeric(merged.get("return_pct"), errors="coerce")
+    merged = merged.dropna(subset=["return_pct"])
+    if merged.empty:
+        return pd.DataFrame(columns=columns)
+
+    grouped = merged.groupby("selection_path", dropna=False)["return_pct"]
+    result = grouped.agg(evaluated="size", mean_return="mean", median_return="median").reset_index()
+    positive = merged.assign(_positive=merged["return_pct"] > 0).groupby("selection_path")["_positive"].mean()
+    result["positive_rate"] = result["selection_path"].map(positive)
+    return result[columns].sort_values(["evaluated", "mean_return"], ascending=[False, False]).reset_index(drop=True)
+
+
 def horizons_for_record(record: dict[str, Any]) -> dict[str, int]:
     return SHORT_HORIZONS.copy() if str(record.get("horizon_type")) == "short" else LONG_HORIZONS.copy()
 
@@ -179,6 +225,9 @@ def evaluate_record_from_history(
     record: dict[str, Any],
     history: pd.DataFrame,
     as_of: datetime | pd.Timestamp | None = None,
+    benchmark_history: pd.DataFrame | None = None,
+    benchmark_symbol: str | None = None,
+    benchmark_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """Evaluate due horizons using trading-session offsets after the recommendation date.
 
@@ -222,6 +271,43 @@ def evaluate_record_from_history(
         if not math.isfinite(price) or price <= 0:
             continue
         ret = price / entry_price - 1
+
+        # Path quality from recommendation date through the frozen horizon. These
+        # diagnostics are descriptive: they show how quickly the thesis worked and
+        # how painful the path was, without changing the original recommendation.
+        path = after.iloc[:trading_days + 1].copy()
+        path_prices = pd.to_numeric(path["Close"], errors="coerce")
+        path_returns = path_prices / entry_price - 1
+        best_return = float(path_returns.max()) if path_returns.notna().any() else np.nan
+        worst_return = float(path_returns.min()) if path_returns.notna().any() else np.nan
+        sessions_to_best = None
+        if path_returns.notna().any():
+            best_idx = path_returns.idxmax()
+            try:
+                sessions_to_best = int(path.index.get_loc(best_idx))
+            except Exception:
+                sessions_to_best = None
+
+        benchmark_return = np.nan
+        if benchmark_history is not None and not benchmark_history.empty and "Close" in benchmark_history:
+            bench = benchmark_history[["Close"]].copy()
+            bench.index = pd.to_datetime(bench.index)
+            if getattr(bench.index, "tz", None) is not None:
+                bench.index = bench.index.tz_localize(None)
+            bench = bench.sort_index()
+            bench["Close"] = pd.to_numeric(bench["Close"], errors="coerce")
+            bench = bench.dropna(subset=["Close"])
+            # Use the first benchmark close on/after capture and the last close on/before
+            # the stock's evaluated date. This avoids requiring identical exchange calendars.
+            b0 = bench[bench.index.normalize() >= captured.normalize()]
+            b1 = bench[bench.index.normalize() <= pd.Timestamp(eval_date).normalize()]
+            if not b0.empty and not b1.empty:
+                b_start = _num(b0.iloc[0]["Close"])
+                b_end = _num(b1.iloc[-1]["Close"])
+                if math.isfinite(b_start) and b_start > 0 and math.isfinite(b_end) and b_end > 0:
+                    benchmark_return = b_end / b_start - 1
+        excess_return = ret - benchmark_return if math.isfinite(benchmark_return) else np.nan
+
         out.append({
             "record_id": str(record["record_id"]),
             "symbol": str(record["symbol"]),
@@ -230,6 +316,14 @@ def evaluate_record_from_history(
             "evaluated_date": pd.Timestamp(eval_date).date().isoformat(),
             "evaluated_price": float(price),
             "return_pct": float(ret),
+            "benchmark_symbol": str(benchmark_symbol or ""),
+            "benchmark_name": str(benchmark_name or ""),
+            "benchmark_return_pct": None if not math.isfinite(benchmark_return) else float(benchmark_return),
+            "excess_return_pct": None if not math.isfinite(excess_return) else float(excess_return),
+            "beat_benchmark": None if not math.isfinite(excess_return) else bool(excess_return > 0),
+            "best_return_pct": None if not math.isfinite(best_return) else float(best_return),
+            "worst_return_pct": None if not math.isfinite(worst_return) else float(worst_return),
+            "sessions_to_best": sessions_to_best,
             "positive": bool(ret > 0),
             "gain_10": bool(ret >= 0.10),
             "loss_10": bool(ret <= -0.10),
@@ -265,7 +359,11 @@ def outcome_summary(recommendations: pd.DataFrame, outcomes: pd.DataFrame) -> di
         "hit_rate": float((valid["return_pct"] > 0).mean()),
         "gain_10_rate": float((valid["return_pct"] >= 0.10).mean()),
         "loss_10_rate": float((valid["return_pct"] <= -0.10).mean()),
-        "message": "Deskriptiv uppföljning av frysta point-in-time-rekommendationer. Resultatet är inte riskjusterat eller ett bevis på framtida alpha.",
+        "benchmark_evaluated": int(pd.to_numeric(valid.get("excess_return_pct"), errors="coerce").notna().sum()) if "excess_return_pct" in valid.columns else 0,
+        "median_excess_return": float(pd.to_numeric(valid["excess_return_pct"], errors="coerce").dropna().median()) if "excess_return_pct" in valid.columns and pd.to_numeric(valid["excess_return_pct"], errors="coerce").notna().any() else np.nan,
+        "beat_benchmark_rate": float((pd.to_numeric(valid["excess_return_pct"], errors="coerce").dropna() > 0).mean()) if "excess_return_pct" in valid.columns and pd.to_numeric(valid["excess_return_pct"], errors="coerce").notna().any() else np.nan,
+        "median_sessions_to_best": float(pd.to_numeric(valid["sessions_to_best"], errors="coerce").dropna().median()) if "sessions_to_best" in valid.columns and pd.to_numeric(valid["sessions_to_best"], errors="coerce").notna().any() else np.nan,
+        "message": "Deskriptiv uppföljning av frysta point-in-time-rekommendationer. Jämförelsen mot index är ungefärlig och resultatet är inte ett bevis på framtida överavkastning.",
     }
 
 

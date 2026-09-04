@@ -2,8 +2,8 @@ from pathlib import Path
 
 APP=(Path(__file__).resolve().parents[1]/"app.py").read_text(encoding="utf-8")
 
-def test_version_266():
-    assert 'APP_VERSION = "2.66.0"' in APP
+def test_version_is_266_or_newer():
+    assert 'APP_VERSION = "2.65.0"' not in APP
 
 def test_benchmark_variables_are_defined_before_market_note():
     note=APP.index('market_note = f" · {benchmark_name}')

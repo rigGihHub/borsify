@@ -1594,3 +1594,184 @@ Detta minskar risken att gammal nyhetsinformation presenteras som något som hä
 
 Några kvarvarande tekniska ord i djupcaset har också förenklats. Bland annat
 visas inte längre "avkastningshurdle" i användartexten.
+
+
+## v2.67.0 – Ticker, flagga och land överallt
+
+Aktier som visas som rekommendationer eller kandidater får nu en gemensam identitet:
+
+`🇸🇪 Volvo B · VOLV-B.ST · Sverige`
+
+Det gör det enklare att:
+- söka upp rätt aktie direkt,
+- skilja mellan bolag med liknande namn,
+- förstå vilken marknad/notering Borsify analyserar,
+- undvika att råka söka på fel notering i ett annat land.
+
+Regeln används i startsidans bästa möjligheter, Top 3 efter tidshorisont,
+kortsiktiga och långsiktiga fördjupningar samt övriga kandidatlistor.
+
+Land härleds deterministiskt från tickerformatet för Borsifys nuvarande marknader.
+Tickers utan känd utländsk suffix behandlas som USA enligt samma befintliga
+marknadslogik som används i resten av appen.
+
+### Tydligare "Varför nu?"
+
+När en möjlig katalysator har ett identifierbart underlag visar Borsify nu även
+vilken typ av underlag det är och vilken källa analysen bygger på, exempelvis:
+
+`Underlag: Daterad extern rubrik · källa: Reuters`
+
+eller:
+
+`Underlag: Rapporterade siffror och estimat · källa: Bolagsdata/analytikerdata`
+
+Detta ändrar inte katalysatorscoringen. Syftet är att göra slutsatsen lättare att
+granska och tydligare skilja en extern daterad rubrik från rapporterade bolagssiffror.
+
+
+## v2.68.0 – Filtrera på land och aktiepris
+
+Land och aktiepris är nu förstklassiga sökfilter i sidopanelen.
+
+### Land
+
+Användaren kan välja ett eller flera länder i ett multiselect-filter där varje
+land visas med flagga. Exempel:
+
+- 🇸🇪 Sverige
+- 🇺🇸 USA
+- 🇩🇪 Tyskland
+
+Landfiltret tillämpas redan innan Yahoo-scanningen startar. Om användaren i ett
+globalt universum bara väljer Sverige och USA behöver Borsify alltså inte ens
+börja hämta övriga länder i den körningen.
+
+Om inget land är valt startar ingen scanning.
+
+### Pris per aktie
+
+Användaren kan ange:
+
+- Pris från (SEK)
+- Pris till (SEK)
+
+0 betyder ingen gräns.
+
+För utländska aktier används Borsifys befintliga valutaomräkning till `Pris SEK`.
+Det gör att ett globalt prisfilter blir jämförbart. Ett filter på exempelvis
+100–300 SEK betyder alltså samma ekonomiska prisintervall oavsett om aktien
+ursprungligen handlas i USD, EUR, DKK eller annan stödd valuta.
+
+Om prisfilter används och Borsify inte kan räkna fram ett SEK-pris exkluderas
+aktien i stället för att ett lokalt pris felaktigt jämförs med SEK-gränsen.
+
+### Övrigt
+
+Sidotexten om cache har rättats. Den visar nu att kurser normalt cachas 15 minuter
+och att bolagsdata kan återanvändas från den beständiga 24-timmarscachen.
+
+
+## v2.70.0 – Enklare kombinerad aktiesökning
+
+De viktigaste sökvalen finns nu samlade i samma enkla flöde:
+
+1. Typ av case
+2. Tidshorisont
+3. Marknad/land
+4. Pris per aktie i SEK
+
+"Mitt mål" heter nu "Typ av case" eftersom det bättre beskriver vad användaren
+faktiskt väljer, till exempel kortsiktigt köpläge, utdelningsaktier eller billiga
+kvalitetsbolag.
+
+### Tidshorisont
+
+Användaren kan välja:
+- Alla tidshorisonter
+- 1–2 dagar
+- 1 vecka–3 månader
+- 1–5 år
+- Mycket lång sikt
+
+Borsify bygger inte en ny separat modell för detta. Sökningen använder de
+befintliga horizon-scorerna och kombinerar vald tidshorisont med den valda
+case-typen för att prioritera resultaten.
+
+Horisonten är därför en sökprioritering. Den ersätter inte Buy Quality Gate,
+datakontroll, likviditetskontroll eller andra befintliga säkerhetsregler.
+
+### Din sökning
+
+Ett kompakt fält "Din sökning" visar de aktiva huvudvalen:
+- case-typ,
+- tidshorisont,
+- land,
+- prisintervall.
+
+Avancerade filter ligger fortfarande separat bakom "Fler filter", så den normala
+användaren behöver inte möta fler val än nödvändigt.
+
+## v2.71.0 – Multi-lens Finalist Selection
+
+Djupanalysen startar inte längre enbart från de högsta INVEST-poängen. Den lilla finalistpoolen behåller de starkaste INVEST-casen men reserverar även plats för kandidater som sticker ut i redan befintliga linser: bolagskvalitet, mycket lång ägarhorisont, möjlig vändning och värdering. Svaga alternativ får inte en plats bara för att de råkar vara bäst i en svag grupp; rimliga miniminivåer används och tomma platser fylls med befintlig långsikts-/INVEST-rankning.
+
+Detta skapar ingen ny köp-score och ökar inte normal storlek på deep-scan-poolen. Urval till djupanalys är inte en köprekommendation; befintliga data-, value-trap-, vinstkvalitets-, inflection-, mispricing-, scenario- och catalyst-kontroller avgör fortfarande slutlig ordning och kvalitet.
+
+
+## v2.72.0 – Deep Selection Audit
+
+Varje aktie som släpps in i den långsiktiga djupanalysen fryser nu varför den kom med.
+Borsify sparar en stabil urvalsnyckel för den primära vägen (INVEST, kvalitet, mycket lång
+sikt, vändning, värdering eller flerårig profil) samt vilka övriga befintliga linser som var
+starka vid urvalstillfället. Metadata följer med in i rekommendationshistorikens snapshot.
+
+Det finns också en deskriptiv analysfunktion som kan jämföra senare utfall per urvalsväg.
+Den ändrar aldrig vikter automatiskt. Små stickprov ska inte användas för slutsatser om att
+en urvalsväg är bättre; syftet är spårbarhet och framtida validering, inte självlärande heuristik.
+
+## v2.73.0 – Finalist Coverage Test
+
+Borsify kan nu validera om den långsiktiga deep-scan-poolen på sex kandidater är lagom stor i stället för att ändra den på känsla.
+
+Valideringen jämför poolstorlekarna 4, 6, 8 och 10 mot **en och samma redan djupanalyserade referenskörning**. Därmed behöver en referenspool på exempelvis tio kandidater bara hämtas en gång; analysen simulerar därefter vilka av referensens starkaste slutcase som hade överlevt mindre finalistpooler.
+
+Mätningen visar bland annat:
+- hur stor andel av referensens bästa djupcase varje poolstorlek fångar,
+- vilka starka referenscase som missas,
+- hur många extra deep-anrop 8 respektive 10 innebär jämfört med dagens pool på 6.
+
+En separat aggregatfunktion kräver minst fem oberoende körningar, minst 98 % genomsnittlig täckning och ingen körning under 95 % innan en poolstorlek ens markeras som tillräckligt stabil för att övervägas. Poolstorleken ändras **inte automatiskt**.
+
+Detta är en utvecklings-/valideringsmotor och körs inte automatiskt i det vanliga användarflödet. Borsify fortsätter därför med poolstorlek 6 tills faktisk mätdata motiverar något annat.
+
+
+## v2.74.0 – Catalyst Quality / Varför nu? 2.0
+
+- Hindrar dubbelräkning där samma fundamentala inflektion tidigare kunde vara både förändringsstöd och separat katalysatorstöd.
+- Fundamental förbättring, skuldminskning och kassaflödesvändning får fortfarande förklara varför caset är aktuellt, men räknas inte som en oberoende femte pelare.
+- Separat katalysatorstöd kräver nu en färsk, daterad positiv extern signal från en namngiven källa.
+- UI visar tydligare källkontroll och om Varför nu-underlaget faktiskt är oberoende från övrig analys.
+- Rubrikdata är fortfarande triage: originalkällan måste verifieras innan användaren agerar.
+
+## v2.76 – Fundamental Data Confidence
+
+Djupcase får nu en separat datakontroll av själva fundamentaunderlaget. Borsify kontrollerar om resultat-, kassaflödes- och balansdata faktiskt finns, om kvartalsserier finns och hur gammal den senaste verifierbara rapportperioden är. Ett case med för gammal eller overifierbar fundamental datagrund kan inte bli toppcase bara för att övriga scores ser starka ut. Kontrollen är en kvalitetsgrind, inte en ny investeringsscore.
+
+
+## v2.77 – Estimate Revision Quality
+
+Analytikerrevideringar vägs nu efter verifierbar täckning. När Yahoo lämnar antal analytiker skiljer Borsify mellan bred, användbar, tunn och mycket tunn täckning. Om total täckning saknas kan faktisk revisionsaktivitet användas som ett försiktigt tecken på att analytiker finns, men Borsify hittar aldrig på ett analytikerantal. Estimat med tunn eller oklar täckning får lägre påverkan på inflektionsbedömningen, och helt overifierbar täckning får inte flytta scoren. UI visar täckningsstatus och antal när de faktiskt finns.
+
+## v2.78 – Recommendation Outcome Quality
+
+Rekommendationshistoriken mäter nu mer än rå kursuppgång. Mogna utfall kan även sparas med relevant jämförelseindex, utveckling mot index, bästa och sämsta utveckling under mätperioden samt antal handelssessioner till periodens bästa nivå. Sverige jämförs exempelvis med OMXS30, USA med S&P 500 och globalt urval med VT. Learning Engine använder indexrelativt utfall först när hela den valda utfallsgruppen har sådan data; annars används rå kursutveckling så gamla och nya mätmetoder inte blandas. Historiken är fortsatt deskriptiv och ändrar inte modellvikter automatiskt.
+
+
+## v2.79 – Recommendation Failure Analysis
+
+Tydligt svaga historiska rekommendationer får en försiktig efterhandsdiagnos baserad enbart på den data som frystes när rekommendationen skapades. Diagnosen kan peka ut varningssignaler som värdefälla, få oberoende stöd, svag fundamentaldatakvalitet, svag vinstkvalitet eller ett svagt varför-nu. Den försöker inte bevisa vad som orsakade kursutfallet och rekonstruerar aldrig saknad historik med dagens data.
+
+## v2.80 – Failure Pattern Aggregation
+
+Borsify jämför nu hur ofta frysta varningssignaler förekommer i tydligt svaga utfall mot hur ofta samma signal uttryckligen saknas i jämförelsegruppen. Analysen använder alltid en gemensam utfallsgrund för hela vald period: indexrelativ utveckling endast när alla case har sådan data, annars rå kursutveckling. Saknade historiska fält räknas inte som att varningen saknades. Ett möjligt återkommande mönster kräver minst fem case både med och utan signal, minst tre misslyckanden bland exponerade case och minst 15 procentenheters högre misslyckandegrad. Resultaten är deskriptiva och får inte automatiskt ändra modellvikter eller köpgränser.

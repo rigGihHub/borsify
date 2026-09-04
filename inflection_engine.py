@@ -128,6 +128,56 @@ def _revision_balance(eps_revisions: pd.DataFrame | None) -> float:
     return (up - down) / total if total > 0 else 0.0
 
 
+
+
+def _estimate_coverage(earnings_estimate: pd.DataFrame | None, eps_revisions: pd.DataFrame | None) -> dict[str, Any]:
+    """Describe analyst coverage conservatively; missing coverage is never inferred."""
+    row = _pick_index(earnings_estimate)
+    analysts = _col_value(row, ["numberOfAnalysts", "numberofanalysts", "analystCount", "analysts"])
+
+    rev_row = _pick_index(eps_revisions)
+    up30 = _col_value(rev_row, ["upLast30days", "upLast30Days"])
+    down30 = _col_value(rev_row, ["downLast30days", "downLast30Days"])
+    up7 = _col_value(rev_row, ["upLast7days", "upLast7Days"])
+    down7 = _col_value(rev_row, ["downLast7days", "downLast7Days"])
+    revised = np.nansum([up30 if np.isfinite(up30) else np.nan, down30 if np.isfinite(down30) else np.nan])
+    if not np.isfinite(revised) or revised <= 0:
+        revised = np.nansum([up7 if np.isfinite(up7) else np.nan, down7 if np.isfinite(down7) else np.nan])
+    if not np.isfinite(revised) or revised <= 0:
+        revised = np.nan
+
+    if np.isfinite(analysts):
+        n = int(max(0, round(analysts)))
+        if n >= 10:
+            label, weight = "Bred analytikertäckning", 1.0
+        elif n >= 4:
+            label, weight = "Användbar analytikertäckning", 0.75
+        elif n >= 2:
+            label, weight = "Tunn analytikertäckning", 0.45
+        elif n == 1:
+            label, weight = "Mycket tunn analytikertäckning", 0.25
+        else:
+            label, weight = "Ingen verifierbar analytikertäckning", 0.0
+    elif np.isfinite(revised):
+        # Revision activity proves that at least some analysts exist, but not total coverage.
+        if revised >= 4:
+            label, weight = "Analytikeraktivitet finns, total täckning oklar", 0.6
+        elif revised >= 2:
+            label, weight = "Tunn analytikeraktivitet, total täckning oklar", 0.4
+        else:
+            label, weight = "Mycket tunn analytikeraktivitet, total täckning oklar", 0.25
+        n = np.nan
+    else:
+        label, weight, n = "Analytikertäckning saknas", 0.0, np.nan
+
+    return {
+        "Analytiker antal": n,
+        "Reviderande analytiker senaste period": int(revised) if np.isfinite(revised) else np.nan,
+        "Analytikertäckning": label,
+        "Estimat tillförlitlighetsvikt": float(weight),
+    }
+
+
 def _latest_surprise(earnings_history: pd.DataFrame | None) -> float:
     if earnings_history is None or not isinstance(earnings_history, pd.DataFrame) or earnings_history.empty:
         return np.nan
@@ -198,6 +248,7 @@ def build_inflection_metrics(
     eps_revisions: pd.DataFrame | None = None,
     earnings_history: pd.DataFrame | None = None,
     quarterly_balance: pd.DataFrame | None = None,
+    earnings_estimate: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     """Build change-focused evidence without inventing missing estimates.
 
@@ -234,6 +285,7 @@ def build_inflection_metrics(
     eps_change, eps_window = _eps_revision_change(eps_trend)
     revision_balance = _revision_balance(eps_revisions)
     surprise = _latest_surprise(earnings_history)
+    coverage = _estimate_coverage(earnings_estimate, eps_revisions)
 
     rev_yoy = _yoy(revenue)
     previous_rev_yoy = np.nan
@@ -262,6 +314,7 @@ def build_inflection_metrics(
         "EPS-estimat jämförelseperiod": eps_window,
         "EPS-revisionsbalans": revision_balance,
         "Senaste EPS-överraskning": surprise,
+        **coverage,
     }
 
 
@@ -290,24 +343,31 @@ def assess_inflection(metrics: dict[str, Any]) -> dict[str, Any]:
     fcf_positive_share = _num(metrics.get("Andel senaste kvartal med positiv FCF"))
     debt_yoy = _num(metrics.get("Skuld YoY senaste kvartal"))
     net_debt_yoy = _num(metrics.get("Nettoskuld YoY senaste kvartal"))
+    estimate_weight = _num(metrics.get("Estimat tillförlitlighetsvikt"))
+    if not np.isfinite(estimate_weight):
+        estimate_weight = 0.0
+    estimate_weight = float(np.clip(estimate_weight, 0.0, 1.0))
 
     if np.isfinite(eps_change):
         evidence += 1
-        if eps_change >= .05:
-            score += 18; positive.append(f"EPS-estimat har höjts cirka {eps_change:.1%}")
+        if estimate_weight <= 0:
+            # The directional estimate can be shown, but it must not move the case when coverage is unverifiable.
+            pass
+        elif eps_change >= .05:
+            score += 18 * estimate_weight; positive.append(f"EPS-estimat har höjts cirka {eps_change:.1%}")
         elif eps_change >= .02:
-            score += 10; positive.append(f"EPS-estimat har höjts cirka {eps_change:.1%}")
+            score += 10 * estimate_weight; positive.append(f"EPS-estimat har höjts cirka {eps_change:.1%}")
         elif eps_change <= -.05:
-            score -= 24; negative.append(f"EPS-estimat har sänkts cirka {abs(eps_change):.1%}")
+            score -= 24 * estimate_weight; negative.append(f"EPS-estimat har sänkts cirka {abs(eps_change):.1%}")
         elif eps_change <= -.02:
-            score -= 14; negative.append(f"EPS-estimat har sänkts cirka {abs(eps_change):.1%}")
+            score -= 14 * estimate_weight; negative.append(f"EPS-estimat har sänkts cirka {abs(eps_change):.1%}")
 
     if np.isfinite(rev_balance):
         evidence += 1
-        if rev_balance >= .35:
-            score += 10; positive.append("fler analytiker har höjt än sänkt estimaten")
-        elif rev_balance <= -.35:
-            score -= 13; negative.append("fler analytiker har sänkt än höjt estimaten")
+        if estimate_weight > 0 and rev_balance >= .35:
+            score += 10 * estimate_weight; positive.append("fler analytiker har höjt än sänkt estimaten")
+        elif estimate_weight > 0 and rev_balance <= -.35:
+            score -= 13 * estimate_weight; negative.append("fler analytiker har sänkt än höjt estimaten")
 
     if np.isfinite(rev_acc):
         evidence += 1
@@ -418,6 +478,8 @@ def assess_inflection(metrics: dict[str, Any]) -> dict[str, Any]:
             score -= 7
             negative.append("nettoskuld/skuld har ökat tydligt mot för ett år sedan")
 
+    # Conflict detection remains descriptive even when analyst coverage is unknown.
+    # Coverage controls score impact, not whether contradictory estimate data is shown.
     estimate_direction = 0
     if np.isfinite(eps_change):
         estimate_direction += 1 if eps_change >= .02 else (-1 if eps_change <= -.02 else 0)

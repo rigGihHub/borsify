@@ -215,6 +215,14 @@ create table if not exists public.recommendation_outcomes (
   evaluated_at timestamptz not null default now(),
   primary key (user_id, record_id, horizon)
 );
+alter table public.recommendation_outcomes add column if not exists benchmark_symbol text not null default '';
+alter table public.recommendation_outcomes add column if not exists benchmark_name text not null default '';
+alter table public.recommendation_outcomes add column if not exists benchmark_return_pct double precision;
+alter table public.recommendation_outcomes add column if not exists excess_return_pct double precision;
+alter table public.recommendation_outcomes add column if not exists beat_benchmark boolean;
+alter table public.recommendation_outcomes add column if not exists best_return_pct double precision;
+alter table public.recommendation_outcomes add column if not exists worst_return_pct double precision;
+alter table public.recommendation_outcomes add column if not exists sessions_to_best integer;
 alter table public.recommendation_outcomes enable row level security;
 drop policy if exists "recommendation_outcomes_select_own" on public.recommendation_outcomes;
 create policy "recommendation_outcomes_select_own" on public.recommendation_outcomes for select using (auth.uid() = user_id);

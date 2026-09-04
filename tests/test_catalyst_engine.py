@@ -10,7 +10,7 @@ def test_positive_inflection_becomes_catalyst():
     }
     r = build_catalyst_assessment(case, {}, NOW)
     assert r['Catalyst Signal'] == 'Tydlig möjlig katalysator'
-    assert r['Catalyst Support'] is True
+    assert r['Catalyst Support'] is False
     assert r['Primary Catalyst'] == 'Fundamental inflektion'
 
 def test_report_is_control_point_not_positive_support():
@@ -34,7 +34,7 @@ def test_undated_positive_headline_is_not_current_catalyst():
 
 def test_deleveraging_can_be_catalyst():
     r = build_catalyst_assessment({'Skuldförändring': -.25}, {}, NOW)
-    assert r['Catalyst Support'] is True
+    assert r['Catalyst Support'] is False
     assert r['Primary Catalyst'] == 'Skuldminskning'
 
 def test_no_evidence_means_no_catalyst():

@@ -36,10 +36,19 @@ def build_case_quality_gate(case: dict[str, Any] | pd.Series) -> dict[str, Any]:
     catalyst_signal = str(case.get("Catalyst Signal", "Ingen tydlig katalysator verifierad"))
     catalyst_support = bool(case.get("Catalyst Support", False))
     catalyst_conf = _num(case.get("Catalyst Confidence"))
+    fundamental_data_status = str(case.get("Fundamental Data status", ""))
+    fundamental_data_stop = str(case.get("Fundamental Data stopp", "") or "")
 
     supports: list[str] = []
     neutral: list[str] = []
     vetoes: list[str] = []
+
+    # Fundamental data confidence is a prerequisite, not another support pillar.
+    # A stale or unverifiable financial base must not be rescued by a high score.
+    if fundamental_data_status == "STOPP":
+        vetoes.append("fundamentala data är för gamla eller ofullständiga" + (f" ({fundamental_data_stop})" if fundamental_data_stop else ""))
+    elif fundamental_data_status == "ANVÄNDBART MED VARNING":
+        neutral.append("fundamentala data är användbara men har en färskhets-/täckningsvarning")
 
     # 1) Durable operating evidence.
     if deep_gate == "Klarar djupkontroll":
@@ -113,7 +122,12 @@ def build_case_quality_gate(case: dict[str, Any] | pd.Series) -> dict[str, Any]:
 
     support_count = len(supports)
     veto_count = len(vetoes)
-    hard_veto = deep_gate in {"Hög value-trap-risk", "Avstå tills vidare", "Otillräcklig data"} or (np.isfinite(trap) and trap >= 70) or low_coverage
+    hard_veto = (
+        deep_gate in {"Hög value-trap-risk", "Avstå tills vidare", "Otillräcklig data"}
+        or (np.isfinite(trap) and trap >= 70)
+        or low_coverage
+        or fundamental_data_status == "STOPP"
+    )
 
     if hard_veto or veto_count >= 2 or (veto_count >= 1 and support_count <= 1):
         gate = "Ej toppcase"
