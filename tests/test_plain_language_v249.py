@@ -7,7 +7,7 @@ def test_version_is_at_least_249():
     assert 'APP_VERSION = "2.48.0"' not in APP
 
 def test_main_tabs_use_plain_historical_test_name():
-    assert '["Marknad", "Historiska tester"]' in APP
+    assert '["Så fungerar Borsify", "Analyslabbet"]' in APP
     assert '["Marknad", "Edge Lab"]' not in APP
 
 def test_buy_gate_is_explained_in_swedish():

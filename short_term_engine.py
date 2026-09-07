@@ -6,6 +6,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from momentum_12_1 import combine_momentum, momentum_12_1_score
+
 
 def _num(value: Any) -> float:
     try:
@@ -100,7 +102,12 @@ def assess_short_term_case(
     flags = str(row.get("Riskflaggor", ""))
 
     trend = _trend_score(price, sma50, dist200)
-    momentum = _momentum_score(m1, m3, m6)
+    recent_momentum = _momentum_score(m1, m3, m6)
+    momentum_12_1_ret = _num(row.get("12–1 momentum"))
+    momentum_12_1 = _num(row.get("12–1 momentum score"))
+    if not math.isfinite(momentum_12_1):
+        momentum_12_1 = momentum_12_1_score(momentum_12_1_ret)
+    momentum, momentum_text = combine_momentum(recent_momentum, momentum_12_1)
     relative, relative_text = _relative_strength_score(row, benchmark)
     participation = _linear(vol, 0.65, 1.65) if math.isfinite(vol) else 45.0
 
@@ -153,6 +160,11 @@ def assess_short_term_case(
         vetoes.append("aktien underpresterar marknaden samtidigt som lång trend är svag")
     if math.isfinite(liquidity) and liquidity < 2:
         cautions.append("mycket låg daglig omsättning kan göra signalen svår att handla")
+    idio_status = str(row.get("Idiosynkratisk volatilitet status", "") or "")
+    if idio_status == "MYCKET HÖG BOLAGSSPECIFIK RISK":
+        cautions.append("mycket stora bolagsspecifika svängningar")
+    elif idio_status == "HÖG BOLAGSSPECIFIK RISK":
+        cautions.append("stora bolagsspecifika svängningar")
 
     # A sharp daily fall is a risk/event clue, never a positive factor by itself.
     if math.isfinite(daily) and daily <= -0.08:
@@ -213,6 +225,10 @@ def assess_short_term_case(
         "Short Relative Strength": round(relative, 1),
         "Short Relative Text": relative_text,
         "Short Momentum": round(momentum, 1),
+        "Short Recent Momentum": round(recent_momentum, 1),
+        "Short 12–1 Momentum": round(momentum_12_1, 1) if math.isfinite(momentum_12_1) else np.nan,
+        "Short 12–1 Momentum Return": round(momentum_12_1_ret, 4) if math.isfinite(momentum_12_1_ret) else np.nan,
+        "Short Momentum Text": momentum_text,
         "Short Participation": round(participation, 1),
         "Short Revisions": round(revisions, 1),
         "Short Catalyst": round(catalyst_score, 1),

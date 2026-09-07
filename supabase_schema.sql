@@ -323,3 +323,52 @@ drop policy if exists "universe_qc_events_insert_own" on public.universe_qc_even
 create policy "universe_qc_events_insert_own" on public.universe_qc_events for insert with check (auth.uid() = user_id);
 create index if not exists universe_qc_state_quarantine_idx on public.universe_qc_state(user_id, quarantine_until);
 create index if not exists universe_qc_events_symbol_idx on public.universe_qc_events(user_id, symbol, created_at desc);
+
+-- v3.09.0: append-only production model governance events.
+-- Use this as durable backing when SQLite is not persistent across deploys.
+create table if not exists public.production_model_events (
+  event_id text primary key,
+  event_type text not null,
+  effective_at timestamptz not null,
+  registry_version text not null,
+  app_version text not null,
+  model_id text not null,
+  model_label text not null,
+  model_fingerprint text not null,
+  previous_model_id text,
+  previous_fingerprint text,
+  challenger_id text,
+  challenger_fingerprint text,
+  source_event_id text,
+  decision_by text not null,
+  reason text not null,
+  rollback_trigger text,
+  metadata_json jsonb not null default '{}'::jsonb
+);
+create index if not exists idx_production_model_events_effective_at
+  on public.production_model_events (effective_at desc);
+
+
+-- v3.18.0: append-only production selection-policy governance events.
+-- Use this as durable backing when local SQLite is not persistent across deploys.
+create table if not exists public.production_policy_events (
+  event_id text primary key,
+  event_type text not null,
+  effective_at timestamptz not null,
+  registry_version text not null,
+  app_version text not null,
+  policy_id text not null,
+  policy_label text not null,
+  policy_fingerprint text not null,
+  previous_policy_id text,
+  previous_fingerprint text,
+  candidate_policy_id text,
+  candidate_fingerprint text,
+  source_event_id text,
+  decision_by text not null,
+  reason text not null,
+  rollback_trigger text,
+  metadata_json jsonb not null default '{}'::jsonb
+);
+create index if not exists idx_production_policy_events_effective_at
+  on public.production_policy_events (effective_at desc);

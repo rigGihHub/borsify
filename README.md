@@ -1,4 +1,54 @@
-# Borsify v2.35.0
+# Borsify v2.93.0
+
+## v2.93.0 – Benchmark 2.0
+
+- Relativ styrka jämför nu aktien i tre lager: hemmamarknad, sektor och jämförbara bolag.
+- Peer-gruppen prioriterar samma marknad + sektor + bransch och kräver minst tre andra bolag med data.
+- Om branschgruppen är för liten används samma marknad + sektor; om även det är för tunt visas peer-jämförelsen som saknad.
+- Peer-data får aldrig fabriceras och saknat underlag ger inte en påhittad stark signal.
+- UI:t säger uttryckligen att marknads-/sektorjämförelsen är baserad på den aktuella Borsify-scanningen och inte ett officiellt index.
+- Relativ styrka är fortsatt bekräftelse/tiebreaker och kan inte ensam rädda ett svagt fundamentalt case.
+
+## v2.92.0 – Expectation Change Engine
+
+Borsify separates changes in analyst expectations from changes in reported company data. The engine does not create another ranking score. It classifies whether expectations are rising, falling, conflicted, or whether reported numbers may be improving before analyst estimates turn. Thin analyst coverage cannot on its own create a positive expectation signal. The case quality gate now uses this evidence explicitly, and the detailed UI shows the analyst view and reported-data view separately.
+
+
+## v2.91.0 – Sector-aware Valuation
+
+- Värdering använder nu olika måttvikter för bank/finans, fastigheter, tillgångslätt tillväxt/teknik, cykliska råvaru-/energibolag och kapitalintensiva utilities.
+- Saknade värderingsmått räknas inte längre automatiskt som neutrala 50-poängare; täckningen visas separat.
+- Fastigheter märks försiktigt eftersom P/FFO och substansvärde/NAV inte finns i grunddatan.
+- I köpets fördjupning visas vilken värderingsprofil och vilket underlag som faktiskt användes.
+- Detta är fortfarande relativ screening, inte en DCF eller ett bevis på intrinsic value.
+
+
+## v2.90.0 – Point-in-Time Ledger 2.0
+
+- Fryser modellversion, profil, marknad och exakt fångsttid inne i varje snapshot.
+- Fryser fler av de faktiska beslutsunderlagen: rapportdatum/datastatus, estimatrevideringar och analytikertäckning, katalysatorns källa/verifiering, case-stöd/veton samt scenario- och kvalitetsdata.
+- Märker uttryckligen vilka kritiska fält som saknades när beslutet togs. Saknad historisk data fylls aldrig i senare.
+- Historikvyn kan visa **Vad visste Borsify när beslutet togs?** för de senaste frysta casen.
+- Äldre snapshots lämnas orörda och märks som äldre i stället för att efterkonstrueras.
+
+
+
+## v2.86.0 – Rejection Rule Audit
+
+Borsify jämför nu missade vinnare med korrekt bortvalda finalister och flaggar bara stopporsaker som kan vara för hårda när jämförelseunderlaget är tillräckligt. Ingen automatisk omviktning sker.
+
+## v2.85.0 – False Negative Analysis
+
+- Fryser nu uttryckligen om varje finalist faktiskt rekommenderades eller valdes bort.
+- Följer mogna bortvalda finalister och hittar tydliga vinnare som Borsify missade.
+- Använder indexrelativt utfall när hela jämförelsegruppen har indexdata, annars rå kursutveckling för hela gruppen.
+- Visar varför caset valdes bort utifrån fryst point-in-time-data, aldrig dagens information.
+- Analysen är deskriptiv och ändrar inte modellvikter eller köpgränser automatiskt.
+
+## v2.84.0 – Kortare köpkort, detaljer på begäran
+
+Topplistorna visar nu bara det som behövs för första beslutet: varför köpa, varför just nu, största risk och vad som måste kontrolleras. Handel, marknadsläge, jämförelse mot marknad/sektor och den regelbaserade risk-/uppsideplanen finns kvar men visas först när användaren öppnar **Visa mer om bedömningen**. Varning om att aktien redan kan ha gått för långt ligger kvar direkt på kortet eftersom den kan ändra beslutet omedelbart. Ingen ranking-, gate- eller analyslogik har ändrats.
+
 
 ## v2.35.0 – Earnings Revisions & Inflection Engine
 
@@ -733,7 +783,7 @@ Tyskland och Storbritannien finns kvar.
 
 Borsifys marknadsuniversum har flyttats till en separat skalbar katalog
 `avanza_universe.csv` med ticker, land och nivå. Första breda versionen innehåller
-586 unika aktier i 15 länder.
+772 unika aktier i 15 länder efter den kontrollerade USA-expansionen i v2.89.0.
 
 För utländska marknader kan användaren välja:
 - Snabbt kärnurval
@@ -1775,3 +1825,225 @@ Tydligt svaga historiska rekommendationer får en försiktig efterhandsdiagnos b
 ## v2.80 – Failure Pattern Aggregation
 
 Borsify jämför nu hur ofta frysta varningssignaler förekommer i tydligt svaga utfall mot hur ofta samma signal uttryckligen saknas i jämförelsegruppen. Analysen använder alltid en gemensam utfallsgrund för hela vald period: indexrelativ utveckling endast när alla case har sådan data, annars rå kursutveckling. Saknade historiska fält räknas inte som att varningen saknades. Ett möjligt återkommande mönster kräver minst fem case både med och utan signal, minst tre misslyckanden bland exponerade case och minst 15 procentenheters högre misslyckandegrad. Resultaten är deskriptiva och får inte automatiskt ändra modellvikter eller köpgränser.
+
+
+## v2.89.0 – Controlled Universe Expansion
+
+- Brett universum har utökats från 586 till 772 katalogposter i 15 länder.
+- Expansionen ligger i **Bred**-nivån och ändrar inte det snabbare kärnurvalet.
+- Den största utökningen ligger i USA, där fler stora och medelstora bolag kan nå finaliststeget.
+- Alla nya katalogposter måste fortfarande passera den lokala Universe Integrity Gate innan någon datahämtning.
+- Därefter gäller samma runtime-QC som tidigare: trasig kursdata, för kort historik eller gammalt kursdatum kan stoppa en ticker.
+- Katalogmedlemskap är inte ett påstående om att aktien är aktiv eller investeringsbar just nu; marknadsdata måste verifiera det i körningen.
+
+Syftet är bättre söktäckning utan att sänka datakraven. Nästa prioritet är att stärka point-in-time-ledgern så att framtida modellutvärdering kan göras på exakt det underlag Borsify såg när beslutet togs.
+
+## v2.94.0 – Signal Ablation
+
+Borsify kan nu göra ett riktigt leave-one-signal-out-test av den kortsiktiga Short Alpha-blandningen. De sex frysta komponenterna (relativ styrka, trend, momentum, handelsaktivitet, förväntningsförändring och katalysator) testas en i taget genom att tas bort och de återstående originalvikterna normaliseras om. Testet använder bara data som faktiskt frystes vid beslutet, samma utfallsmått för hela kohorten och oberoende case efter borttagning av överlappande observationer av samma aktie. Case där ett hard veto kapade Short Alpha-scoren exkluderas från just detta additiva ablationstest.
+
+Resultatet jämför rangkorrelation mot framtida utfall samt skillnaden i medianutfall mellan signalblandningens övre och nedre tredjedel. Minst 24 oberoende kompletta case krävs innan en signal kan märkas som möjlig informationsnytta eller som värd att granska. Analysen är deskriptiv och ändrar aldrig vikter automatiskt.
+
+Från v2.94 fryser den långsiktiga ledgern även `Growth Score` och `Marknadsläge`, så att samma exakta komponent-ablation kan byggas för INVEST-modellen när tillräckligt många nya point-in-time-utfall har mognat. Äldre historik fylls inte i retroaktivt.
+
+## v2.95 – SCORE CALIBRATION
+
+Borsify testar nu explicit om ett högre fryst Borsify-betyg faktiskt har följts av bättre framtida utfall. Analysen använder fasta scoregrupper (under 60, 60–69, 70–79 och 80+), samma utfallsmått inom varje kohort och oberoende case efter att överlappande observationer av samma aktie tagits bort. Kortsiktig och långsiktig modell blandas aldrig, även när båda har ett 6-månadersutfall.
+
+Borsify kräver minst 24 oberoende case per modelltyp och minst två scoregrupper med sex case vardera innan kalibreringen får klassas. Resultatet kan bli `Bra ordning`, `Ingen tydlig ordning` eller `Kalibreringen bör granskas`. Kalibreringen är deskriptiv och ändrar aldrig scorevikter, köpgränser eller andra produktionsregler automatiskt.
+
+## v2.96 – DATA CONSISTENCY / REDUNDANCY GATE
+
+- Finalister dubbelkontrolleras via Yahoo quote/info, `fast_info` och rapporttabeller.
+- Kurs, börsvärde, FCF, skuld, omsättning och nettoresultat jämförs när båda representationerna finns.
+- Extrema motsägelser stoppar ett toppcase; rimliga tids-/periodskillnader ger bara varning.
+- Intern Yahoo-dubbelkontroll räknas aldrig som oberoende extern verifiering. Saknad sekundär data blir `FÖR LITE UNDERLAG`, inte positiv bekräftelse.
+- Extern verifieringsstatus finns nu som separat kontrakt för framtida primär/oberoende källa.
+
+
+## v2.98.0 – Post-Report Drift Engine
+
+- Fångar senaste rapporthändelsen från verifierbar earnings history när den finns.
+- Mäter första marknadsreaktionen över upp till två handelssessioner och därefter fortsatt kursrörelse.
+- Kombinerar rapportöverraskning, kursreaktion, fortsatt drift och verifierbar analytikerrespons utan att skapa en ny användarscore.
+- Positiv rapportdrift kan stärka "Varför nu"; negativ eller avtagande drift visas som konflikt/varning.
+- Rapporter äldre än 45 dagar får inte räknas som stark aktuell drivkraft, och rapporter äldre än 90 dagar räknas inte som varför-nu-signal.
+- Point-in-time-ledgern fryser rapportdriftens råa beslutsunderlag för framtida utvärdering.
+- Modulen använder Yahoo/yfinance-data och är därför inte oberoende extern verifiering.
+
+## v2.99.0 – Earnings Quality 2.0 / Accrual Quality
+
+Borsify går djupare i frågan om redovisad vinst faktiskt stöds av pengar i verksamheten.
+
+Nytt i denna release:
+
+- beräknar ett kassaflödesbaserat accrual-mått: `(nettoresultat - operativt kassaflöde) / genomsnittliga tillgångar`
+- skiljer hög redovisad vinst från vinst som faktiskt blir operativt kassaflöde
+- varnar när vinsttillväxt springer tydligt före kassaflödestillväxt
+- följer om kassaflöde/vinst förbättras eller försämras över flera år
+- kontrollerar hur konsekvent operativt och fritt kassaflöde varit positivt
+- behåller kontroller av rörelsekapital, kundfordringar och lager
+- fryser de nya vinstkvalitetsfälten i Recommendation Ledger för framtida point-in-time-validering
+- visar inga nya top-level scores; informationen ligger i djupcasets förklaring
+
+Höga accruals används som varning, inte som ett ensamt hårt köpstopp. Måttet är bransch- och redovisningskänsligt och ska därför ses som motbevis/evidens, inte som facit.
+
+## v3.00.0 – Investment Discipline / Asset Growth
+
+Borsify kontrollerar nu om ett bolags tillväxt kräver allt mer kapital. Analysen använder rapporterad tillgångstillväxt, omsättningstillväxt, capex som andel av omsättning, kapitalomsättning och operativ avkastning på tillgångar. Syftet är att skilja effektiv tillväxt från tillväxt där balansräkningen eller investeringsbehovet växer snabbare än affären.
+
+Kontrollen är branschmedveten: kapitalintensiva verksamheter får bredare toleranser och bank/finans bedöms inte med generiska tillgångs- och capexregler. En svag kapitaldisciplin blir en kontroll-/varningssignal, inte ett automatiskt hårt köpstopp. Fälten fryses i Recommendation Ledger för framtida point-in-time-validering.
+
+## v3.01.0 – Evidence Families
+
+Borsify grupperar nu närliggande signaler i sex tydliga evidensfamiljer: pris/värdering, bolagskvalitet, förändrade förväntningar, kursbekräftelse, händelse/katalysator samt risk/motbevis. Flera korrelerade mått inom samma familj räknas inte längre som flera oberoende stöd. Riskfamiljen fungerar som kontroll och ger inte plusstöd bara för att ingen riskflagga hittas. Case Quality Gate använder familjebredd när den finns, medan äldre historiska snapshots fortsätter använda äldre logik. Familjestatus fryses i Recommendation Ledger för framtida point-in-time-validering.
+
+## v3.03.0 – 12–1 Momentum
+
+Borsify skiljer nu längre momentum från den allra senaste månadens kursrörelse. Ett klassiskt 12–1-mått beräknar kursutvecklingen från ungefär tolv månader tillbaka fram till ungefär en månad före dagens snapshot. Den senaste månaden exkluderas medvetet så att en kort squeeze, rapportspik eller rekyl inte förväxlas med uthålligt momentum.
+
+12–1-signalen ersätter inte kortare timing. I Short Alpha kombineras den med det befintliga 1/3/6-månadersmomentumet, där den färskare signalen fortfarande väger mest. Borsify kan därför skilja mellan kort och längre momentum som bekräftar varandra, en färsk uppgång utan längre stöd och ett starkt längre momentum där den senaste tiden har försvagats. För kort kurshistorik ger `För lite historik`, aldrig neutral positiv bekräftelse.
+
+Rå 12–1-avkastning, dess diagnostiska score och den kombinerade momentumbilden fryses i Recommendation Ledger. Det gör framtida point-in-time-ablation möjlig utan att dagens kurser används retroaktivt. Ingen ny top-level score har skapats och 12–1 får inte ensamt rädda ett case som stoppas av trend-, risk- eller falling-knife-regler.
+
+## v3.05.0 – Literature Signal Validation
+
+Borsify validerar nu de senaste litteraturinspirerade signalerna mot framtida utfall i Recommendation Ledger: Post-Report Drift, Earnings Quality 2.0, Investment Discipline, Evidence Families, 12–1 Momentum och bolagsspecifik volatilitet. Endast point-in-time-data som faktiskt frystes efter att respektive signal infördes används; äldre case fylls aldrig i med dagens data. Överlappande observationer av samma aktie tas bort före jämförelsen.
+
+Varje signal jämför en tydligt positiv grupp mot en tydlig varningsgrupp och klassas som Lovande, Oklart, Ifrågasatt eller För lite historik. Minst 24 oberoende case totalt och minst 8 i vardera grupp krävs innan en signal kan klassas som Lovande eller Ifrågasatt. Om samtliga observationer har jämförelseindex används indexjusterat utfall, annars används rå kursutveckling för hela gruppen. Diagnostiken ändrar aldrig vikter eller köpgränser automatiskt.
+
+
+## v3.05.0 – Signal Governance
+Borsify sammanför point-in-time-validering över flera horisonter och föreslår endast manuell granskning: behåll, bevaka, granska för nedtoning, kandidat för avveckling eller vänta på mer data. En enda horisont räcker aldrig och case räknas inte ihop mellan horisonter. Inga vikter, signaler eller köpgränser ändras automatiskt.
+
+## v3.07.0 – Champion–Challenger / Model Change Log
+
+Borsify inför en separat modellstyrning där enkla, förregistrerade Short Alpha-varianter jämförs mot nuvarande produktionsmodell på exakt samma frysta, oberoende historiska case. En challenger måste visa bättre resultat på minst två utvärderade horisonter utan en tydligt sämre horisont för att ens få status "Kandidat för fortsatt test". Ingen challenger kan automatiskt ersätta champion; nästa steg efter historiskt stöd är prospektiv testning på nya case. Större modellförändringar dokumenteras samtidigt i en separat ändringslogg så att framtida utfall kan kopplas till rätt modellversion.
+
+
+## v3.08.0
+Model Promotion Protocol: prospektiv resultatgrind, rangordningskontroll, marknadslägesrobusthet, point-in-time-datatäckning och explicit rollback-plan innan manuell promotionsprövning. Ingen automatisk promotion.
+
+## v3.09.0 – Production Model Registry + Rollback History
+
+Borsify har nu ett separat, append-only produktionsregister för champion-modellen. Registret lagrar exakt modell-fingerprint, appversion, beslutsmotivering, beslutsfattare, föregående champion och rollback-trigger för varje faktisk promotion. En rollback blir en ny historikhändelse; gamla poster skrivs aldrig över. Själva fingerprinten bygger på innehållet i modellrelevanta källfiler snarare än bara versionsnumret, så en tyst kodförändring kan upptäckas.
+
+Promotion och rollback kräver ett uttryckligt manuellt beslut och ändrar aldrig modellkod eller vikter automatiskt. UI:t visar aktuell champion, registrerad fingerprint, runtime-fingerprint och produktions-/rollbackhistorik. Om runtime-definitionen inte matchar registrerad champion markeras det som en blockerande granskningssignal. Lokal SQLite används som audit-store i standardinstallationen; för verkligt beständig historik över redeploy/restart måste registret ligga på beständig lagring.
+
+## v3.10.0 – Model Health Monitor
+
+- Följer champion efter driftsättning med fasta, point-in-time-baserade hälsokontroller.
+- Jämför senaste mogna oberoende case mot föregående period för 1m och 3m.
+- Bevakar utfallsförsämring, score–utfall-rangordning, PIT-datatäckning, signaldistributionsskiften och marknadslägesrobusthet.
+- Kräver minst två samtidiga varningar och minst en varning i utfall/rangordning innan statusen blir `Granska rollback`.
+- Ingen automatisk rollback eller modelländring sker; resultatet är beslutsstöd för manuell root-cause- och rollbackprövning.
+
+## v3.11.0 – Root Cause Diagnostics
+
+- Lägger till diagnostik efter Model Health Monitor för att försöka lokalisera *var* en försämring finns innan rollback diskuteras.
+- Använder endast fryst point-in-time-data och oberoende mogna case; ingen historik fylls i med dagens data.
+- Granskar förändringar i Short Alpha-signaler, koncentrerad svaghet per marknad/sektor/marknadsläge samt fall i PIT- och signaldatatäckning.
+- Visar **Stark kandidat** eller **Möjlig** förklaring, men uttryckligen aldrig bevisad kausalitet.
+- Diagnostiken får inte ändra vikter, exkludera grupper eller trigga rollback automatiskt.
+
+## v3.12.0 – Drift Attribution / Failure Cohorts
+
+- Lägger till fördefinierade failure cohorts för att se vilka *typer av case* som står för ett eventuellt tapp i champion-modellen.
+- Jämför senaste 12 oberoende mogna case med föregående 12 och med övriga case i samma fönster.
+- Kortsiktiga cohorts omfattar bland annat högt score + svag kursbekräftelse, starkt momentum + svag handelsaktivitet, förväntningar/katalysator utan kursstöd, rapportstöd utan fortsatt drift och hög bolagsspecifik volatilitet.
+- Stöd finns även för långsiktiga cohorts såsom högt score + svag vinstkvalitet/kapitaldisciplin och få oberoende Evidence Families.
+- Resultaten är diagnostisk attribution/samvariation, aldrig bevisad kausalitet och leder inte till automatisk viktändring, exkludering eller rollback.
+
+
+## v3.13.0 – Case Archetypes / Interaction Diagnostics
+
+- Testar ett litet antal fördefinierade kombinationer av två signaler i fryst point-in-time-historik.
+- Jämför case där båda signalerna finns mot case där exakt en av signalerna finns. Det minskar risken att bara återupptäcka effekten av en enskild signal.
+- Kortsiktiga exempel: 12–1 momentum + relativ styrka, katalysator + kursbekräftelse, rapportstöd + kursbekräftelse samt momentum + hög bolagsspecifik risk.
+- Långsiktiga exempel finns för framtida mogna utfall: billigt + förbättrade förväntningar, vinstkvalitet + kapitaldisciplin, dyrt + momentum och högt score + svag vinstkvalitet.
+- Kräver minst 24 oberoende case totalt, minst 5 case med båda signalerna och minst 6 case med exakt en signal.
+- Visar möjlig/stark interaction eller om en fördefinierad hypotes motsägs. Resultatet är association, inte bevisad kausalitet.
+- Inga vikter, köpgränser eller produktionsregler ändras automatiskt.
+
+## v3.14.0 – Regime-aware Archetypes
+
+Borsify testar nu fördefinierade tvåsignalsarketyper separat i det marknadsläge som var fryst när caset skapades. Syftet är att upptäcka om en kombination är robust över flera börsklimat eller om den verkar fungera i ett läge men inte i ett annat.
+
+Kontrollen använder endast oberoende point-in-time-case. Ett marknadsläge måste ha minst 14 oberoende observationer, minst 4 case med båda signalerna och minst 5 case med exakt en av signalerna. Minst två mogna marknadslägen krävs innan Borsify bedömer en arketyp som robust eller regimberoende.
+
+Status kan bland annat bli Robust positiv, Regimberoende, Möjligen regimkänslig, Robust ifrågasatt eller Ingen tydlig regimskillnad. Analysen är deskriptiv och ändrar aldrig vikter, regler eller champion-modell automatiskt.
+
+
+## v3.15.0 – Regime-aware Selection Policy
+
+Borsify prövar nu ett litet antal låsta hypoteser om högre beviskrav i svag marknad. Testet stannar inne i samma riskfyllda target-cohort och jämför case som uppfyller det föreslagna extra kravet med case som inte gör det.
+
+Första policyhypoteserna gäller momentum + fundamental trigger, katalysator/förväntningar + kursbekräftelse och hög bolagsspecifik risk + stöd från minst tre evidensfamiljer. Minst 16 target-case och minst 6 observationer i vardera jämförelsegruppen krävs. Endast fryst point-in-time-data och oberoende mogna case används.
+
+Resultatet kan ge starkt eller möjligt stöd, motsäga hypotesen eller visa ingen tydlig skillnad. Det är diagnostik för framtida urvalspolicy, inte en produktionsregel. Inga köpgränser eller regler ändras automatiskt; en lovande policy måste först testas prospektivt och beslutas manuellt.
+
+## v3.16.0 – Prospective Policy Registry
+
+Regime-aware Selection Policy är nu förregistrerad innan framtida utfall finns. De tre policyhypoteserna från v3.15 har stabila policy-ID:n, registreringsversion/datum och definition fingerprints. Endast rekommendationer skapade från v3.16.0 och framåt efter registreringsdatumet får räknas som prospektiv evidens.
+
+Prospektiv policygranskning kräver minst två mogna horisonter, minst 32 target-case på den största horisonten, stöd på minst två horisonter och minst en stark stödjande horisont utan motsägande horisont. Resultatet kan endast öppna en manuell policygranskning. Borsify ändrar aldrig köpgränser, urvalsregler eller produktion automatiskt från denna modul.
+
+## v3.17.0 – Policy Promotion Protocol
+
+Förregistrerade urvalspolicyer har nu samma typ av kontrollerad promotionskedja som modell-challengers. En policy måste klara fem separata grindar innan den får status **Redo för manuell policy-promotion**: prospektivt stöd, utfall/kalibrering, robusthet i både SVAG och MYCKET SVAG marknad, minst 90 % point-in-time-täckning för de fält som behövs för policyn samt en versionslåst rollback-plan.
+
+Protokollet ändrar inga köpgränser eller urvalsregler automatiskt. Ett godkänt protokoll öppnar endast för ett dokumenterat manuellt releasebeslut. Nuvarande policy bevaras som rollback-baseline, och en ändrad policydefinition måste få ett nytt policy-ID i stället för att gammal prospektiv historik tolkas om.
+
+
+## v3.18.0 – Production Policy Registry + Rollback History
+
+Borsify registrerar nu vilken urvalspolicy som faktiskt är aktiv i produktion. Registret är append-only och sparar aktivering, manuell policy-promotion och rollback med policy-ID, exakt definitionsfingerprint, appversion, beslutsfattare, motivering och rollback-trigger. Baseline-policyn bootstrappas en gång utan att ändra någon produktionsregel.
+
+En registrerad promotion ändrar aldrig urvalslogiken av sig själv. Den körda releasen måste dessutom bära samma låsta `ACTIVE_POLICY_CONTRACT`; annars visar Analyslabbet en runtime-avvikelse och policyn ska inte betraktas som säkert driftsatt. Rollback återgår till en tidigare registrerad definition men kräver fortfarande ett uttryckligt manuellt beslut och separat release/deployment när koden behöver ändras. För beständig revisionshistorik i produktion bör tabellen ligga på persistent lagring, exempelvis Supabase, eftersom lokal SQLite kan försvinna vid omdeploy/restart.
+
+### v3.19.0 – Policy Health Monitor
+Efter en verklig policyaktivering följer Analyslabbet post-activation-resultat för exakt registrerad policy: policygap i mogna target-case, alternativkostnad/missade vinnare, urvalsgrad, PIT-datatäckning och regimrobusthet. Runtime-fingerprint måste matcha registret. Baseline får ingen påhittad effektmätning och ingen rollback sker automatiskt.
+
+
+### v3.20.0 – Policy Root Cause Diagnostics
+
+Borsify kan nu diagnostisera varför en framtida aktiv urvalspolicy kan försämras. Analysen separerar möjlig generell överfiltrering, missade starka vinnare, marknadslägeskoncentration, filtrerade case-typer och PIT-databrister. Endast frysta post-activation-case används. Resultaten är diagnostiska associationer och får aldrig automatiskt ändra policy, köpgräns eller utföra rollback.
+
+
+## v3.21.0 – Evidence Maturity Dashboard
+Analyslabbet samlar nu signaler, challengers och policyer i en gemensam evidensmognadsvy. Historiskt stöd, prospektiv evidens och manuell promotionsberedskap hålls uttryckligen isär. Dashboarden är endast styrning och ändrar aldrig produktionslogik automatiskt.
+
+## v3.23.0 – Why Now Evidence Engine
+Borsify samlar nu de viktigaste färska förändringarna i en gemensam, beslutsklar **VARFÖR NU?**-bedömning utan att skapa ännu ett score. Motorn håller isär (1) förändrade förväntningar/rapporterade bolagssiffror, (2) färsk post-report-kursbekräftelse och (3) en verkligt oberoende extern katalysator. Samma fundamentala inflektion får därför inte räknas dubbelt som både förändring och katalysator. Gamla rapportreaktioner räknas inte som färskt stöd, och färska motbevis visas direkt. Fälten fryses i Point-in-Time Ledger så att nyttan senare kan valideras utan efterhandskonstruktion.
+
+
+## v3.23.0 – Fresh Change Detector 2.0
+Identifierar nya fundamentala riktningsförändringar mellan senaste och föregående kvartal i omsättning, marginal, kassaflöde och vinst. Estimatförändringar hålls separata. Saknad historik fylls aldrig i och modulen skapar inget nytt ranking-score. Nästa produktspår är nyhetsflöde → verifierad händelse → mätbar kursreaktion.
+
+## v3.24.0 – News Impact Engine
+- Analyserar färska Yahoo-rubriker för finalister och kopplar dem till observerad close-to-close-kursreaktion.
+- Skiljer positiv, negativ och oklar rubrik samt källkvalitet och färskhet.
+- Markerar en **möjlig underreaktion** endast när en positiv rubrik kommer från stark källa och initial kursreaktion är begränsad.
+- Mäter 1-, 2- och cirka 5-sessioners reaktion/drift utan att låtsas ha intradags-, spread- eller orderboksdata.
+- Rubrik + kursrörelse är association, aldrig bevis på kausalitet. Originalnyheten ska verifieras.
+- Nyhetsutfall fryses i Point-in-Time Ledger för framtida validering. Inget nytt köp-score skapas.
+
+## v3.25.0 – News Flow Monitor 2.0
+- Följer nu **serier av nyheter** över 30 dagar i stället för att bara bedöma en enskild rubrik.
+- Deduplicerar samma/syndikerade rubrik per publiceringsdag så att ett pressmeddelande inte räknas som flera oberoende bevis.
+- Jämför senaste 14 dagarnas tydligt positiva/negativa händelser med föregående 15–30 dagar och visar om nyhetsriktningen faktiskt förändras.
+- Ett förbättrande flöde kräver minst två separata positiva händelser från starka källor på olika dagar och bryts av färsk negativ information.
+- Kopplar flödet till medianen av observerad initial och cirka femdagars kursreaktion och kan märka **möjlig ackumulerad underreaktion**, **fördröjd positiv kursbekräftelse** eller att flödet redan verkar tydligt prisat.
+- Nyhetsflöde och kursreaktion är tidsmässig association, inte kausalitetsbevis. Ingen ny rankingpoäng skapas och inga köpgränser ändras automatiskt.
+- Nyhetsflödesfälten fryses i Point-in-Time Ledger för framtida prospektiv validering.
+
+
+## v3.26.0 – News Surprise & Price Response
+- Skiljer vanlig positiv/negativ bolagsnyhet från rubriker som explicit signalerar en **förväntningsöverraskning**, exempelvis höjd/sänkt guidance eller bättre/sämre än väntat.
+- Surprise-bedömningen är medvetet en **rubrikproxy**. Borsify hittar inte på konsensusestimat eller ekonomisk magnitud när sådan data saknas.
+- Kopplar den färska överraskningen till observerad close-to-close-reaktion direkt och efter cirka fem handelssessioner.
+- Kan markera möjlig underreaktion, senare kursbekräftelse, mycket stor direkt reaktion eller att kursen går emot rubrikens riktning.
+- Jämförelse mot äldre liknande händelser visas endast när minst två äldre händelser av samma typ/riktning finns i det frysta 30-dagarsunderlaget.
+- Negativ överraskning prioriteras så att positivt nyhetsbrus inte döljer färsk nedsiderisk.
+- Ingen ny rankingpoäng skapas, inga köpgränser ändras och kursrörelse påstås aldrig bevisa att nyheten orsakade rörelsen.
+- Fälten fryses i Point-in-Time Ledger för framtida validering.

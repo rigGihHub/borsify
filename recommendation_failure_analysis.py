@@ -7,6 +7,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from independent_case_validation import independent_case_sample
+
 
 def _num(value: Any) -> float:
     try:
@@ -131,7 +133,12 @@ def failure_pattern_analysis(
     outs = outcomes[outcomes["horizon"].astype(str).eq(str(horizon))].copy()
     if outs.empty:
         return pd.DataFrame(columns=cols)
-    merged = outs.merge(recommendations[["record_id", "horizon_type", "snapshot_json"]], on="record_id", how="inner")
+    rec_cols = ["record_id", "horizon_type", "snapshot_json"]
+    rec_cols += [c for c in ["symbol", "captured_date"] if c in recommendations.columns]
+    merged = outs.merge(recommendations[rec_cols], on="record_id", how="inner")
+    if merged.empty:
+        return pd.DataFrame(columns=cols)
+    merged = independent_case_sample(merged, horizon)
     if merged.empty:
         return pd.DataFrame(columns=cols)
     raw = pd.to_numeric(merged["return_pct"], errors="coerce")

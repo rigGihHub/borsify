@@ -28,6 +28,8 @@ def build_case_quality_gate(case: dict[str, Any] | pd.Series) -> dict[str, Any]:
     deep_conf = _num(case.get("Deep Confidence"))
     infl_conf = _num(case.get("Inflection Confidence"))
     infl_signal = str(case.get("Inflection Signal", "Otillräcklig förändringsdata"))
+    expectation_direction = str(case.get("Förväntningsriktning", "neutral"))
+    expectation_status = str(case.get("Förväntningsförändring", ""))
     mispricing = str(case.get("Mispricing Signal", "Kan inte bedömas"))
     scenario_status = str(case.get("Scenario Status", "Otillräcklig data"))
     scenario_verdict = str(case.get("Scenario Verdict", ""))
@@ -38,6 +40,8 @@ def build_case_quality_gate(case: dict[str, Any] | pd.Series) -> dict[str, Any]:
     catalyst_conf = _num(case.get("Catalyst Confidence"))
     fundamental_data_status = str(case.get("Fundamental Data status", ""))
     fundamental_data_stop = str(case.get("Fundamental Data stopp", "") or "")
+    redundancy_status = str(case.get("Redundans status", ""))
+    redundancy_stop = str(case.get("Redundans stopp", "") or "")
 
     supports: list[str] = []
     neutral: list[str] = []
@@ -49,6 +53,11 @@ def build_case_quality_gate(case: dict[str, Any] | pd.Series) -> dict[str, Any]:
         vetoes.append("fundamentala data är för gamla eller ofullständiga" + (f" ({fundamental_data_stop})" if fundamental_data_stop else ""))
     elif fundamental_data_status == "ANVÄNDBART MED VARNING":
         neutral.append("fundamentala data är användbara men har en färskhets-/täckningsvarning")
+
+    if redundancy_status == "STOPP – MOTSÄGELSE":
+        vetoes.append("beslutskritiska datapunkter motsäger varandra" + (f" ({redundancy_stop})" if redundancy_stop else ""))
+    elif redundancy_status == "KONTROLLERA":
+        neutral.append("datadubbelkontrollen visar en avvikelse som bör verifieras")
 
     # 1) Durable operating evidence.
     if deep_gate == "Klarar djupkontroll":
@@ -63,7 +72,13 @@ def build_case_quality_gate(case: dict[str, Any] | pd.Series) -> dict[str, Any]:
         vetoes.append("flerårsdata är otillräcklig")
 
     # 2) Fresh revisions / operating inflection. Neutral is allowed but not support.
-    if infl_signal in {"Positiv inflektion", "Tidiga förbättringstecken"}:
+    if expectation_direction in {"positiv", "positiv_tidigt"}:
+        supports.append("marknadens förväntningar eller bolagets färska siffror förbättras")
+    elif expectation_direction == "konflikt":
+        neutral.append("prognoser och rapporterade siffror pekar åt olika håll")
+    elif expectation_direction == "negativ":
+        vetoes.append("förväntningarna eller färska bolagssiffror försämras")
+    elif infl_signal in {"Positiv inflektion", "Tidiga förbättringstecken"}:
         supports.append("färska estimat/kvartalstrender förbättras")
     elif infl_signal in {"Negativ förändring", "Tydlig försämring"}:
         vetoes.append("färska förändringssignaler försämras")
@@ -120,26 +135,32 @@ def build_case_quality_gate(case: dict[str, Any] | pd.Series) -> dict[str, Any]:
     if low_coverage:
         vetoes.append("för lite verifierbar data för ett toppcase")
 
-    support_count = len(supports)
+    # v3.01: gate strength is based on independent evidence families when
+    # available. Several correlated metrics inside one family must not create
+    # several votes. Older snapshots without family fields retain legacy logic.
+    family_support = _num(case.get("Evidence Family Support Count"))
+    family_warnings = _num(case.get("Evidence Family Warning Count"))
+    support_count = int(family_support) if np.isfinite(family_support) else len(supports)
     veto_count = len(vetoes)
     hard_veto = (
         deep_gate in {"Hög value-trap-risk", "Avstå tills vidare", "Otillräcklig data"}
         or (np.isfinite(trap) and trap >= 70)
         or low_coverage
         or fundamental_data_status == "STOPP"
+        or redundancy_status == "STOPP – MOTSÄGELSE"
     )
 
     if hard_veto or veto_count >= 2 or (veto_count >= 1 and support_count <= 1):
         gate = "Ej toppcase"
     elif veto_count == 1:
         gate = "Bevaka – motbevis finns"
-    elif support_count >= 5 and coverage_conf >= 65 and catalyst_support:
+    elif support_count >= 4 and coverage_conf >= 65 and catalyst_support and (not np.isfinite(family_warnings) or family_warnings == 0):
         gate = "Toppcase"
-    elif support_count >= 4 and coverage_conf >= 58:
+    elif support_count >= 3 and coverage_conf >= 58 and (not np.isfinite(family_warnings) or family_warnings <= 1):
         gate = "Starkt case"
-    elif support_count >= 3 and coverage_conf >= 52:
+    elif support_count >= 2 and coverage_conf >= 52:
         gate = "Värd djupanalys"
-    elif support_count >= 2 and coverage_conf >= 48:
+    elif support_count >= 1 and coverage_conf >= 48:
         gate = "Bevaka"
     else:
         gate = "Bevaka"
@@ -155,6 +176,7 @@ def build_case_quality_gate(case: dict[str, Any] | pd.Series) -> dict[str, Any]:
     return {
         "Case Gate": gate,
         "Case Evidence Count": support_count,
+        "Case Evidence Basis": "oberoende signalgrupper" if np.isfinite(family_support) else "äldre fempelarmodell",
         "Case Veto Count": veto_count,
         "Case Confidence": round(coverage_conf, 1),
         "Case Confidence Label": conf_label,

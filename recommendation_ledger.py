@@ -58,38 +58,135 @@ def stable_record_id(
 
 
 def snapshot_columns(horizon_type: str) -> list[str]:
+    """Fields frozen for future point-in-time audit.
+
+    Keep raw decision inputs and provenance that were actually available when the
+    finalist was analysed. Missing values stay missing; the ledger must never fill
+    historical gaps with later data.
+    """
+    common = [
+        "Ticker", "Namn", "Pris", "Valuta", "Prisdatum", "Sektor", "Bransch",
+        "Datatäckning", "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
+        "ROE", "Vinstmarginal", "Skuld/eget kapital", "Risk", "Värdering", "Kvalitet", "Marknadsläge",
+        "Fundamental hämtad", "_Fundamental cache",
+        "Idiosynkratisk volatilitet status", "Idiosynkratisk volatilitet",
+        "Idiosynkratisk volatilitet andel", "Idiosynkratisk beta", "Idiosynkratisk volatilitet sessioner",
+    ]
+    catalyst = [
+        "Catalyst Signal", "Catalyst Support", "Catalyst Strength", "Catalyst Confidence",
+        "Primary Catalyst", "Catalyst Timing", "Catalyst Effect", "Catalyst Evidence",
+        "Catalyst Evidence Type", "Catalyst Source", "Catalyst Verification",
+        "Catalyst Source Quality", "Catalyst Source Quality Score",
+        "Catalyst Independent Support", "Catalyst Why Now", "Catalyst Warnings",
+        "Why Now Status", "Why Now Summary", "Why Now Evidence Count", "Why Now Evidence Families",
+        "Why Now Contradiction Count", "Why Now Warning", "Why Now Has Independent Catalyst",
+        "News Impact Status", "News Impact Summary", "News Impact Fresh Count",
+        "News Impact Positive Count", "News Impact Negative Count", "News Impact Underreaction Count",
+        "News Impact Primary Title", "News Impact Primary Direction", "News Impact Primary Reaction",
+        "News Impact Primary Drift", "News Impact Source Quality", "News Impact Warning",
+        "News Flow Status", "News Flow Summary", "News Flow Unique Items 30d",
+        "News Flow Recent Items 14d", "News Flow Positive 14d", "News Flow Negative 14d",
+        "News Flow Independent Positive 14d", "News Flow Independent Negative 14d",
+        "News Flow Early Positive 7d", "News Flow Early Negative 7d",
+        "News Flow Prior Positive 15-30d", "News Flow Prior Negative 15-30d",
+        "News Flow Direction Shift", "News Flow Distinct Positive Days", "News Flow Price Pattern",
+        "News Flow Median Immediate Positive", "News Flow Median Five Day Positive",
+        "News Flow Median Positive Drift", "News Flow Warning",
+        "News Surprise Status", "News Surprise Summary", "News Surprise Fresh Count",
+        "News Surprise Meaningful Count", "News Surprise Primary Title", "News Surprise Primary Type",
+        "News Surprise Primary Label", "News Surprise Primary Direction", "News Surprise Strength",
+        "News Surprise Immediate Reaction", "News Surprise Five Day Reaction",
+        "News Surprise Directional Immediate", "News Surprise Directional Five Day",
+        "News Surprise Underreaction", "News Surprise Later Confirmation", "News Surprise Adverse Reaction",
+        "News Surprise Reference N", "News Surprise Reference Median Immediate",
+        "News Surprise Relative Reaction Gap", "News Surprise Source Quality", "News Surprise Warning",
+    ]
+    inflection = [
+        "Inflection Signal", "Inflection Score", "Varför nu", "Förändringskonflikt",
+        "Kvartalsdata antal", "Omsättning YoY senaste kvartal", "Omsättning acceleration",
+        "Marginal YoY förändring", "Marginal YoY föregående kvartal", "FCF YoY senaste kvartal", "FCF YoY föregående kvartal", "Vinst YoY senaste kvartal", "Vinst YoY föregående kvartal",
+        "Fresh Change Status", "Fresh Change Summary", "Fresh Change Positive Count", "Fresh Change Negative Count",
+        "Fresh Change Comparable Metrics", "Fresh Change New Positives", "Fresh Change New Negatives",
+        "EPS-estimat förändring", "EPS-estimat jämförelseperiod", "EPS-revisionsbalans",
+        "Senaste EPS-överraskning", "Analytiker antal", "Reviderande analytiker senaste period",
+        "Analytikertäckning", "Estimat tillförlitlighetsvikt",
+        "Post-report status", "Post-report why now", "Post-report datum",
+        "Post-report dagar sedan", "Post-report EPS-överraskning", "Post-report reaktion",
+        "Post-report fortsatt rörelse", "Post-report analytikerrespons",
+        "Post-report stöd", "Post-report varning", "Post-report evidens",
+    ]
     if horizon_type == "short":
-        return [
-            "Ticker", "Namn", "Pris", "Valuta", "Prisdatum", "Sektor",
-            "Dagsförändring", "1 mån", "3 mån", "6 mån", "Volymkvot", "RSI14",
-            "Avstånd SMA200", "Omsättning MSEK/dag", "Datatäckning",
-            "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
-            "ROE", "Vinstmarginal", "Skuld/eget kapital", "Risk", "Värdering", "Kvalitet",
+        return common + [
+            "Dagsförändring", "1 mån", "3 mån", "6 mån", "12–1 momentum", "12–1 momentum score", "12–1 momentum status", "Volymkvot", "RSI14",
+            "Avstånd SMA200", "Omsättning MSEK/dag",
             "Short Alpha Score", "Short Alpha Gate", "Short Alpha Confidence",
             "Short Relative Strength", "Short Trend", "Short Momentum",
+            "Short Recent Momentum", "Short 12–1 Momentum", "Short 12–1 Momentum Return", "Short Momentum Text",
             "Short Participation", "Short Revisions", "Short Catalyst",
             "Short Confirmation Count", "Short Why Now", "Short Counterargument",
-            "Inflection Signal", "Inflection Score",
-            "Catalyst Signal", "Primary Catalyst", "Catalyst Timing",
-        ]
-    return [
-        "Ticker", "Namn", "Pris", "Valuta", "Prisdatum", "Sektor", "INVEST Score",
-        "Djupurval", "Djupurval Nyckel", "Djupurval Linser", "Djupurval Linser text",
-        "Lång Score", "Livstid Score", "REVERSAL Score",
-        "Kvalitet", "Risk", "Värdering", "Datatäckning",
-        "1 mån", "3 mån", "6 mån", "Avstånd SMA200",
-        "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
-        "ROE", "Vinstmarginal", "Skuld/eget kapital",
-        "Case Gate", "Case Confidence", "Case Evidence Count", "Case Veto Count",
-        "Djupkontroll", "Value Trap Risk", "Deep Confidence",
+            "Short Vetoes", "Short Cautions", "Short Data Warning",
+        ] + inflection + catalyst
+    return common + [
+        "INVEST Score", "Growth Score", "Djupurval", "Djupurval Nyckel", "Djupurval Linser", "Djupurval Linser text",
+        "Lång Score", "Livstid Score", "REVERSAL Score", "1 mån", "3 mån", "6 mån", "Avstånd SMA200",
+        "Case Gate", "Case Confidence", "Case Confidence Label", "Case Evidence Count", "Case Evidence Basis",
+        "Case Veto Count", "Case Supports", "Case Neutrals", "Case Vetoes",
+        "Evidence Families schema", "Evidence Family Support Count", "Evidence Family Warning Count",
+        "Evidence Family Covered Count", "Evidence Family Label", "Evidence Family Supports", "Evidence Family Warnings",
+        "Evidence Family Pris/värdering", "Evidence Family Pris/värdering text", "Evidence Family Pris/värdering detalj",
+        "Evidence Family Bolagskvalitet", "Evidence Family Bolagskvalitet text", "Evidence Family Bolagskvalitet detalj",
+        "Evidence Family Förändrade förväntningar", "Evidence Family Förändrade förväntningar text", "Evidence Family Förändrade förväntningar detalj",
+        "Evidence Family Kursbekräftelse", "Evidence Family Kursbekräftelse text", "Evidence Family Kursbekräftelse detalj",
+        "Evidence Family Händelse/katalysator", "Evidence Family Händelse/katalysator text", "Evidence Family Händelse/katalysator detalj",
+        "Evidence Family Risk/motbevis", "Evidence Family Risk/motbevis text", "Evidence Family Risk/motbevis detalj",
+        "Djupkontroll", "Value Trap Risk", "Deep Confidence", "Fleråriga styrkor",
+        "Fleråriga varningar", "Rapportdatum", "Historik år",
         "Fundamental Data status", "Fundamental Data senaste rapportperiod",
-        "Vinstkvalitet status",
-        "Inflection Signal", "Inflection Score",
-        "Mispricing Signal", "Mispricing Confidence",
-        "Scenario Verdict", "Scenario Asymmetry", "Scenario Confidence",
-        "Catalyst Signal", "Catalyst Confidence", "Primary Catalyst", "Catalyst Timing",
-        "Catalyst Why Now", "Varför marknaden kan ha fel", "Devil's Advocate",
+        "Fundamental Data rapportålder dagar", "Fundamental Data årsrapporter",
+        "Fundamental Data kvartalsrapporter", "Fundamental Data stopp",
+        "Fundamental Data varningar", "Fundamental Data styrkor",
+        "Vinstkvalitet status", "Vinstkvalitet varningar", "Vinstkvalitet",
+        "Earnings Quality schema", "Periodiseringsrisk status",
+        "Accruals/tillgångar senaste", "Accruals/tillgångar median",
+        "Vinst minus OCF tillväxtgap", "Positivt OCF andel", "Positivt FCF andel",
+        "Investment Discipline schema", "Kapitaldisciplin status", "Kapitaldisciplin profil",
+        "Kapitaldisciplin styrkor", "Kapitaldisciplin varningar", "Kapitaldisciplin evidens",
+        "Tillgångstillväxt senaste", "Tillgångstillväxt CAGR",
+        "Tillgångar minus omsättning tillväxtgap", "Capex/omsättning senaste",
+        "Capex/omsättning trend", "Kapitalomsättning senaste", "Kapitalomsättning trend",
+        "Operativ avkastning/tillgångar senaste", "Operativ avkastning/tillgångar trend",
+        "Mispricing Signal", "Mispricing Confidence", "Scenario Status", "Scenario Verdict",
+        "Scenario Asymmetry", "Scenario Confidence", "Scenario Risk Label", "Scenario Note",
+        "Bear EPS growth", "Bear exit P/E", "Bear upside", "Base EPS growth", "Base exit P/E",
+        "Base upside", "Bull EPS growth", "Bull exit P/E", "Bull upside",
+        "Varför marknaden kan ha fel", "Devil's Advocate", "Deep fetch error",
+    ] + inflection + catalyst
+
+
+def _pit_critical_fields(horizon_type: str) -> list[str]:
+    if horizon_type == "short":
+        return ["Ticker", "Pris", "Prisdatum", "Short Alpha Gate", "Short Alpha Score", "Short Alpha Confidence"]
+    return [
+        "Ticker", "Pris", "Prisdatum", "Case Gate", "INVEST Score", "Case Confidence",
+        "Fundamental Data status", "Fundamental Data senaste rapportperiod",
     ]
+
+
+def point_in_time_snapshot_summary(snapshot: dict[str, Any], horizon_type: str) -> dict[str, Any]:
+    """Describe ledger completeness without treating missing data as negative evidence."""
+    critical = _pit_critical_fields(str(horizon_type).lower().strip())
+    missing = []
+    for key in critical:
+        value = snapshot.get(key)
+        if value is None or (isinstance(value, str) and value.strip() in {"", "—"}):
+            missing.append(key)
+    present = len(critical) - len(missing)
+    return {
+        "critical_fields": len(critical),
+        "critical_present": present,
+        "critical_missing": missing,
+        "complete": len(missing) == 0,
+    }
 
 
 def build_recommendation_records(
@@ -138,6 +235,31 @@ def build_recommendation_records(
             confidence = _num(row.get("Case Confidence"))
             why_now = str(row.get("Catalyst Why Now") or row.get("Varför nu") or "—")
             evidence_count = _num(row.get("Case Evidence Count"))
+
+        # Freeze the actual decision state inside snapshot_json. This avoids trying
+        # to reconstruct an old decision later with a newer model version.
+        if horizon_type == "short":
+            recommended = gate in {"Kortsiktigt toppcase", "Starkt kortsiktigt case"}
+            decision_basis = "Short Alpha Gate"
+        else:
+            recommended = gate in {"Toppcase", "Starkt case"}
+            decision_basis = "Case Gate"
+        snap["Ledger Decision"] = "RECOMMENDED" if recommended else "NOT_RECOMMENDED"
+        snap["Ledger Decision Basis"] = decision_basis
+        snap["Ledger Rank"] = rank
+        # Point-in-time envelope: provenance is frozen beside the model inputs so
+        # future diagnostics never need to infer what version/date/profile was used.
+        snap["PIT Schema Version"] = 2
+        snap["PIT Model Version"] = str(model_version)
+        snap["PIT Captured At"] = captured.isoformat()
+        snap["PIT Captured Date"] = captured_date
+        snap["PIT Profile"] = str(profile)
+        snap["PIT Market"] = str(market)
+        pit = point_in_time_snapshot_summary(snap, horizon_type)
+        snap["PIT Critical Fields"] = pit["critical_fields"]
+        snap["PIT Critical Present"] = pit["critical_present"]
+        snap["PIT Critical Missing"] = pit["critical_missing"]
+        snap["PIT Complete"] = pit["complete"]
 
         record_id = stable_record_id(
             symbol, horizon_type, captured_date, profile, market, model_version
