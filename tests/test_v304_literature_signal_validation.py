@@ -72,6 +72,6 @@ def test_summary_refuses_conclusion_when_history_is_too_small():
 
 def test_app_version_and_ui_hook_updated():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.26.0"' in app
+    assert 'APP_VERSION = "3.38.0"' in app
     assert "Fungerar de nya litteratursignalerna i Borsify?" in app
     assert "validate_literature_signals" in app

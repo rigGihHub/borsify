@@ -39,6 +39,6 @@ def test_apply_preserves_rows():
 def test_v303_wiring():
     app=open("app.py",encoding="utf-8").read()
     ledger=open("recommendation_ledger.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "3.26.0"' in app
+    assert 'APP_VERSION = "3.38.0"' in app
     assert "apply_idiosyncratic_volatility" in app
     assert "Idiosynkratisk volatilitet status" in ledger

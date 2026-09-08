@@ -51,6 +51,6 @@ def test_loader_exposes_only_approved_catalog_rows(tmp_path):
 
 def test_app_surfaces_catalog_integrity_without_claiming_provider_verification():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "3.26.0"' in app
+    assert 'APP_VERSION = "3.38.0"' in app
     assert "Katalogkontrollen bevisar inte att aktien handlas" in app
     assert "stoppades före datahämtning" in app

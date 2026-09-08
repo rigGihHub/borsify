@@ -5,6 +5,7 @@ import pandas as pd
 # Explicit model-relevant release register. This is documentation/governance only;
 # it does not mutate model parameters and is deliberately separate from runtime data.
 MODEL_CHANGE_LOG = [
+    {"Version": "3.27.0", "Förändring": "News Event Memory", "Typ": "Produktionsförklaring", "Status": "Införd + valideras", "Motivering": "Jämför färska nyhetshändelser med fryst same-company-historik av samma eventtyp och riktning, utan nytt score eller prognosanspråk."},
     {"Version": "3.26.0", "Förändring": "News Surprise & Price Response", "Typ": "Produktionsförklaring", "Status": "Införd + valideras", "Motivering": "Skiljer explicit förväntningsöverraskning från vanlig positiv/negativ rubrik och mäter observerad kursrespons utan nytt score, uppfunnen konsensus eller kausalitetsanspråk."},
     {"Version": "3.25.0", "Förändring": "News Flow Monitor 2.0", "Typ": "Produktionsförklaring", "Status": "Införd + valideras", "Motivering": "Följer serier av deduplicerade nyheter, förändrad riktning och hur kursen absorberar flera separata händelser utan nytt score eller kausalitetsanspråk."},
     {"Version": "2.91.0", "Förändring": "Sector-aware Valuation", "Typ": "Produktionslogik", "Status": "Införd", "Motivering": "Värderingsmått ska tolkas olika mellan branscher."},

@@ -2047,3 +2047,27 @@ Identifierar nya fundamentala riktningsförändringar mellan senaste och föreg�
 - Negativ överraskning prioriteras så att positivt nyhetsbrus inte döljer färsk nedsiderisk.
 - Ingen ny rankingpoäng skapas, inga köpgränser ändras och kursrörelse påstås aldrig bevisa att nyheten orsakade rörelsen.
 - Fälten fryses i Point-in-Time Ledger för framtida validering.
+
+
+## v3.27.0 – News Event Memory
+- Jämför aktuell nyhet med frysta äldre händelser för samma bolag, eventtyp och riktning.
+- Dubbletter av samma rubrik kollapsas så dagliga snapshots inte blåser upp samplet.
+- Median används; N<2 ger ingen jämförelse och små sample märks tydligt.
+- Ingen köp-gate, inget nytt score och inget påstående om att historisk reaktion är en prognos.
+- Resultatet fryses i Point-in-Time Ledger för senare prospektiv validering.
+
+## v3.37.0 – Plain Decision Language
+- Förstasidans och Upptäck-vyns beslutstexter passerar nu ett separat presentationslager som översätter interna finans-/modellord till vanlig svenska.
+- Termer som positiv inflektion, relativ styrka, estimatrevidering, momentum, katalysator, setup och fundamentaldata behöver inte längre förstås för att tolka ett köpcase.
+- Långa förklaringar kapas på en naturlig menings-/satsgräns så att "Varför nu?" och risktext inte blir textväggar.
+- Rådata, modeller, köpgrindar, scores och Point-in-Time-data ändras inte. Språklagret används bara vid presentation och kan därför inte påverka vilken aktie Borsify väljer.
+- Avancerade vyer kan fortfarande visa tekniska termer och råa mått när användaren aktivt öppnar analysen.
+
+## v3.38.0 – Decision Tie-breaker
+
+- Förstavalet avgörs inte längre av små skillnader i en enda rankingpoäng när flera starka case ligger mycket nära varandra.
+- Den befintliga **Dagens relevans** är fortfarande huvudrankingen; en kandidat som ligger mer än 3 punkter efter gruppledaren får inte gå om genom tie-breakern.
+- Vid genuint jämna case används en strikt ordning i stället för ett nytt mega-score: allvarlig risk → Case Readiness → relativ styrka → befintlig relevans/score → datatäckning.
+- Case Readiness mäter hur komplett, färskt och samstämmigt underlaget är. Relative Strength används endast som bekräftelse/tie-breaker och kan inte rädda ett svagt case.
+- Relativ styrka räknas mot hela det filtrerade universumet innan finalistpoolen tas ut, så jämförelsen inte snedvrids av enbart toppnamnen.
+- Ingen ny köp-gate och inget nytt köp-score har lagts till.

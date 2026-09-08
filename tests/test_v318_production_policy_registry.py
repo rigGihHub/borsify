@@ -84,7 +84,7 @@ def test_v318_ui_schema_and_version_contract():
     root = Path(__file__).resolve().parents[1]
     app = (root / "app.py").read_text(encoding="utf-8")
     schema = (root / "supabase_schema.sql").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "3.26.0"' in app
+    assert 'APP_VERSION = "3.38.0"' in app
     assert "Produktionspolicy · aktiv urvalspolicy och rollbackhistorik" in app
     assert "policy_registry_summary" in app
     assert "aktiverar aldrig en policy automatiskt" in app

@@ -71,6 +71,6 @@ def test_protocol_waits_instead_of_promoting_without_outcomes():
 
 def test_v308_ui_and_version_are_wired():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.26.0"' in app
+    assert 'APP_VERSION = "3.38.0"' in app
     assert "Model Promotion Protocol" in app
     assert "promotionskrav och rollback-plan" in app

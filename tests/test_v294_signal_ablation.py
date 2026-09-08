@@ -92,6 +92,6 @@ def test_long_ledger_now_freezes_components_needed_for_future_exact_ablation():
 
 def test_v294_ui_exposes_ablation_without_auto_reweighting():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "3.26.0"' in app
+    assert 'APP_VERSION = "3.38.0"' in app
     assert "Vilka kortsiktiga signaler gör faktiskt nytta?" in app
     assert "ändrar aldrig vikter automatiskt" in app

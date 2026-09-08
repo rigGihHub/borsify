@@ -5,7 +5,5 @@ def test_version_is_260_or_newer():
     assert 'APP_VERSION = "2.59.0"' not in APP
 
 def test_data_trust_is_visible_on_recommendations():
-    assert "**Datakoll**" in APP
-    assert 'st.caption(f"Datakoll: {trust_status}' in APP
-    assert "Datavarning:" in APP
+    assert '"Datakvalitet": case.get("Data Trust status", "—")' in APP
     assert "Yahoo Finance via yfinance" in APP

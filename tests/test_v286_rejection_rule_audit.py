@@ -57,7 +57,7 @@ def test_rejection_rule_audit_uses_one_metric_basis_for_whole_cohort():
 
 def test_v286_ui_exposes_rule_audit_without_auto_relaxing_model():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.26.0"' in app
+    assert 'APP_VERSION = "3.38.0"' in app
     assert "Stoppar någon regel för många framtida vinnare?" in app
     assert "rejection_rule_audit(recs, outs, chosen_h)" in app
     assert "Ingen modellvikt eller köpgräns ändras automatiskt" in app

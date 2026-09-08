@@ -100,6 +100,11 @@ def snapshot_columns(horizon_type: str) -> list[str]:
         "News Surprise Underreaction", "News Surprise Later Confirmation", "News Surprise Adverse Reaction",
         "News Surprise Reference N", "News Surprise Reference Median Immediate",
         "News Surprise Relative Reaction Gap", "News Surprise Source Quality", "News Surprise Warning",
+        "News Event Memory Status", "News Event Memory Summary", "News Event Memory N",
+        "News Event Memory Median Immediate", "News Event Memory Median Two Day", "News Event Memory Median Five Day",
+        "News Event Memory Current Gap Immediate", "News Event Memory Current Gap Five Day",
+        "News Event Memory Confidence", "News Event Memory Event Type", "News Event Memory Direction",
+        "News Event Memory Warning",
     ]
     inflection = [
         "Inflection Signal", "Inflection Score", "Varför nu", "Förändringskonflikt",

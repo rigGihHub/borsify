@@ -6,13 +6,14 @@ def test_version_is_268_or_newer():
 
 def test_country_filter_is_first_class_and_uses_flags():
     assert 'selected_countries = st.multiselect(' in APP
-    assert '"Land",' in APP
+    assert '"Länder",' in APP
     assert 'format_func=lambda c: f"{_country_flag(c)} {c}"' in APP
 
 def test_price_filter_is_in_sek():
-    assert '"Pris från (SEK)"' in APP
-    assert '"Pris till (SEK)"' in APP
-    assert "Utländska aktiekurser räknas om till SEK." in APP
+    assert '"Min pris"' in APP
+    assert '"Max pris"' in APP
+    assert 'min_price_sek = st.number_input("Min pris"' in APP
+    assert 'max_price_sek = st.number_input("Max pris"' in APP
 
 def test_country_filter_reduces_symbols_before_scan():
     scan=APP.index('with st.spinner(f"Borsify analyserar {len(scan_symbols)} aktier…")')

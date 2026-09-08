@@ -4,7 +4,7 @@ APP = (Path(__file__).parents[1] / "app.py").read_text(encoding="utf-8")
 
 
 def test_v284_version():
-    assert 'APP_VERSION = "3.26.0"' in APP
+    assert 'APP_VERSION = "3.38.0"' in APP
 
 
 def test_secondary_diagnostics_are_not_in_first_view_of_toplist_card():

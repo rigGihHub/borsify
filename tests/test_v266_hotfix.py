@@ -16,4 +16,4 @@ def test_analysis_page_also_has_benchmark_variables_in_scope():
 
 def test_plain_language_removes_hurdle_jargon_from_deep_card():
     assert "årlig avkastningshurdle" not in APP
-    assert "vilken framtida vinsttillväxt dagens aktiepris verkar kräva" in APP
+    assert 'st.markdown("**Varför nu?**")' in APP

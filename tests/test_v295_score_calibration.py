@@ -64,6 +64,6 @@ def test_shared_6m_horizon_never_mixes_short_and_long_scores():
 
 def test_v295_ui_exposes_calibration_without_auto_reweighting():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "3.26.0"' in app
+    assert 'APP_VERSION = "3.38.0"' in app
     assert "Betyder högre Borsify-betyg faktiskt bättre utfall?" in app
     assert "leder aldrig till automatisk viktändring" in app

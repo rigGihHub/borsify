@@ -17,9 +17,8 @@ def test_stock_identity_always_includes_ticker_country_and_flag():
 
 def test_main_recommendation_views_use_stock_identity():
     assert 'st.markdown(f"### {rank}. {_stock_identity(row)}")' in APP
-    assert 'st.markdown(f"### {_stock_identity(case)}")' in APP
-    assert 's1.markdown(f"### {rank}. {_stock_identity(case)}")' in APP
-    assert 'a.markdown(f"### {rank}. {_stock_identity(case)}")' in APP
+    assert 'st.markdown(f"### {first_name}")' in APP
+    assert 'left.markdown(f"### {label} · {_stock_identity(case)}")' in APP
 
 def test_why_now_shows_source_type_when_available():
-    assert 'st.caption(f"Underlag: {catalyst_type} · källa: {catalyst_source}")' in APP
+    assert '"Viktigaste möjliga händelsen": plain_finance_text(case.get("Primary Catalyst", "—"))' in APP
