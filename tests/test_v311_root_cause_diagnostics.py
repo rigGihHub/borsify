@@ -65,6 +65,6 @@ def test_summary_waits_for_minimum_history():
 
 def test_v311_ui_and_version():
     app=open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.38.0"' in app
+    assert 'APP_VERSION = "3.73.0"' in app
     assert "Root Cause Diagnostics · varför kan modellen ha försämrats?" in app
     assert "aldrig bevisad kausalitet" in app

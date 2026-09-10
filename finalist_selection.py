@@ -6,6 +6,16 @@ import numpy as np
 import pandas as pd
 
 from horizon_rankings import add_horizon_scores
+from estimate_revision_radar import select_estimate_revision_candidates
+from expectation_acceleration_engine import select_expectation_acceleration_candidates
+from report_delta_engine import select_report_delta_candidates
+from capital_allocation_insider_radar import select_owner_signal_candidates
+from management_signal_layer import select_management_signal_candidates
+from consensus_change_engine import select_consensus_change_candidates
+from sector_readthrough_engine import select_sector_readthrough_candidates
+from value_chain_readthrough_engine import select_value_chain_candidates
+from verified_relationship_engine import select_verified_relationship_candidates
+from relationship_change_radar import select_relationship_change_candidates
 
 
 def _num(value: Any) -> float:
@@ -69,6 +79,92 @@ def select_deep_finalist_pool(df: pd.DataFrame, pool_size: int = 6) -> pd.DataFr
 
     # Preserve the incumbent model's strongest convictions.
     take("INVEST Score", "Hög INVEST-bedömning", "invest", count=min(2, pool_size))
+
+    # Fresh-change/expectation evidence gets at most one additional doorway after
+    # the two strongest incumbent convictions. A broad recent report delta has
+    # priority because it combines observed operating change with expectations;
+    # estimate acceleration/revisions remain fallbacks. This is still one slot, not
+    # another score or a larger deep-analysis budget.
+    if len(selected) < pool_size:
+        report_delta = select_report_delta_candidates(work, quota=1)
+        if report_delta:
+            idx, _ = report_delta[0]
+            if idx not in selected:
+                selected.append(idx)
+                reasons[idx] = "Bred positiv rapportförändring som behöver djupkontroll"
+                reason_keys[idx] = "report_delta"
+        else:
+            management = select_management_signal_candidates(work, quota=1)
+            if management:
+                idx, _ = management[0]
+                if idx not in selected:
+                    selected.append(idx)
+                    reasons[idx] = "Ledningen beskriver flera konkreta operativa förbättringar"
+                    reason_keys[idx] = "management_signal"
+            consensus = [] if management else select_consensus_change_candidates(work, quota=1)
+            if consensus:
+                idx, _ = consensus[0]
+                if idx not in selected:
+                    selected.append(idx)
+                    reasons[idx] = "Analytikerkollektivet har blivit brett mer positivt"
+                    reason_keys[idx] = "consensus_change"
+            acceleration = [] if (management or consensus) else select_expectation_acceleration_candidates(work, quota=1)
+            if acceleration:
+                idx, _ = acceleration[0]
+                if idx not in selected:
+                    selected.append(idx)
+                    reasons[idx] = "Förväntningarna förbättras snabbare och behöver djupkontroll"
+                    reason_keys[idx] = "expectation_acceleration"
+            elif not consensus:
+                for idx, _ in select_estimate_revision_candidates(work, quota=1):
+                    if idx not in selected:
+                        selected.append(idx)
+                        reasons[idx] = "Bred positiv estimatförändring som behöver djupkontroll"
+                        reason_keys[idx] = "estimate_revision"
+                        break
+
+    # Owner/capital-allocation evidence gets at most one doorway and must fit inside
+    # the existing deep-analysis budget. It never displaces the two strongest INVEST
+    # convictions or the single fresh-change slot above.
+    if len(selected) < pool_size:
+        for idx, _ in select_owner_signal_candidates(work, quota=1):
+            if idx not in selected:
+                selected.append(idx)
+                reasons[idx] = "Ägarvänlig kapitalallokering eller oberoende insiderköp behöver djupkontroll"
+                reason_keys[idx] = "owner_signal"
+                break
+
+    # Cross-company read-through still gets at most one doorway in total. Prefer
+    # an explicit value-chain relationship; broad same-sector read-through is fallback.
+    if len(selected) < pool_size:
+        relationship_change = select_relationship_change_candidates(work, quota=1)
+        if relationship_change:
+            idx, _ = relationship_change[0]
+            if idx not in selected:
+                selected.append(idx)
+                reasons[idx] = "Verifierad förändring i en ekonomisk bolagsrelation behöver djupkontroll"
+                reason_keys[idx] = "relationship_change"
+        verified = [] if relationship_change else select_verified_relationship_candidates(work, quota=1)
+        if verified:
+            idx, _ = verified[0]
+            if idx not in selected:
+                selected.append(idx)
+                reasons[idx] = "Verifierad ekonomisk bolagsrelation + eget fundamentalt stöd behöver djupkontroll"
+                reason_keys[idx] = "verified_relationship"
+        chain = [] if (relationship_change or verified) else select_value_chain_candidates(work, quota=1)
+        if chain:
+            idx, _ = chain[0]
+            if idx not in selected:
+                selected.append(idx)
+                reasons[idx] = "Positiv värdekedjeläsning + eget fundamentalt stöd behöver djupkontroll"
+                reason_keys[idx] = "value_chain_readthrough"
+        elif not (relationship_change or verified):
+            for idx, _ in select_sector_readthrough_candidates(work, quota=1):
+                if idx not in selected:
+                    selected.append(idx)
+                    reasons[idx] = "Positiv sektorläsning + eget fundamentalt stöd behöver djupkontroll"
+                    reason_keys[idx] = "sector_readthrough"
+                    break
 
     # Then deliberately widen the doorway to deep analysis. Thresholds stop a weak
     # candidate from getting a slot merely because it is the least-bad name in a lens.

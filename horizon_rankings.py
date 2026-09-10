@@ -70,8 +70,16 @@ def add_horizon_scores(df: pd.DataFrame) -> pd.DataFrame:
             + .08*_num(r.get("Värdering") if np.isfinite(_num(r.get("Värdering"))) else 50)
             + .05*_pct_score(r.get("Omsättningstillväxt"),-.05,.15)
         )
-        rows.append((_clip(day),_clip(medium),_clip(long),_clip(lifetime)))
-    vals=pd.DataFrame(rows,index=out.index,columns=["Daytrade Score","Mellan Score","Lång Score","Livstid Score"])
+        year = (
+            .30*_num(r.get("INVEST Score") if np.isfinite(_num(r.get("INVEST Score"))) else 50)
+            + .20*_num(r.get("Kvalitet") if np.isfinite(_num(r.get("Kvalitet"))) else 50)
+            + .15*_num(r.get("Risk") if np.isfinite(_num(r.get("Risk"))) else 50)
+            + .15*_num(r.get("Värdering") if np.isfinite(_num(r.get("Värdering"))) else 50)
+            + .10*_pct_score(r.get("6 mån"),-.35,.55)
+            + .10*_pct_score(r.get("3 mån"),-.25,.40)
+        )
+        rows.append((_clip(day),_clip(medium),_clip(year),_clip(long),_clip(lifetime)))
+    vals=pd.DataFrame(rows,index=out.index,columns=["Daytrade Score","Mellan Score","Års Score","Lång Score","Livstid Score"])
     return out.join(vals)
 
 def horizon_reason(row: pd.Series|dict[str,Any], horizon: str) -> str:
@@ -104,33 +112,34 @@ def horizon_reason(row: pd.Series|dict[str,Any], horizon: str) -> str:
     if _num(r.get("Vinstmarginal"))>=.10: parts.append("god lönsamhet")
     return "; ".join(parts[:3]) or "kvalitetsprofil lämpad för mycket lång ägarhorisont"
 
-def top_three(df: pd.DataFrame, horizon: str) -> pd.DataFrame:
+def top_ranked(df: pd.DataFrame, horizon: str, limit: int = 3) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
-    col={"day":"Daytrade Score","medium":"Mellan Score","long":"Lång Score","lifetime":"Livstid Score"}[horizon]
+    col={"day":"Daytrade Score","medium":"Mellan Score","year":"Års Score","long":"Lång Score","lifetime":"Livstid Score"}[horizon]
+    gate_horizon = "long" if horizon == "year" else horizon
     out=add_horizon_scores(df)
     out=add_relative_strength(out)
-    out=add_market_regime(out,horizon)
-    out=eligible_buys(out,horizon)
+    out=add_market_regime(out,gate_horizon)
+    out=eligible_buys(out,gate_horizon)
     out=filter_market_regime_eligible(out)
     if out.empty:
         return out
 
     # Short-horizon recommendations must also be practically tradeable.
     # This is a coarse turnover guard; it does not pretend to know live spread.
-    out=add_liquidity_guard(out,horizon)
-    out=filter_execution_ready(out,horizon)
+    out=add_liquidity_guard(out,gate_horizon)
+    out=filter_execution_ready(out,gate_horizon)
     if out.empty:
         return out
 
     # A high score is not enough for a Top-3 slot. The case must also have
     # sufficiently complete, fresh and internally consistent evidence.
-    out=add_case_readiness(out,horizon)
+    out=add_case_readiness(out,gate_horizon)
     out=filter_top_case_ready(out)
     if out.empty:
         return out
 
-    extension=[assess_overextension(r,horizon) for _,r in out.iterrows()]
+    extension=[assess_overextension(r,gate_horizon) for _,r in out.iterrows()]
     ext=pd.DataFrame(extension,index=out.index)
     overlap=[c for c in ext.columns if c in out.columns]
     if overlap:
@@ -139,15 +148,15 @@ def top_three(df: pd.DataFrame, horizon: str) -> pd.DataFrame:
 
     # A very short-term candidate that has already moved too far should not be
     # presented as a fresh buy. For long horizons it remains visible with a warning.
-    if horizon in {"day","medium"}:
+    if gate_horizon in {"day","medium"}:
         out=out[~out["För långt gången"].eq(True)].copy()
     if out.empty:
         return out
 
     # Risk/reward is a secondary ranking input for the two short horizons. It can
     # separate otherwise similar candidates, but does not override the core buy gate.
-    if horizon in {"day","medium"}:
-        rr_plans=[build_risk_reward(r,horizon) for _,r in out.iterrows()]
+    if gate_horizon in {"day","medium"}:
+        rr_plans=[build_risk_reward(r,gate_horizon) for _,r in out.iterrows()]
         out["RR plan"]=rr_plans
         out["RR rangvärde"]=[risk_reward_rank_value(p) for p in rr_plans]
         # Relative strength is deliberately only a tie-break/confirmation layer.
@@ -155,16 +164,17 @@ def top_three(df: pd.DataFrame, horizon: str) -> pd.DataFrame:
         out=out.sort_values(
             [col,"Case Readiness","Relativ styrka","RR rangvärde","Datatäckning"],
             ascending=[False,False,False,False,False]
-        ).head(3).copy()
+        ).head(limit).copy()
     else:
         out=out.sort_values(
             [col,"Case Readiness","Datatäckning"],
             ascending=[False,False,False]
-        ).head(3).copy()
-        out["RR plan"]=[build_risk_reward(r,horizon) for _,r in out.iterrows()]
+        ).head(limit).copy()
+        out["RR plan"]=[build_risk_reward(r,gate_horizon) for _,r in out.iterrows()]
 
-    out["Horisontförklaring"]=[horizon_reason(r,horizon) for _,r in out.iterrows()]
-    cards=[build_buy_card(r,horizon) for _,r in out.iterrows()]
+    reason_horizon = "long" if horizon == "year" else horizon
+    out["Horisontförklaring"]=[horizon_reason(r,reason_horizon) for _,r in out.iterrows()]
+    cards=[build_buy_card(r,gate_horizon) for _,r in out.iterrows()]
     out["Varför köpa"]=[c["Varför köpa"] for c in cards]
     out["Varför nu"]=[c["Varför nu"] for c in cards]
     out["Största risk"]=[c["Största risk"] for c in cards]
@@ -172,3 +182,7 @@ def top_three(df: pd.DataFrame, horizon: str) -> pd.DataFrame:
     out["Relativ styrka text"]=[relative_strength_label(r) for _,r in out.iterrows()]
     out["Marknadsläge text"]=[market_regime_user_text(r) for _,r in out.iterrows()]
     return out
+
+
+def top_three(df: pd.DataFrame, horizon: str) -> pd.DataFrame:
+    return top_ranked(df, horizon, limit=3)

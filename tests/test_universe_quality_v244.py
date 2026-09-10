@@ -4,7 +4,7 @@ from universe_quality import assess_universe_quality, apply_universe_quality, fi
 def good_row():
     hist=pd.DataFrame({"Close":[100+i*.1 for i in range(150)]})
     return {
-        "Ticker":"TEST","Namn":"Test AB","Pris":115.0,"Prisdatum":"2026-09-02",
+        "Ticker":"TEST","Namn":"Test AB","Pris":115.0,"Prisdatum":pd.Timestamp.utcnow().date().isoformat(),
         "Valuta":"SEK","_history":hist,"P/E":15,"Forward P/E":14,
         "ROE":.18,"Vinstmarginal":.12,"Börsvärde BSEK":10,
     }

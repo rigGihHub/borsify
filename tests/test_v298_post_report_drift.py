@@ -67,7 +67,7 @@ def test_point_in_time_ledger_freezes_post_report_fields():
 
 def test_app_wires_engine_into_deep_and_short_paths():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.38.0"' in app
+    assert 'APP_VERSION = "3.73.0"' in app
     assert 'from post_report_drift import build_post_report_drift' in app
     assert app.count('build_post_report_drift(') >= 2
     assert 'build_post_report_drift(' in app

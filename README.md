@@ -1,5 +1,14 @@
 # Borsify v2.93.0
 
+
+## v3.40.0 – Scandinavian broad default
+
+- Standardmarknad är Sverige + Norge + Danmark.
+- Multi-country-sökningar använder Brett universum som standard, inte bara Kärna.
+- Standardurvalet omfattar därmed hela katalogen för de tre länderna (125 aktier i nuvarande katalog).
+- Välj Alla marknader i vänsterspalten för att utöka till hela katalogen (876 aktier i 15 länder).
+- Snabbt kärnurval finns kvar som frivillt hastighetsläge.
+
 ## v2.93.0 – Benchmark 2.0
 
 - Relativ styrka jämför nu aktien i tre lager: hemmamarknad, sektor och jämförbara bolag.
@@ -2071,3 +2080,171 @@ Identifierar nya fundamentala riktningsförändringar mellan senaste och föreg�
 - Case Readiness mäter hur komplett, färskt och samstämmigt underlaget är. Relative Strength används endast som bekräftelse/tie-breaker och kan inte rädda ett svagt case.
 - Relativ styrka räknas mot hela det filtrerade universumet innan finalistpoolen tas ut, så jämförelsen inte snedvrids av enbart toppnamnen.
 - Ingen ny köp-gate och inget nytt köp-score har lagts till.
+
+
+## v3.39.0 – News Underreaction Validation
+- Förregistrerar underreaktionshypotesen från 2026-09-08 / v3.39.0 så äldre utfall inte kan användas som om testet varit definierat i förväg.
+- Jämför tydlig positiv förväntningsöverraskning från stark källa + liten initial kursreaktion mot liknande positiva surprise-case med tydligare direkt reaktion.
+- Använder bara frysta point-in-time-fält och mogna framtida ledger-utfall. Överlappande observationer av samma aktie reduceras till oberoende case.
+- Kräver minst 30 prospektiva oberoende case totalt och minst 10 per grupp innan signalen kan få preliminärt stöd eller ifrågasättas.
+- Ingen automatisk ändring av score, ranking, köpgrind eller produktionspolicy.
+
+## v3.42.0 – Action Signals per horizon
+
+The three homepage rankings now translate already-approved cases into explicit, horizon-specific action language. Short-term cases can say KÖP NU/KÖP/BEVAKA, one-year cases KÖP / ÄG/BYGG POSITION/BEVAKA, and lifetime cases distinguish long-term buying from price watching. This is presentation-only: it does not create a new score, change eligibility, or move rejected stocks into a buy list.
+
+Each Top 10 table now also shows country, current cached price, action signal, score, score distance to the place above, and the biggest known risk. A compact legend explains what each signal means.
+
+## v3.43.0 – Förändringssignaler per tidshorisont
+
+Topplistorna för kort sikt, upp till ett år och livstidsägande visar nu även hur varje kandidat har förändrats sedan föregående sparade analys för samma horisont. Borsify använder NY KÖPSIGNAL, NY PÅ LISTAN, STÄRKT, OFÖRÄNDRAD och FÖRSVAGAD. Jämförelsen bygger på föregående topp-10-placering och samma horisonts score. En aktie som lämnat topp 10 visas separat som en omprövningssignal — aldrig automatiskt som en säljsignal. Förändringslagret är presentation/explainability och ändrar inte score, ranking eller köpbarhet.
+
+## v3.44.0 – Vad har förändrats?
+
+Förändringssignalerna STÄRKT/FÖRSVAGAD förklaras nu med frysta point-in-time-komponenter i stället för bara score/rank. För topp 10 per tidshorisont sparas värdering, kvalitet, marknadsläge, risk, datatäckning, relativ styrka, Case Readiness, översträckning och aktuell handlingssignal. Nästa dags jämförelse kan därför säga exempelvis "värderingen har blivit mer attraktiv", "riskprofilen har försämrats" eller "aktien går svagare jämfört med marknaden".
+
+Historiska luckor fylls inte bakåt med dagens data. Om äldre radarhistorik saknar de nya frysta delkomponenterna visar Borsify det uttryckligen. Funktionen är endast för förklaring och ändrar varken score, köpgrind, handlingssignal eller ranking.
+
+
+## v3.45.0 – Discovery Engine 2.0
+
+Borsify öppnar nu djupanalysen genom flera separata befintliga linser i stället för att låta ett enda högt INVEST-/grundscore dominera kandidatbudgeten. Köp nu, upp till ett år, livstid, kvalitet, värdering och vändning får reserverad representation. Ingen ny sammanslagen Discovery Score skapas. Den dyrare djupanalysen avgör fortfarande om caset överlever.
+
+Djupurvalet har samtidigt breddats från 6 till upp till 10 finalister och kortsiktsdjupet från 8 till upp till 10. Under **Om dagens analys** visas en kompakt audit av hur många kandidater och linser Discovery 2.0 faktiskt representerar.
+
+
+## v3.46.0 – Nordic Universe Expansion
+- Standardmarknaden är fortsatt Sverige + Norge + Danmark.
+- Borsifys statiska katalog har utökats från 772 till 876 aktier utan att lägga till ett nytt score.
+- Sverige har nu 126, Norge 55 och Danmark 48 katalogerade aktier (229 totalt i standardmarknaden).
+- De nya posterna ligger i nivån `Bred`; befintligt kärnurval och dess snabbväg är oförändrade.
+- Alla nya tickers går genom samma katalogkontroll, Yahoo-hämtning och Universe QC/karantän som övriga aktier. En katalogpost är därför en kandidat, inte ett påstående om att marknadsdata alltid finns.
+- Discovery Engine 2.0 får därmed ett betydligt större skandinaviskt kandidatuniversum att arbeta med innan dyr djupanalys väljs ut.
+
+## v3.47.0 – Missed Winners Engine
+
+Borsify fryser nu hela det analyserade universumet när de tre horisontlistorna byggs, inte bara aktierna som rekommenderas. När en fryst kohort har mognat jämförs den med senare prisdata för att hitta aktier som blev tydliga vinnare men aldrig nådde Borsifys rekommendationslistor.
+
+En "missad vinnare" definieras konservativt: aktien måste både ligga i kohortens översta avkastningsdecim och klara en absolut avkastningströskel (+10 % för ungefär en månad, +15 % för ungefär tre månader). Minst 20 jämförbara aktier krävs. Förklaringen till missen använder bara värden som frystes när urvalet gjordes, exempelvis horisontscore, kvalitet, värdering, marknadsläge, risk och datatäckning.
+
+Motorn är prospektiv från v3.47. Äldre dagar fylls inte bakåt och dagens modell används aldrig för att rekonstruera ett gammalt beslut. Resultaten visas i Analyslabbet och ändrar inte Borsify Score, ranking eller köpgränser automatiskt.
+
+## v3.48.0 – Miss Pattern Analysis
+
+Missed Winners Engine grupperar nu de prospektivt identifierade missarna efter egenskaper som faktiskt var frysta när urvalet gjordes. Exempel är dyra kvalitetsbolag, vändningscase, svagt marknadsläge, hög risk och låg datatäckning. Ett mönster jämförs mot hela den utvärderade kohorten, så en vanlig egenskap inte felaktigt pekas ut bara för att den förekommer bland vinnarna.
+
+Borsify kräver minst tre missade vinnare i samma mönster och minst 1,25× överrepresentation innan det märks som återkommande. Resultatet visas i Analyslabbet och är diagnostik: inga score, köpgränser, rankingar eller produktionsvikter ändras automatiskt. Historiska luckor fylls inte med dagens data.
+
+## v3.49.0 – Discovery Learning Loop
+
+Borsify converts sufficiently strong, point-in-time Missed Winners patterns into conservative discovery-challenger proposals. A proposal requires at least five missed winners in the same frozen pattern and at least 1.50× overrepresentation versus the evaluated cohort. The proposed change acts only on the discovery doorway (for example one extra candidate slot for expensive quality or turnaround cases); it does not create a new score, change production quotas, relax final risk/buy gates, or promote itself automatically. Any ready proposal must be frozen and tested only on new future observations before manual promotion review.
+
+## v3.50.0 – Discovery Champion vs Challenger
+
+Discovery Learning Loop är nu kopplad till en riktig prospektiv testbädd. Nuvarande Discovery Engine är champion och sju alternativa doorway-regler är förregistrerade med låst definition, startversion och fingerprint. Vid varje ny universe-snapshot fryses både champion-urvalet och vilka aktier varje challenger skulle ha valt med exakt samma poolstorlek. Endast observationer från v3.50.0 och framåt får räknas; äldre rader backfylls inte. Utvärderingen använder mogna Missed Winners-utfall, tunnar överlappande datum till oberoende kohorter och jämför hur många framtida vinnare som fångades samt medianutfall för valda aktier. Minst tre oberoende kohorter och sex vinnare krävs för riktning. Ingen challenger ändrar automatiskt score, ranking, gate eller produktion.
+
+## v3.51.0 – Fundamental Discovery 2.0
+- Breddar vägen till djupanalys med fyra transparenta fundamentala upptäcktslinser: lönsam tillväxt, vinst som växer snabbare än försäljning, kassaflöde + kvalitet samt tillväxt till rimligt pris.
+- Skapar inget nytt Fundamental/Discovery Score. En aktie får en reserverad kandidatplats genom att uppfylla en tydlig regel; befintliga djupkontroller avgör fortfarande om caset överlever.
+- Saknad data kvalificerar aldrig ett bolag och hög observerad skuldsättning kan stoppa kassaflödes-/kvalitetslinsen.
+- Fundamentala linser syns i Discovery Engine-diagnostiken så att det går att följa vilka typer av case som faktiskt når djupanalysen.
+
+
+## v3.52.0 – Fundamental Change Radar
+
+- Borsify compares today's broad fundamental snapshot with the latest older frozen universe snapshot per ticker.
+- Detects material acceleration in sales growth, earnings growth, margin and ROE without inventing a new score.
+- Same-day observations can never be their own baseline; old missing fields stay missing and are never reconstructed with current data.
+- Up to four verified change cases can receive a reserved Discovery Engine doorway before static lenses, while deep-analysis gates still decide whether the case survives.
+- Broad snapshot history now freezes revenue growth, earnings growth, profit margin, ROE, FCF yield and forward P/E for future point-in-time diagnostics.
+- Advanced UI shows a compact Fundamental Change Radar and its comparison date.
+
+## v3.53.0 – Estimate Revision Radar 2.0
+
+Borsify kan nu reservera en liten discovery-väg för bolag där verifierbar analytikerdata visar att vinstestimaten höjs och revisionsbredden är positiv. Radarn är medvetet kategorisk och skapar inget nytt investeringsscore. Den starkaste etiketten kräver användbar analytikertäckning, positiv EPS-estimatförändring, positiv revisionsbalans och flera analytiker/revideringar. En liten kursreaktion kan markeras som möjlig underreaktion, men ett tydligt kursfall behandlas som konflikt och får aldrig en automatisk köpfördel.
+
+För att hålla kostnad och laddtid begränsad provas estimatdata på högst tolv redan diversifierade Discovery Engine-kandidater. Yahoo-hämtningen är cachead och återanvänds om kandidaten går vidare till djupanalys. Högst en estimatrevisionskandidat får reservera en finalistplats, efter de två starkaste incumbent/INVEST-kandidaterna. Saknad analytikerdata ger ingen fördel. Under Fler aktier finns ett kollapsat granskningsläge som visar vilka estimatförändringar som hittats.
+
+## v3.54.0 – Expectation Acceleration Engine
+
+Borsify kan nu skilja mellan vanliga positiva estimatrevideringar och fall där förbättringen faktiskt **accelererar**. Motorn jämför det aktuella vinstestimatet med 7- och 30-dagarsnivåer och söker efter en ovanligt stor koncentration av den positiva förändringen till den senaste veckan. Positiv revisionsbredd och/eller verifierad fundamental förbättring krävs som bekräftelse. Motorn skapar inget nytt score. Estimate-familjen får fortfarande högst en reserverad finalistplats efter de två starkaste befintliga INVEST-casen, och en verifierad acceleration har då företräde framför en vanlig estimathöjning.
+
+
+## v3.55.0 – Report Delta Engine 2.0
+
+Borsify behandlar nu senaste rapporten som en förändringskarta i stället för bara en EPS-överraskning. Motorn håller isär observerad omsättningsacceleration, marginalförändring, kassaflöde, vinst, verifierad EPS-surprise, analytikernas efterföljande estimatrevideringar, explicit guidningsförändring och faktisk kursreaktion. Saknad konsensus för omsättning, marginal eller kassaflöde fylls aldrig i med rubriker eller gissningar.
+
+En bred positiv rapportförändring kan använda den enda reserverade färsk-förändring/estimat-platsen till djupanalysen efter de två starkaste incumbent-casen. Report Delta konkurrerar därmed med Expectation Acceleration/Estimate Revision om samma plats och ökar inte analysbudgeten. En tydligt negativ kursreaktion blockerar discovery-fördelen även när rapportmåtten ser starka ut. En liten kursreaktion kan märkas som möjlig underreaktion men skapar inget nytt investeringsscore eller automatisk köpsignal.
+
+Report Delta-fälten fryses i Point-in-Time Ledger för framtida prospektiv validering. Den avancerade vyn under Fler aktier visar vad som förändrades och vad marknaden faktiskt gjorde efter rapporten.
+
+## v3.56.0 – Capital Allocation + Insider Cluster Radar
+
+Borsify får en konservativ ägarsignal som letar efter sådant som ofta diskuteras i kvalitativ börsanalys men som tidigare saknade en egen discovery-väg: meningsfulla **nettoåterköp**, tydlig **skuldneddragning** och **flera oberoende insiderköp** nära varandra.
+
+Motorn skapar inget nytt investeringsscore. Återköp räknas netto efter observerad aktieutgivning, värdering och skuldsättning fungerar som kontroller, och optioner/grants behandlas inte som frivilliga insiderköp. Saknade transaktionsdata är saknade – de tolkas aldrig som stöd.
+
+Ägarsignalen får högst en plats i det redan befintliga djupanalysutrymmet och kan inte tränga undan de två starkaste INVEST-casen eller den reserverade färsk-förändringsplatsen. Alla observerade fält fryses i Point-in-Time Ledger för framtida prospektiv validering.
+
+
+## v3.57.0 – Management Signal Layer
+
+Borsify kan nu fånga explicita, konkreta CEO/CFO/VD-uttalanden i färska rubriker om efterfrågan, orderingång, marginal, prissättning, lager och investeringar. Lagret är avsiktligt konservativt: generisk optimism/pessimism ignoreras, ett enda positivt uttalande räcker inte för discovery och negativa uttalanden prioriteras. Det skapar inget nytt score och påstår inte att Yahoo-rubriker motsvarar fullständiga rapporttranskript. Signalerna fryses i rekommendations-ledgern för framtida prospektiv validering.
+
+
+## v3.58.0 – Sector Read-through Engine
+
+Borsify kan nu använda en tydlig positiv förändring i ett bolag som en konservativ ledtråd för andra bolag i samma sektor eller bransch. Motorn gör uttryckligen **inte** antagandet att samma förändring automatiskt gäller en peer och den modellerar ännu inte hela värdekedjor. För att en peer ska få en discovery-väg krävs därför eget transparent fundamentalt discovery-stöd, inga färska negativa report/management-motbevis och att aktien inte redan stigit mer än 12 % senaste månaden.
+
+Direkt bolagsspecifik evidens väger alltid tyngre. Sector Read-through får högst en plats i den redan fasta djupanalysbudgeten, efter de två starkaste INVEST-casen, färsk bolagsspecifik förändring och ägarsignal. Ingen ny score skapas. Signalen fryses i Point-in-Time Ledger för framtida prospektiv validering.
+
+
+## v3.59.0 – Value Chain Read-through 2.0
+
+Borsify går från grov samma-sektor-läsning till en transparent, riktad värdekedjemodell. Yahoo-branschtext klassificeras i ekonomiska roller (t.ex. halvledare, elektronikkomponenter, industrimaskiner, bygginsatsvaror, bygg/infrastruktur, energi, transport och handel) och endast fördefinierade uppströms/nedströms-relationer får skapa en read-through-ledtråd. Motorn påstår aldrig att två namngivna bolag har ett verifierat kund-/leverantörsavtal. Target-bolaget måste fortfarande ha eget fundamentalt discovery-stöd, sakna färska negativa motbevis och inte redan ha rusat >12 % på en månad. Värdekedja prioriteras framför bred sektorläsning men delar samma enda cross-company-plats i den fasta djupanalysbudgeten. Ingen ny score skapas.
+
+## v3.60.0 – Verified Company Relationships
+- Adds a strict, source-backed registry for named customer/supplier, ownership, commodity, market and operational-dependency relationships.
+- A relationship requires explicit source URL, source date, verification date and active status; heuristic industry adjacency is never promoted to verified evidence.
+- Verified relationships get first priority inside the existing single cross-company read-through doorway, so the deep-analysis budget does not grow.
+- Target companies still require their own fundamental support and are blocked by fresh counter-evidence or a >12% one-month run-up.
+- No new investment score. Fields are frozen in the point-in-time recommendation ledger for later prospective validation.
+- The bundled CSV intentionally starts empty rather than shipping guessed/stale named relationships; verified records can be added independently of the engine.
+
+## v3.61.0 – Relationship Data Builder
+
+The verified company-relationship layer now has a deterministic source-ingestion and audit path instead of an empty production registry. `relationship_data_builder.py` validates source-backed records, requires HTTPS primary-source metadata, rejects invalid/future verification dates, preserves rejection reasons, de-duplicates directed relationships by the latest verification and exposes a small registry-health summary. It never infers or auto-promotes a relationship and adds no score.
+
+The first seed registry contains 20 explicit ownership relationships sourced from Investor AB's listed-company portfolio page and Industrivärden's portfolio page. This seed is deliberately narrow: it proves the end-to-end verified read-through path with high-evidence relationships before expanding to named customers, suppliers, commodity dependencies and geographic exposures. `RELATIONSHIP_DATA_GUIDE.md` documents the curation workflow.
+
+The advanced `Fler aktier` area now includes a collapsed relationship-database coverage view showing relation count, source-company count, target-company count, primary-source share and stale-verification count. The existing single cross-company discovery quota is unchanged.
+
+
+## v3.62.0 – Customer & Supplier Relationship Expansion
+- Adds named primary-source customer→supplier links for Telia→Ericsson, Elisa→Nokia, Boliden→Epiroc and Volvo Group→SSAB.
+- Verified ownership links remain context only and can no longer create operating read-through candidates.
+- Directional operating links are ranked ahead of generic verified relationships while sharing the same single cross-company finalist slot.
+- Registry health now separates operating and customer→supplier coverage.
+- No new investment score. Missing materiality remains missing.
+
+## v3.63.0 – Relationship Materiality & Change Radar
+- Skiljer en statisk verifierad relation från en explicit förändring i relationen.
+- Stöd för nytt avtal, avtalsförlängning, volym-/kapacitetsökning, ny kund/leverantör och strategisk expansion.
+- Materialitetsnivån beskriver endast hur tydligt omfattningen är källbelagd; Borsify antar aldrig intäktsandel eller resultateffekt.
+- Förändringen måste vara nyligen daterad, target-bolaget måste ha eget fundamentalt stöd och färska motbevis eller >12 % enmånadsrörelse stoppar discovery.
+- Relationsförändring får ingen extra analysplats: den prioriteras inom samma enda cross-company-slot före statisk verifierad relation, värdekedja och sektor.
+- Fälten fryses i recommendation ledger för senare prospektiv validering.
+
+## v3.64.0 – Consensus Change Engine
+
+Borsify får ett nytt, transparent discovery-lager för **hur analytikerkollektivet förändras**, inte bara var den genomsnittliga riktkursen ligger. Motorn jämför tillgänglig konsensusbredd mellan Yahoo-perioder, räknar färska upp-/nedgraderingar från flera oberoende analyshus och markerar nyinitierad bevakning som kontext.
+
+En enskild rekommendation eller riktkurs kan aldrig skapa en discovery-fördel. Positiva kandidater kräver bred förändring, medan flera nedgraderingar eller tydligt försämrad rekommendationsbredd blir motbevis. Aktuell riktkursdispersion visas deskriptivt, men Borsify påstår inte att dispersionen *förändras* förrän jämförbar point-in-time-historik har frysts.
+
+Consensus Change delar samma enda fresh-change-plats som Report Delta, Management Signal, Expectation Acceleration och Estimate Revision. Ingen ny investeringsscore eller större djupanalysbudget införs. Signalen fryses i rekommendationsledgern för framtida prospektiv utvärdering.
+
+## v3.65.0 – Consensus Change Memory
+
+Consensus Change har nu ett äkta point-in-time-minne. Borsify fryser dagens analytikerkonsensus per aktie och jämför bara med ett faktiskt äldre snapshot. Ingen historik rekonstrueras och ingen backfill görs.
+
+Minnet kan bland annat upptäcka att köpandelen breddas, riktkursmedianen stiger, fler analytiker ansluter eller att riktkurserna samlas kring en högre nivå. Negativa förändringar markeras separat. Lagret skapar ingen ny investeringsscore och ingen extra discovery-slot; det fördjupar den befintliga Consensus Change-signalen.

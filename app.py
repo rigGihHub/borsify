@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import json
 import hmac
 import sqlite3
 import time
@@ -54,8 +55,27 @@ from news_flow_monitor import build_news_flow_monitor
 from news_surprise_response import build_news_surprise_response
 from news_event_memory import apply_news_event_memory
 from fresh_change_detector import build_fresh_change
+from fundamental_change_radar import add_fundamental_change_radar
+from estimate_revision_radar import add_estimate_revision_radar
+from expectation_acceleration_engine import build_expectation_acceleration
 from expectation_change import build_expectation_change
 from post_report_drift import build_post_report_drift
+from report_delta_engine import build_report_delta
+from capital_allocation_insider_radar import build_capital_allocation_insider_radar
+from management_signal_layer import build_management_signal
+from management_signal_memory import snapshot_from_management_signal, previous_management_snapshot, save_management_snapshot, compare_management_signal_memory, ensure_management_signal_memory_table
+from consensus_change_engine import build_consensus_change
+from consensus_change_memory import snapshot_from_result, previous_snapshot, save_snapshot, compare_consensus_memory, ensure_consensus_memory_table
+from crowded_narrative import build_crowded_narrative
+from expectation_gap import build_expectation_gap
+from report_delta_memory import snapshot_from_report_delta, previous_report_snapshot, save_report_snapshot, compare_report_delta_memory, ensure_report_delta_memory_table
+from change_confirmation_engine import build_change_confirmation
+from confirmed_why_now import build_confirmed_why_now
+from sector_readthrough_engine import add_sector_readthrough
+from value_chain_readthrough_engine import add_value_chain_readthrough
+from verified_relationship_engine import add_verified_relationships, load_verified_relationships
+from relationship_data_builder import relationship_registry_health
+from relationship_change_radar import add_relationship_change_radar
 from momentum_12_1 import momentum_12_1_return, momentum_12_1_score, momentum_12_1_label
 from idiosyncratic_volatility import apply_idiosyncratic_volatility
 from short_term_engine import assess_short_term_case, short_term_rank_key
@@ -92,6 +112,8 @@ from signal_ablation import short_signal_ablation, ablation_summary, MIN_ABLATIO
 from literature_signal_validation import (
     validate_literature_signals, literature_signal_summary, MIN_SIGNAL_CASES, MIN_GROUP_CASES,
 )
+from news_underreaction_validation import validation_table as news_underreaction_validation_table, validation_summary as news_underreaction_validation_summary, MIN_TOTAL_CASES as NEWS_UNDERREACTION_MIN_CASES, MIN_GROUP_CASES as NEWS_UNDERREACTION_MIN_GROUP
+from expectation_gap_validation import validation_table as expectation_gap_validation_table, validation_summary as expectation_gap_validation_summary, MIN_TOTAL_CASES as EXPECTATION_GAP_MIN_CASES, MIN_GROUP_CASES as EXPECTATION_GAP_MIN_GROUP
 from signal_governance import (
     build_signal_governance, signal_governance_summary,
     ACTION_KEEP, ACTION_MIXED, ACTION_DEEMPHASISE, ACTION_RETIRE, ACTION_WAIT,
@@ -133,7 +155,10 @@ from policy_promotion_protocol import (
     STATUS_REVIEW as POLICY_PROMOTION_REVIEW, STATUS_BLOCK as POLICY_PROMOTION_BLOCK,
 )
 from case_plan import apply_case_plans
-from horizon_rankings import top_three, add_horizon_scores
+from horizon_rankings import top_three, top_ranked, add_horizon_scores
+from horizon_signals import add_action_signals, signal_legend
+from horizon_signal_changes import add_change_signals, dropped_from_top10
+from horizon_change_reasons import add_change_reasons, snapshot_details
 from relative_strength import add_relative_strength
 from case_readiness import add_case_readiness
 from decision_tiebreaker import rank_close_daily_candidates
@@ -164,9 +189,15 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "3.38.0"
+APP_VERSION = "3.73.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
+from discovery_engine import build_discovery_pool, discovery_coverage_summary
+from missed_winners_engine import build_universe_snapshot, evaluate_snapshot_cohort, missed_winner_summary, HORIZONS as MISSED_WINNER_HORIZONS
+from missed_winner_patterns import build_miss_pattern_table, miss_pattern_summary
+from discovery_learning_loop import build_discovery_learning_proposals, discovery_learning_summary
+from discovery_champion_challenger import discovery_selection_flags, registry_table as discovery_registry_table, prospective_discovery_results, discovery_challenger_summary
+
 APP_DIR = Path(__file__).resolve().parent
 DB_PATH = APP_DIR / "borsify.db"
 UNIVERSE_PATH = APP_DIR / "universe.csv"
@@ -302,6 +333,7 @@ GLOBAL_RADAR_TICKERS = list(dict.fromkeys(
 ))
 
 MARKET_CONFIGS = {
+    "Sverige + Norge + Danmark": {"currency": "blandat", "benchmark": "VT", "benchmark_name": "Globalt aktieindex (VT)"},
     "Sverige": {"currency": "SEK", "benchmark": "^OMXS30", "benchmark_name": "OMXS30"},
     "USA": {"currency": "USD", "benchmark": "^GSPC", "benchmark_name": "S&P 500"},
     "Norden exkl. Sverige": {"currency": "lokal valuta", "benchmark": None, "benchmark_name": "—"},
@@ -319,6 +351,7 @@ MARKET_CONFIGS = {
 }
 
 MARKET_UNIVERSES = {
+    "Sverige + Norge + Danmark": SWEDEN_BROAD_TICKERS + NORDIC_LARGE_TICKERS,
     "Sverige": SWEDEN_BROAD_TICKERS,
     "USA": US_LARGE_TICKERS,
     "Norden exkl. Sverige": NORDIC_LARGE_TICKERS,
@@ -1086,6 +1119,17 @@ def fetch_deep_statements(symbol: str) -> dict[str, Any]:
         eps_revisions = _analyst_frame("eps_revisions", "get_eps_revisions")
         earnings_estimate = _analyst_frame("earnings_estimate", "get_earnings_estimate")
         earnings_history = _analyst_frame("earnings_history", "get_earnings_history")
+        insider_transactions = _analyst_frame("insider_transactions", "get_insider_transactions")
+        recommendation_summary = _analyst_frame("recommendations", "recommendations_summary", "get_recommendations")
+        upgrades_downgrades = _analyst_frame("upgrades_downgrades", "get_upgrades_downgrades")
+        try:
+            analyst_price_targets = t.analyst_price_targets
+            if callable(analyst_price_targets):
+                analyst_price_targets = analyst_price_targets()
+            if not isinstance(analyst_price_targets, (dict, pd.Series)):
+                analyst_price_targets = {}
+        except Exception:
+            analyst_price_targets = {}
         try:
             price_history = _frame(t.history(period="6mo", interval="1d", auto_adjust=False))
         except Exception:
@@ -1150,6 +1194,9 @@ def fetch_deep_statements(symbol: str) -> dict[str, Any]:
             "quarterly_balance": quarterly_balance,
             "eps_trend": eps_trend, "eps_revisions": eps_revisions,
             "earnings_estimate": earnings_estimate, "earnings_history": earnings_history,
+            "insider_transactions": insider_transactions,
+            "recommendation_summary": recommendation_summary, "upgrades_downgrades": upgrades_downgrades,
+            "analyst_price_targets": analyst_price_targets,
             "price_history": price_history,
             "catalyst_events": {"earnings": earnings_date, "news": catalyst_news},
             "fast_info": fast_info,
@@ -1169,7 +1216,179 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
     """
     if df.empty:
         return df.copy()
-    pool = select_deep_finalist_pool(df, pool_size=pool_size)
+    # Discovery Engine 2.0: reserve deep-analysis capacity for different ways an
+    # excellent stock can surface (one-year, lifetime, quality, valuation, reversal).
+    # No new aggregate score is introduced; the existing deep gates remain decisive.
+    discovery_pool = build_discovery_pool(df, max_candidates=max(18, pool_size * 2))
+
+    # v3.53 Estimate Revision Radar 2.0: probe a bounded, diversified subset before
+    # the final deep slots are locked. The fetch is cached and reused by the later
+    # deep analysis. Missing analyst data never earns a slot.
+    estimate_probe = discovery_pool.head(min(12, len(discovery_pool))).copy()
+    estimate_records: dict[Any, dict[str, Any]] = {}
+    if not estimate_probe.empty:
+        with ThreadPoolExecutor(max_workers=min(3, len(estimate_probe))) as executor:
+            futures = {executor.submit(fetch_deep_statements, str(row["Ticker"])): idx for idx, row in estimate_probe.iterrows()}
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    raw = future.result()
+                    metrics = build_inflection_metrics(
+                        raw.get("quarterly_income"), raw.get("quarterly_cashflow"),
+                        raw.get("eps_trend"), raw.get("eps_revisions"), raw.get("earnings_history"),
+                        raw.get("quarterly_balance"), raw.get("earnings_estimate")
+                    )
+                    acceleration = build_expectation_acceleration(
+                        raw.get("eps_trend"), raw.get("eps_revisions"), metrics, estimate_probe.loc[idx]
+                    )
+                    post_report = build_post_report_drift(
+                        raw.get("earnings_history"), raw.get("price_history"), metrics
+                    )
+                    report_delta = build_report_delta(metrics, post_report, raw.get("catalyst_events"))
+                    _symbol = str(estimate_probe.loc[idx].get("Ticker", ""))
+                    _report_snap = snapshot_from_report_delta(_symbol, metrics, post_report, report_delta, "2026-09-09")
+                    try:
+                        with _db_connect() as _conn:
+                            _report_prev = previous_report_snapshot(_conn, _symbol, _report_snap["report_date"]) if _report_snap else None
+                            report_memory = compare_report_delta_memory(_report_snap, _report_prev)
+                            save_report_snapshot(_conn, _report_snap)
+                    except Exception:
+                        report_memory = compare_report_delta_memory(_report_snap, None)
+                    owner_snapshot = {**estimate_probe.loc[idx].to_dict(), **(raw.get("fast_info") or {})}
+                    owner_signal = build_capital_allocation_insider_radar(
+                        raw.get("cashflow"), raw.get("balance"), raw.get("insider_transactions"), owner_snapshot
+                    )
+                    management_signal = build_management_signal(raw.get("catalyst_events"))
+                    _mgmt_snap = snapshot_from_management_signal(_symbol, management_signal, raw.get("catalyst_events"), "2026-09-09")
+                    try:
+                        with _db_connect() as _conn:
+                            _mgmt_prev = previous_management_snapshot(_conn, _symbol, _mgmt_snap["signal_key"]) if _mgmt_snap else None
+                            management_memory = compare_management_signal_memory(_mgmt_snap, _mgmt_prev)
+                            save_management_snapshot(_conn, _mgmt_snap)
+                    except Exception:
+                        management_memory = compare_management_signal_memory(_mgmt_snap, None)
+                    consensus_change = build_consensus_change(
+                        raw.get("recommendation_summary"), raw.get("upgrades_downgrades"),
+                        raw.get("analyst_price_targets"), estimate_probe.loc[idx], as_of="2026-09-09"
+                    )
+                    _snap = snapshot_from_result(_symbol, consensus_change, "2026-09-09")
+                    try:
+                        with _db_connect() as _conn:
+                            _prev = previous_snapshot(_conn, _symbol, _snap["captured_date"])
+                            consensus_memory = compare_consensus_memory(_snap, _prev)
+                            save_snapshot(_conn, _snap)
+                    except Exception:
+                        consensus_memory = compare_consensus_memory(_snap, None)
+                    _combined_change = {**report_memory, **management_memory, **consensus_memory}
+                    change_confirmation = build_change_confirmation(_combined_change)
+                    confirmed_why_now = build_confirmed_why_now(change_confirmation)
+                    crowded_narrative = build_crowded_narrative({**estimate_probe.loc[idx].to_dict(), **consensus_change, **consensus_memory})
+                    expectation_gap = build_expectation_gap({**estimate_probe.loc[idx].to_dict(), **consensus_change, **consensus_memory, **change_confirmation, **crowded_narrative})
+                    estimate_records[idx] = {**metrics, **acceleration, **post_report, **report_delta, **report_memory, **owner_signal, **management_signal, **management_memory, **consensus_change, **consensus_memory, **change_confirmation, **confirmed_why_now, **crowded_narrative, **expectation_gap}
+                except Exception:
+                    estimate_records[idx] = {}
+    if estimate_records:
+        estimate_frame = pd.DataFrame.from_dict(estimate_records, orient="index")
+        keep = [c for c in [
+            "EPS-estimat förändring", "EPS-estimat jämförelseperiod", "EPS-revisionsbalans",
+            "Analytiker antal", "Reviderande analytiker senaste period", "Analytikertäckning",
+            "Estimat tillförlitlighetsvikt", "Senaste EPS-överraskning",
+            "Förväntningsacceleration status", "Förväntningsacceleration kandidat",
+            "Förväntningsacceleration stark", "EPS förändring 7d", "EPS förändring 30d",
+            "Revisionsbalans 7d", "Andel revideringar senaste 7d",
+            "Förväntningsacceleration förklaring",
+            "Post-report dagar sedan", "Post-report reaktion", "Post-report fortsatt rörelse",
+            "Report Delta status", "Report Delta kandidat", "Report Delta underreaktion",
+            "Report Delta evidens", "Report Delta positiva", "Report Delta negativa",
+            "Report Delta guidance", "Report Delta kursreaktion", "Report Delta fortsatt rörelse",
+            "Report Delta förklaring",
+            "Rapportminne status", "Rapportminne historik", "Rapportminne förbättring",
+            "Rapportminne försämring", "Rapportminne rapportdatum",
+            "Rapportminne jämförelserapport", "Rapportminne förklaring",
+            "Kapitalallokering nettoåterköp", "Kapitalallokering återköpsyield",
+            "Kapitalallokering emissionsyield", "Kapitalallokering kontantutdelningsyield",
+            "Kapitalallokering skuldtrend", "Insider köp antal", "Insider köpare antal",
+            "Insider sälj antal", "Insider köp värde", "Insider kluster", "Insider starkt kluster",
+            "Insider period dagar", "Insider förklaring", "Ägarsignal status", "Ägarsignal kandidat",
+            "Ägarsignal stark", "Ägarsignal positiva", "Ägarsignal varningar", "Ägarsignal förklaring",
+            "Ledningssignal status", "Ledningssignal kandidat", "Ledningssignal stark", "Ledningssignal varning",
+            "Ledningssignal positiva", "Ledningssignal negativa", "Ledningssignal jämförbara",
+            "Ledningssignal positiva ämnen", "Ledningssignal negativa ämnen", "Ledningssignal rubriker",
+            "Ledningssignal förklaring",
+            "Ledningsminne status", "Ledningsminne historik", "Ledningsminne positiv", "Ledningsminne negativ",
+            "Ledningsminne förbättrade ämnen", "Ledningsminne försämrade ämnen", "Ledningsminne signaldatum",
+            "Ledningsminne jämförelsedatum", "Ledningsminne förklaring",
+            "Konsensusförändring status", "Konsensusförändring kandidat", "Konsensusförändring stark",
+            "Konsensusförändring varning", "Konsensus bullish andel", "Konsensus bearish andel",
+            "Konsensus net breadth", "Konsensus breadth förändring", "Konsensus analytiker antal",
+            "Konsensus uppgraderingar 45d", "Konsensus nedgraderingar 45d",
+            "Konsensus initierad bevakning 45d", "Konsensus aktiva analyshus 45d",
+            "Konsensus åtgärdsbalans 45d", "Riktkurs medel", "Riktkurs median",
+            "Riktkurs hög", "Riktkurs låg", "Riktkurs dispersion", "Riktkurs potential",
+            "Konsensusförändring förklaring",
+            "Konsensusminne status", "Konsensusminne historik", "Konsensusminne positiv",
+            "Konsensusminne negativ", "Konsensusminne köpandel förändring",
+            "Konsensusminne riktkursmedian förändring", "Konsensusminne dispersion förändring",
+            "Crowded status", "Crowded varning", "Crowded stark varning", "Crowded förklaring",
+            "Expectation Gap status", "Expectation Gap kandidat", "Expectation Gap stark", "Expectation Gap varning",
+            "Expectation Gap förändringsfamiljer", "Expectation Gap bullish andel", "Expectation Gap analytiker antal",
+            "Expectation Gap riktkurs potential", "Expectation Gap förklaring",
+            "Konsensusminne analytiker förändring", "Konsensusminne jämförelsedatum",
+            "Konsensusminne förklaring",
+            "Förändringsbekräftelse status", "Förändringsbekräftelse kandidat",
+            "Förändringsbekräftelse stark", "Förändringsbekräftelse varning",
+            "Förändringsbekräftelse historikfamiljer", "Förändringsbekräftelse positiva familjer",
+            "Förändringsbekräftelse negativa familjer", "Förändringsbekräftelse förklaring",
+            "Bekräftat varför nu status", "Bekräftat varför nu", "Bekräftat varför nu utfall",
+            "Bekräftat varför nu stöd antal", "Bekräftat varför nu motbevis antal",
+            "Bekräftat varför nu konflikt", "Bekräftat varför nu stark",
+            "Bekräftat varför nu familjer", "Bekräftat varför nu motbevis"
+        ] if c in estimate_frame.columns]
+        if keep:
+            discovery_pool = discovery_pool.drop(columns=[c for c in keep if c in discovery_pool.columns], errors="ignore")
+            discovery_pool = discovery_pool.join(estimate_frame[keep], how="left")
+        if "Bekräftat varför nu status" in estimate_frame.columns:
+            st.session_state["bq_confirmed_why_now_radar"] = estimate_frame.copy()
+    discovery_pool = add_estimate_revision_radar(discovery_pool)
+    # v3.58 Sector Read-through: use verified changes in one company only as a
+    # conservative clue for fundamentally supported peers in the same sector.
+    # This never claims causality or that a peer shares the source company's change.
+    discovery_pool = add_value_chain_readthrough(discovery_pool)
+    discovery_pool = add_verified_relationships(discovery_pool)
+    discovery_pool = add_relationship_change_radar(discovery_pool, load_verified_relationships(), as_of="2026-09-09")
+    discovery_pool = add_sector_readthrough(discovery_pool)
+    try:
+        st.session_state["bq_relationship_registry_health"] = relationship_registry_health(
+            load_verified_relationships(), as_of="2026-09-09"
+        )
+    except Exception:
+        st.session_state["bq_relationship_registry_health"] = {}
+    try:
+        if "Underfollowed kandidat" in discovery_pool.columns:
+            st.session_state["bq_underfollowed_discovery"] = discovery_pool.copy()
+        st.session_state["bq_estimate_revision_radar"] = discovery_pool[
+            discovery_pool["Estimat Radar kandidat"].fillna(False).astype(bool)
+        ].copy()
+        if "Report Delta status" in discovery_pool.columns:
+            st.session_state["bq_report_delta_radar"] = discovery_pool.copy()
+        if "Ägarsignal status" in discovery_pool.columns:
+            st.session_state["bq_owner_signal_radar"] = discovery_pool.copy()
+        if "Ledningssignal status" in discovery_pool.columns:
+            st.session_state["bq_management_signal_radar"] = discovery_pool.copy()
+        if "Konsensusförändring status" in discovery_pool.columns:
+            st.session_state["bq_consensus_change_radar"] = discovery_pool.copy()
+        if "Värdekedja status" in discovery_pool.columns:
+            st.session_state["bq_value_chain_radar"] = discovery_pool.copy()
+        if "Verifierad relation status" in discovery_pool.columns:
+            st.session_state["bq_verified_relationship_radar"] = discovery_pool.copy()
+        if "Relationsförändring status" in discovery_pool.columns:
+            st.session_state["bq_relationship_change_radar"] = discovery_pool.copy()
+        if "Sektorläsning status" in discovery_pool.columns:
+            st.session_state["bq_sector_readthrough_radar"] = discovery_pool.copy()
+    except Exception:
+        pass
+
+    pool = select_deep_finalist_pool(discovery_pool, pool_size=pool_size)
     records: dict[str, dict[str, Any]] = {}
     max_workers = min(3, max(1, len(pool)))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1203,9 +1422,27 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
                 )
                 inflection = assess_inflection(inflection_metrics)
                 assessment.update(inflection)
-                assessment.update(build_post_report_drift(
+                post_report = build_post_report_drift(
                     raw.get("earnings_history"), raw.get("price_history"), inflection_metrics
+                )
+                assessment.update(post_report)
+                assessment.update(build_report_delta(inflection_metrics, post_report, raw.get("catalyst_events")))
+                owner_snapshot = {**row.to_dict(), **(raw.get("fast_info") or {})}
+                assessment.update(build_capital_allocation_insider_radar(
+                    raw.get("cashflow"), raw.get("balance"), raw.get("insider_transactions"), owner_snapshot
                 ))
+                _management_signal = build_management_signal(raw.get("catalyst_events"))
+                assessment.update(_management_signal)
+                _deep_symbol = str(row.get("Ticker", ""))
+                _mgmt_snap = snapshot_from_management_signal(_deep_symbol, _management_signal, raw.get("catalyst_events"), "2026-09-09")
+                try:
+                    with _db_connect() as _conn:
+                        _mgmt_prev = previous_management_snapshot(_conn, _deep_symbol, _mgmt_snap["signal_key"]) if _mgmt_snap else None
+                        _management_memory = compare_management_signal_memory(_mgmt_snap, _mgmt_prev)
+                        save_management_snapshot(_conn, _mgmt_snap)
+                except Exception:
+                    _management_memory = compare_management_signal_memory(_mgmt_snap, None)
+                assessment.update(_management_memory)
                 assessment.update(build_expectation_change({**row.to_dict(), **assessment}))
                 assessment.update(build_fresh_change({**row.to_dict(), **assessment}))
                 assessment = apply_inflection_gate(assessment)
@@ -1308,9 +1545,11 @@ def build_short_term_longlist(df: pd.DataFrame, benchmark: dict[str, Any] | None
                     raw.get("quarterly_balance"), raw.get("earnings_estimate")
                 )
                 inflection = assess_inflection(inflection_metrics)
-                inflection.update(build_post_report_drift(
+                post_report = build_post_report_drift(
                     raw.get("earnings_history"), raw.get("price_history"), inflection_metrics
-                ))
+                )
+                inflection.update(post_report)
+                inflection.update(build_report_delta(inflection_metrics, post_report, raw.get("catalyst_events")))
                 inflection.update(build_expectation_change({**row.to_dict(), **inflection}))
                 inflection.update(build_fresh_change({**row.to_dict(), **inflection}))
                 catalyst = build_catalyst_assessment({**row.to_dict(), **inflection}, raw.get("catalyst_events"))
@@ -1590,6 +1829,7 @@ def init_db() -> None:
             )
             """
         )
+        _ensure_sqlite_column(conn, "radar_history", "details", "TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS signal_history (
@@ -1717,6 +1957,63 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS missed_winner_snapshots (
+                snapshot_id TEXT PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                profile TEXT NOT NULL,
+                market TEXT NOT NULL,
+                captured_date TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                borsify_score REAL,
+                medium_score REAL,
+                year_score REAL,
+                lifetime_score REAL,
+                valuation REAL,
+                quality REAL,
+                setup REAL,
+                risk REAL,
+                coverage REAL,
+                recommended_medium INTEGER NOT NULL DEFAULT 0,
+                recommended_year INTEGER NOT NULL DEFAULT 0,
+                recommended_lifetime INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        _ensure_sqlite_column(conn, "missed_winner_snapshots", "discovery_champion_selected", "INTEGER")
+        _ensure_sqlite_column(conn, "missed_winner_snapshots", "discovery_challenger_flags", "TEXT")
+        _ensure_sqlite_column(conn, "missed_winner_snapshots", "discovery_registry_version", "TEXT")
+        _ensure_sqlite_column(conn, "missed_winner_snapshots", "model_version", "TEXT")
+        _ensure_sqlite_column(conn, "missed_winner_snapshots", "revenue_growth", "REAL")
+        _ensure_sqlite_column(conn, "missed_winner_snapshots", "earnings_growth", "REAL")
+        _ensure_sqlite_column(conn, "missed_winner_snapshots", "profit_margin", "REAL")
+        _ensure_sqlite_column(conn, "missed_winner_snapshots", "roe", "REAL")
+        _ensure_sqlite_column(conn, "missed_winner_snapshots", "fcf_yield", "REAL")
+        _ensure_sqlite_column(conn, "missed_winner_snapshots", "forward_pe", "REAL")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS missed_winner_outcomes (
+                snapshot_id TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                captured_date TEXT NOT NULL,
+                evaluated_date TEXT NOT NULL,
+                horizon TEXT NOT NULL,
+                entry_price REAL NOT NULL,
+                evaluated_price REAL NOT NULL,
+                return_pct REAL NOT NULL,
+                return_percentile REAL NOT NULL,
+                was_recommended INTEGER NOT NULL DEFAULT 0,
+                missed_winner INTEGER NOT NULL DEFAULT 0,
+                frozen_score REAL,
+                why_missed TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY(snapshot_id,horizon)
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS universe_qc_state (
                 symbol TEXT PRIMARY KEY,
                 status TEXT NOT NULL DEFAULT 'OKÄND',
@@ -1730,6 +2027,9 @@ def init_db() -> None:
             )
             """
         )
+        ensure_consensus_memory_table(conn)
+        ensure_report_delta_memory_table(conn)
+        ensure_management_signal_memory_table(conn)
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS universe_qc_events (
@@ -1744,6 +2044,105 @@ def init_db() -> None:
         )
 
 
+
+
+def save_missed_winner_snapshot(frame: pd.DataFrame) -> None:
+    if frame is None or frame.empty:
+        return
+    client = _supabase_client(); uid = current_user_id()
+    rows = []
+    for _, r in frame.iterrows():
+        payload = r.to_dict()
+        payload["snapshot_id"] = f"{payload.get('captured_date')}::{payload.get('profile')}::{payload.get('market')}::{payload.get('symbol')}"
+        rows.append(payload)
+    if client is not None and uid:
+        try:
+            for row in rows:
+                client.table("missed_winner_snapshots").upsert({"user_id": uid, **row}, on_conflict="user_id,snapshot_id").execute()
+            return
+        except Exception:
+            st.session_state["bq_missed_winner_migration_needed"] = True
+            return
+    init_db()
+    cols = ["snapshot_id","symbol","name","profile","market","captured_date","entry_price","borsify_score","medium_score","year_score","lifetime_score","valuation","quality","setup","risk","coverage","revenue_growth","earnings_growth","profit_margin","roe","fcf_yield","forward_pe","recommended_medium","recommended_year","recommended_lifetime","discovery_champion_selected","discovery_challenger_flags","discovery_registry_version","model_version"]
+    with _db_connect() as conn:
+        sql = f"INSERT OR IGNORE INTO missed_winner_snapshots({','.join(cols)}) VALUES ({','.join(['?']*len(cols))})"
+        for row in rows:
+            conn.execute(sql, tuple(row.get(c) for c in cols))
+
+
+def get_missed_winner_snapshots(limit: int = 10000) -> pd.DataFrame:
+    cols = ["snapshot_id","symbol","name","profile","market","captured_date","entry_price","borsify_score","medium_score","year_score","lifetime_score","valuation","quality","setup","risk","coverage","revenue_growth","earnings_growth","profit_margin","roe","fcf_yield","forward_pe","recommended_medium","recommended_year","recommended_lifetime","discovery_champion_selected","discovery_challenger_flags","discovery_registry_version","model_version"]
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        try:
+            data = client.table("missed_winner_snapshots").select(",".join(cols)).eq("user_id", uid).order("captured_date", desc=True).limit(int(limit)).execute().data or []
+            return pd.DataFrame(data, columns=cols)
+        except Exception:
+            st.session_state["bq_missed_winner_migration_needed"] = True
+            return pd.DataFrame(columns=cols)
+    init_db()
+    with _db_connect() as conn:
+        return pd.read_sql_query(f"SELECT {','.join(cols)} FROM missed_winner_snapshots ORDER BY captured_date DESC LIMIT ?", conn, params=(int(limit),))
+
+
+def save_missed_winner_outcomes(frame: pd.DataFrame) -> None:
+    if frame is None or frame.empty:
+        return
+    cols = ["snapshot_id","symbol","name","captured_date","evaluated_date","horizon","entry_price","evaluated_price","return_pct","return_percentile","was_recommended","missed_winner","frozen_score","why_missed"]
+    rows = [{c: r.get(c) for c in cols} for _, r in frame.iterrows()]
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        try:
+            for row in rows:
+                client.table("missed_winner_outcomes").upsert({"user_id": uid, **row}, on_conflict="user_id,snapshot_id,horizon").execute()
+            return
+        except Exception:
+            st.session_state["bq_missed_winner_migration_needed"] = True
+            return
+    init_db()
+    with _db_connect() as conn:
+        sql = f"INSERT OR IGNORE INTO missed_winner_outcomes({','.join(cols)}) VALUES ({','.join(['?']*len(cols))})"
+        for row in rows:
+            conn.execute(sql, tuple(row.get(c) for c in cols))
+
+
+def get_missed_winner_outcomes(limit: int = 10000) -> pd.DataFrame:
+    cols = ["snapshot_id","symbol","name","captured_date","evaluated_date","horizon","entry_price","evaluated_price","return_pct","return_percentile","was_recommended","missed_winner","frozen_score","why_missed"]
+    client = _supabase_client(); uid = current_user_id()
+    if client is not None and uid:
+        try:
+            data = client.table("missed_winner_outcomes").select(",".join(cols)).eq("user_id", uid).order("evaluated_date", desc=True).limit(int(limit)).execute().data or []
+            return pd.DataFrame(data, columns=cols)
+        except Exception:
+            st.session_state["bq_missed_winner_migration_needed"] = True
+            return pd.DataFrame(columns=cols)
+    init_db()
+    with _db_connect() as conn:
+        return pd.read_sql_query(f"SELECT {','.join(cols)} FROM missed_winner_outcomes ORDER BY evaluated_date DESC LIMIT ?", conn, params=(int(limit),))
+
+
+def refresh_missed_winner_outcomes(current_frame: pd.DataFrame, profile: str, market: str) -> None:
+    history = get_missed_winner_snapshots(limit=20000)
+    if history.empty or current_frame is None or current_frame.empty:
+        return
+    today = pd.Timestamp.now().date()
+    existing = get_missed_winner_outcomes(limit=50000)
+    existing_keys = set(zip(existing.get("snapshot_id", pd.Series(dtype=str)).astype(str), existing.get("horizon", pd.Series(dtype=str)).astype(str))) if not existing.empty else set()
+    for horizon, spec in MISSED_WINNER_HORIZONS.items():
+        candidates = history[(history["profile"].astype(str) == str(profile)) & (history["market"].astype(str) == str(market))].copy()
+        if candidates.empty:
+            continue
+        candidates["_date"] = pd.to_datetime(candidates["captured_date"], errors="coerce").dt.date
+        due_dates = sorted({d for d in candidates["_date"].dropna() if (today - d).days >= int(spec["min_age_days"])})
+        for d in due_dates:
+            cohort = candidates[candidates["_date"].eq(d)].drop(columns=["_date"])
+            if cohort.empty or all((str(x), horizon) in existing_keys for x in cohort["snapshot_id"]):
+                continue
+            result = evaluate_snapshot_cohort(cohort, current_frame[["Ticker","Pris"]], horizon, today.isoformat())
+            if not result.empty:
+                result = result[~result["snapshot_id"].astype(str).map(lambda x: (x, horizon) in existing_keys)]
+                save_missed_winner_outcomes(result)
 
 
 def get_universe_qc_states() -> pd.DataFrame:
@@ -2544,27 +2943,97 @@ def previous_top_symbols(profile: str, limit: int = 10) -> set[str]:
         return set()
 
 
+
+def previous_radar_snapshot(profile: str, limit: int = 10) -> pd.DataFrame:
+    """Latest earlier radar snapshot with rank, score and frozen explanation inputs.
+
+    The optional ``details`` payload was added in v3.44. Older cloud schemas are
+    read through a legacy fallback, so missing historical details stay missing
+    rather than being reconstructed from today's data.
+    """
+    client = _supabase_client(); uid = current_user_id()
+    today = datetime.now().date().isoformat()
+    base_columns = ["Ticker", "Rank", "Score", "captured_date"]
+    try:
+        if client is not None and uid:
+            dates = client.table("radar_history").select("captured_date").eq("user_id", uid).eq("profile", profile).lt("captured_date", today).order("captured_date", desc=True).limit(1).execute().data or []
+            if not dates:
+                return pd.DataFrame(columns=base_columns)
+            d = dates[0]["captured_date"]
+            try:
+                data = client.table("radar_history").select("symbol,rank,score,captured_date,details").eq("user_id", uid).eq("profile", profile).eq("captured_date", d).lte("rank", limit).order("rank").execute().data or []
+            except Exception:
+                data = client.table("radar_history").select("symbol,rank,score,captured_date").eq("user_id", uid).eq("profile", profile).eq("captured_date", d).lte("rank", limit).order("rank").execute().data or []
+            rows = []
+            for x in data:
+                row = {"Ticker": x.get("symbol"), "Rank": x.get("rank"), "Score": x.get("score"), "captured_date": x.get("captured_date")}
+                details = x.get("details")
+                if isinstance(details, str):
+                    try: details = json.loads(details)
+                    except Exception: details = None
+                if isinstance(details, dict):
+                    row.update(details)
+                rows.append(row)
+            return pd.DataFrame(rows)
+        init_db()
+        with _db_connect() as conn:
+            row = conn.execute("SELECT captured_date FROM radar_history WHERE profile=? AND captured_date<? ORDER BY captured_date DESC LIMIT 1", (profile, today)).fetchone()
+            if not row:
+                return pd.DataFrame(columns=base_columns)
+            rows = conn.execute("SELECT symbol,rank,score,captured_date,details FROM radar_history WHERE profile=? AND captured_date=? AND rank<=? ORDER BY rank", (profile, row[0], limit)).fetchall()
+        parsed = []
+        for symbol, rank, score, captured_date, details_raw in rows:
+            item = {"Ticker": symbol, "Rank": rank, "Score": score, "captured_date": captured_date}
+            if details_raw:
+                try:
+                    details = json.loads(details_raw)
+                    if isinstance(details, dict): item.update(details)
+                except Exception:
+                    pass
+            parsed.append(item)
+        return pd.DataFrame(parsed)
+    except Exception:
+        return pd.DataFrame(columns=base_columns)
+
 def save_radar_history(top_df: pd.DataFrame, profile: str) -> None:
-    """Store today's ranking to identify shares newly entering the radar on a later day."""
+    """Store today's ranking and frozen explanation inputs for later comparisons.
+
+    ``details`` is point-in-time only. If an older Supabase schema lacks that
+    column, Borsify falls back to the legacy rank/score payload rather than
+    breaking the scan.
+    """
     if top_df.empty:
         return
     today = datetime.now().date().isoformat()
     client = _supabase_client(); uid = current_user_id()
-    rows = top_df.head(20)[["Ticker", "Borsify Score"]].reset_index(drop=True)
+    rows = top_df.head(20).reset_index(drop=True)
     if client is not None and uid:
         for i, row in rows.iterrows():
-            payload = {"user_id": uid, "symbol": str(row["Ticker"]), "profile": profile, "rank": int(i + 1), "score": float(row["Borsify Score"]), "captured_date": today}
+            score = _num(row.get("Borsify Score"))
+            if not np.isfinite(score):
+                continue
+            payload = {
+                "user_id": uid, "symbol": str(row.get("Ticker", "")), "profile": profile,
+                "rank": int(i + 1), "score": float(score), "captured_date": today,
+                "details": snapshot_details(row),
+            }
             try:
                 client.table("radar_history").upsert(payload, on_conflict="user_id,symbol,profile,captured_date").execute()
             except Exception:
-                pass
+                legacy = {k: payload[k] for k in ["user_id", "symbol", "profile", "rank", "score", "captured_date"]}
+                try: client.table("radar_history").upsert(legacy, on_conflict="user_id,symbol,profile,captured_date").execute()
+                except Exception: pass
         return
     init_db()
     with _db_connect() as conn:
         for i, row in rows.iterrows():
+            score = _num(row.get("Borsify Score"))
+            if not np.isfinite(score):
+                continue
+            details = json.dumps(snapshot_details(row), ensure_ascii=False)
             conn.execute(
-                "INSERT INTO radar_history(symbol,profile,rank,score,captured_date) VALUES (?,?,?,?,?) ON CONFLICT(symbol,profile,captured_date) DO UPDATE SET rank=excluded.rank,score=excluded.score,captured_at=CURRENT_TIMESTAMP",
-                (str(row["Ticker"]), profile, int(i + 1), float(row["Borsify Score"]), today),
+                "INSERT INTO radar_history(symbol,profile,rank,score,captured_date,details) VALUES (?,?,?,?,?,?) ON CONFLICT(symbol,profile,captured_date) DO UPDATE SET rank=excluded.rank,score=excluded.score,details=excluded.details,captured_at=CURRENT_TIMESTAMP",
+                (str(row.get("Ticker", "")), profile, int(i + 1), float(score), today, details),
             )
 
 
@@ -5085,6 +5554,55 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         "Detta är associationskontroll, inte kausal bevisning, och ändrar aldrig modellvikter automatiskt."
                     )
 
+                    st.markdown("#### News Underreaction · fungerar signalen faktiskt?")
+                    st.caption(
+                        "Från v3.39 är hypotesen låst innan nya utfall uppstår: tydlig positiv förväntningsöverraskning från stark källa + liten initial kursreaktion "
+                        "jämförs med liknande positiva överraskningar som fick en tydligare direkt reaktion. Äldre case räknas inte."
+                    )
+                    nuv = news_underreaction_validation_table(recs, outs)
+                    nuv_head = news_underreaction_validation_summary(nuv)
+                    if nuv_head.get("status") == "Granska":
+                        st.warning(str(nuv_head.get("text", "")))
+                    elif nuv_head.get("status") == "Stöd":
+                        st.success(str(nuv_head.get("text", "")))
+                    else:
+                        st.info(str(nuv_head.get("text", "")))
+                    if not nuv.empty:
+                        show=nuv.copy()
+                        for col in ["Median underreaktion","Median kontroll","Median skillnad","Träff underreaktion","Träff kontroll","Träffskillnad"]:
+                            show[col+" %"]=(pd.to_numeric(show[col],errors="coerce")*100).round(1)
+                        st.dataframe(show[["Horisont","Status","Oberoende case","Underreaktion case","Kontroll case","Median underreaktion %","Median kontroll %","Median skillnad %"]], use_container_width=True, hide_index=True)
+                    st.caption(
+                        f"Minst {NEWS_UNDERREACTION_MIN_CASES} oberoende prospektiva case totalt och {NEWS_UNDERREACTION_MIN_GROUP} i vardera gruppen krävs innan signalen kan få status Stöd/Ifrågasatt. "
+                        "Resultatet är associationsbevis, inte kausalitet, och ändrar aldrig köpgränser eller ranking automatiskt."
+                    )
+
+                    st.markdown("#### Expectation Gap · slår hypotesen vanlig positiv förändring?")
+                    st.caption(
+                        "Från v3.73 är hypotesen låst prospektivt: case som redan vid analystillfället klassades som 'Förbättring före förväntningarna' "
+                        "jämförs med bekräftad positiv förändring som hade tillräcklig förväntningsdata men inget tydligt gap. Crowded-/varningscase och tunn data exkluderas. Äldre case räknas inte."
+                    )
+                    egv = expectation_gap_validation_table(recs, outs)
+                    egv_head = expectation_gap_validation_summary(egv)
+                    if egv_head.get("status") == "Granska":
+                        st.warning(str(egv_head.get("text", "")))
+                    elif egv_head.get("status") == "Stöd":
+                        st.success(str(egv_head.get("text", "")))
+                    else:
+                        st.info(str(egv_head.get("text", "")))
+                    if not egv.empty:
+                        show = egv.copy()
+                        for col in ["Median gap-case", "Median kontroll", "Median skillnad", "Träff gap-case", "Träff kontroll", "Träffskillnad"]:
+                            show[col + " %"] = (pd.to_numeric(show[col], errors="coerce") * 100).round(1)
+                        st.dataframe(
+                            show[["Horisont", "Status", "Oberoende case", "Expectation Gap case", "Kontroll case", "Median gap-case %", "Median kontroll %", "Median skillnad %"]],
+                            use_container_width=True, hide_index=True,
+                        )
+                    st.caption(
+                        f"Minst {EXPECTATION_GAP_MIN_CASES} oberoende prospektiva case totalt och {EXPECTATION_GAP_MIN_GROUP} i vardera gruppen krävs innan hypotesen kan få status Stöd/Ifrågasatt. "
+                        "Valideringen ändrar aldrig ranking, score eller köpgränser automatiskt."
+                    )
+
                     st.markdown("#### Evidence Maturity · vad vet vi faktiskt – och vad är fortfarande en hypotes?")
                     st.caption("En gemensam mognadsvy för signaler, challengers och policyer. Historiskt stöd, prospektiv evidens och produktionsbeslut hålls isär så att många diagnostikpaneler inte ser starkare ut än underlaget är.")
                     maturity = build_evidence_maturity_dashboard(recs, outs)
@@ -5927,20 +6445,23 @@ def main() -> None:
         )
         st.caption(intent_plain_text(discovery_intent))
 
-        # Novisförst: tid, marknad och alla tekniska filter är frivilliga.
-        # Startsidan ska fungera utan att användaren behöver förstå universum,
-        # likviditet, P/E-filter eller andra modellinställningar.
+        # Landvalet är ett av få beslut som ska vara synligt direkt: standard är
+        # Sverige, Norge och Danmark, men användaren kan utöka sökningen utan
+        # att behöva förstå Borsifys interna universumindelning.
+        market = st.selectbox(
+            "Var ska Borsify leta?",
+            list(MARKET_CONFIGS),
+            index=list(MARKET_CONFIGS).index("Sverige + Norge + Danmark"),
+            help="Standard är hela Borsifys katalog i Sverige, Norge och Danmark. Välj Alla marknader om du vill utöka sökningen globalt.",
+        )
+
+        # Novisförst: tid och tekniska filter är frivilliga.
         with st.expander("Anpassa sökningen", expanded=False):
             search_horizon = st.selectbox(
                 "Hur länge tänker du äga?",
                 SEARCH_HORIZONS,
                 index=0,
                 help="Låt standardvalet vara kvar om du inte har en tydlig tidshorisont.",
-            )
-            market = st.selectbox(
-                "Var ska Borsify leta?",
-                list(MARKET_CONFIGS),
-                index=list(MARKET_CONFIGS).index("Alla marknader"),
             )
 
             if market == "Sverige":
@@ -5949,16 +6470,24 @@ def main() -> None:
             else:
                 custom = ""
                 country_map = {
+                    "Sverige + Norge + Danmark": ["Sverige", "Norge", "Danmark"],
                     "Norden exkl. Sverige": ["Danmark","Norge","Finland"],
                     "Alla marknader": sorted(avanza_universe_df["Land"].unique().tolist()) if not avanza_universe_df.empty else [],
                 }
                 countries_for_market = country_map.get(market, [market])
-                universe_mode = st.radio("Aktieurval", ["Snabbt kärnurval", "Brett universum (beta)"], index=0)
-                broad_universe = universe_mode == "Brett universum (beta)"
+                universe_mode = st.radio(
+                    "Aktieurval",
+                    ["Brett universum", "Snabbt kärnurval"],
+                    index=0,
+                    help="Brett universum söker i alla katalogerade aktier i de valda länderna. Kärnurvalet finns kvar om du vill prioritera snabbhet.",
+                )
+                broad_universe = universe_mode == "Brett universum"
                 universe = universe_mode
 
             if market == "Sverige":
                 country_filter_options = ["Sverige"]
+            elif market == "Sverige + Norge + Danmark":
+                country_filter_options = ["Sverige", "Norge", "Danmark"]
             elif market == "Norden exkl. Sverige":
                 country_filter_options = ["Danmark", "Finland", "Norge"]
             elif market == "Alla marknader":
@@ -6029,12 +6558,13 @@ def main() -> None:
         symbols = OMXS30_TICKERS if universe == "OMXS30" else (file_universe_symbols if universe == "Sverige bred" else parse_symbols(custom))
     else:
         country_map = {
+            "Sverige + Norge + Danmark": ["Sverige", "Norge", "Danmark"],
             "Norden exkl. Sverige": ["Danmark","Norge","Finland"],
             "Alla marknader": sorted(avanza_universe_df["Land"].unique().tolist()) if not avanza_universe_df.empty else [],
         }
         countries_for_market = country_map.get(market, [market])
         if not avanza_universe_df.empty:
-            symbols = universe_symbols(avanza_universe_df, countries_for_market, broad=(universe == "Brett universum (beta)"))
+            symbols = universe_symbols(avanza_universe_df, countries_for_market, broad=(universe == "Brett universum"))
         else:
             symbols = MARKET_UNIVERSES[market]
     # Land can be applied before any Yahoo request, which saves work in global searches.
@@ -6195,6 +6725,18 @@ def main() -> None:
         filtered = filtered[dy.notna() & (dy > 0) & (dy >= min_yield)]
     filtered = apply_discovery_intent(filtered, discovery_intent)
     filtered = apply_search_horizon(filtered, search_horizon, add_horizon_scores)
+    # v3.52 Fundamental Change Radar: compare today's broad scan with the latest
+    # older point-in-time universe snapshot. Same-day data cannot be its own baseline
+    # and missing historical fields are never backfilled.
+    try:
+        _change_history = get_missed_winner_snapshots(limit=20000)
+        filtered = add_fundamental_change_radar(filtered, _change_history, datetime.now().date().isoformat())
+    except Exception:
+        filtered = add_fundamental_change_radar(filtered, pd.DataFrame(), datetime.now().date().isoformat())
+    # Discovery 2.0 is a candidate doorway, not a new score. Keep an auditable
+    # multi-lens pool so advanced diagnostics can show whether the search is broad.
+    discovery_pool_global = build_discovery_pool(filtered, max_candidates=min(24, len(filtered)))
+    st.session_state["bq_discovery_coverage"] = discovery_coverage_summary(filtered, discovery_pool_global)
     top = filtered.head(top_n).copy()
     daily_shortlist = build_daily_shortlist(filtered, profile, limit=min(5, len(filtered)))
     elapsed = time.perf_counter() - start
@@ -6226,6 +6768,18 @@ def main() -> None:
         if benchmark_explainer:
             st.caption(benchmark_explainer)
         st.caption(f"{len(raw_df)} aktier analyserade · {len(filtered)} kvar efter dina val · kursdata {latest_price_date}{market_note}{fx_note}{country_text}{active_price_text}{horizon_text}")
+        if "Fundamental förändring antal" in filtered.columns:
+            _change_count = int((pd.to_numeric(filtered["Fundamental förändring antal"], errors="coerce").fillna(0) > 0).sum())
+            st.caption(f"Fundamental Change Radar: {_change_count} aktier med verifierad ny förbättring mot en äldre fryst bredscan. Radarn skapar inget nytt score.")
+        discovery_diag = st.session_state.get("bq_discovery_coverage", {})
+        if isinstance(discovery_diag, dict) and discovery_diag.get("pool"):
+            lens_counts = discovery_diag.get("lens_counts", {}) or {}
+            represented = ", ".join(f"{k} {v}" for k, v in lens_counts.items() if v)
+            st.caption(
+                f"Discovery 2.0: {int(discovery_diag.get('pool', 0))} kandidater reserveras för bredare djupurval"
+                + (f" · {represented}" if represented else "")
+                + ". Det är inget nytt score."
+            )
         if isinstance(scan_metrics, dict) and scan_metrics:
             cache_hits = int(scan_metrics.get("fundamental_persistent_cache", 0) or 0)
             yahoo_fund = int(scan_metrics.get("fundamental_yahoo", 0) or 0)
@@ -6274,13 +6828,274 @@ def main() -> None:
         )
         with st.spinner("Fördjupar de starkaste kandidaterna…"):
             deep_longlist = build_deep_longlist(
-                filtered, pool_size=min(6, len(filtered)), limit=min(5, len(filtered))
+                filtered, pool_size=min(10, len(filtered)), limit=min(5, len(filtered))
             )
             deep_longlist = add_data_trust(deep_longlist)
             short_longlist = build_short_term_longlist(
-                filtered, idx, pool_size=min(8, len(filtered)), limit=min(5, len(filtered))
+                filtered, idx, pool_size=min(10, len(filtered)), limit=min(5, len(filtered))
             )
             short_longlist = add_data_trust(short_longlist)
+
+        confirmed_view = st.session_state.get("bq_confirmed_why_now_radar", pd.DataFrame())
+        if isinstance(confirmed_view, pd.DataFrame) and not confirmed_view.empty and "Bekräftat varför nu status" in confirmed_view.columns:
+            _cw = confirmed_view.copy()
+            _cw["__support"] = pd.to_numeric(_cw.get("Bekräftat varför nu stöd antal"), errors="coerce").fillna(0)
+            _cw["__against"] = pd.to_numeric(_cw.get("Bekräftat varför nu motbevis antal"), errors="coerce").fillna(0)
+            _cw["__strong"] = _cw.get("Bekräftat varför nu stark", False).fillna(False).astype(int)
+            _cw = _cw.sort_values(["__strong", "__support", "__against"], ascending=[False, False, True]).head(6)
+            st.markdown("### Varför just nu – verifierat från flera håll")
+            st.caption("Det här är inte ett nytt betyg. Borsify visar bara om verkliga förändringar i rapport, analytikerkonsensus och ledningssignaler bekräftar eller motsäger varandra.")
+            for _, _case in _cw.iterrows():
+                _ticker = str(_case.get("Ticker", "—"))
+                _name = str(_case.get("Namn", _ticker) or _ticker)
+                _status = str(_case.get("Bekräftat varför nu status", "—"))
+                _text = str(_case.get("Bekräftat varför nu", "—"))
+                _conflict = bool(_case.get("Bekräftat varför nu konflikt", False))
+                with st.container(border=True):
+                    st.markdown(f"**{_name} · {_ticker}** — {_status}")
+                    if _conflict:
+                        st.warning(_text)
+                    else:
+                        st.write(_text)
+            st.caption("Minst två oberoende PIT-minnen krävs för 'Bekräftat varför nu'. Saknad historik ger aldrig stöd och motbevis visas öppet.")
+
+        underfollowed_view = st.session_state.get("bq_underfollowed_discovery", pd.DataFrame())
+        if isinstance(underfollowed_view, pd.DataFrame) and not underfollowed_view.empty and "Underfollowed kandidat" in underfollowed_view.columns:
+            _uf = underfollowed_view[underfollowed_view["Underfollowed kandidat"].fillna(False).astype(bool)].copy()
+            if not _uf.empty:
+                with st.expander("Underfollowed – förbättras innan analytikerna hunnit bli många", expanded=False):
+                    _uf = _uf.assign(
+                        __change=pd.to_numeric(_uf.get("Fundamental förändring antal"), errors="coerce").fillna(-1),
+                        __quality=pd.to_numeric(_uf.get("Kvalitet"), errors="coerce").fillna(-1e9),
+                    ).sort_values(["__change", "__quality"], ascending=[False, False]).head(10)
+                    _cols = [c for c in [
+                        "Ticker", "Namn", "Land", "Underfollowed status", "Analytiker antal",
+                        "Fundamental förändring", "Fundamental förändring detalj", "Underfollowed förklaring"
+                    ] if c in _uf.columns]
+                    st.dataframe(_uf[_cols], use_container_width=True, hide_index=True)
+                    st.caption("Låg analytikerbevakning är aldrig en positiv signal i sig. För att synas här krävs observerad analystäckning på högst tre analytiker och en verifierad fundamental förbättring mot en äldre fryst bredscan. Saknad analystäckning kvalificerar inte.")
+
+        estimate_radar_view = st.session_state.get("bq_estimate_revision_radar", pd.DataFrame())
+        if isinstance(estimate_radar_view, pd.DataFrame) and not estimate_radar_view.empty:
+            with st.expander("Estimatförändringar i kandidatpoolen", expanded=False):
+                _er = estimate_radar_view.copy()
+                _er = _er.sort_values(
+                    ["Estimat Radar underreaktion", "Estimat tillförlitlighetsvikt", "EPS-revisionsbalans", "EPS-estimat förändring"],
+                    ascending=[False, False, False, False],
+                    na_position="last",
+                ).head(10)
+                _cols = [c for c in ["Ticker", "Namn", "Estimat Radar status", "EPS-estimat förändring", "EPS-revisionsbalans", "Analytiker antal", "1 mån", "Estimat Radar förklaring"] if c in _er.columns]
+                st.dataframe(_er[_cols], use_container_width=True, hide_index=True)
+                st.caption("Radarn skapar inget nytt investeringsscore. Den reserverar bara en liten väg till djupanalys för verifierade estimathöjningar; skarpa kursfall behandlas som konflikt, inte som en automatisk köpfördel.")
+
+        consensus_view = st.session_state.get("bq_consensus_change_radar", pd.DataFrame())
+        if isinstance(consensus_view, pd.DataFrame) and not consensus_view.empty and "Konsensusförändring status" in consensus_view.columns:
+            _cc = consensus_view.copy()
+            _interesting = _cc[
+                (_cc.get("Konsensusförändring kandidat", False).fillna(False).astype(bool))
+                | (_cc.get("Konsensusförändring varning", False).fillna(False).astype(bool))
+                | (_cc["Konsensusförändring status"].astype(str).str.contains("Bevakningen breddas", case=False, regex=False))
+            ].copy()
+            if not _interesting.empty:
+                with st.expander("Analytikerkollektivet ändrar sig – Consensus Change", expanded=False):
+                    _interesting = _interesting.assign(
+                        __candidate=_interesting.get("Konsensusförändring kandidat", False).fillna(False).astype(int),
+                        __strong=_interesting.get("Konsensusförändring stark", False).fillna(False).astype(int),
+                        __breadth=pd.to_numeric(_interesting.get("Konsensus breadth förändring"), errors="coerce").fillna(-99),
+                    ).sort_values(["__candidate", "__strong", "__breadth"], ascending=[False, False, False]).head(10)
+                    _cols = [c for c in [
+                        "Ticker", "Namn", "Konsensusförändring status", "Konsensus breadth förändring",
+                        "Konsensus uppgraderingar 45d", "Konsensus nedgraderingar 45d",
+                        "Konsensus initierad bevakning 45d", "Konsensus aktiva analyshus 45d",
+                        "Riktkurs dispersion", "Riktkurs potential", "Konsensusminne status",
+                        "Konsensusminne jämförelsedatum", "Konsensusförändring förklaring"
+                    ] if c in _interesting.columns]
+                    st.dataframe(_interesting[_cols], use_container_width=True, hide_index=True)
+                    st.caption("Consensus Change skapar inget nytt score. En enskild rekommendation eller riktkurs räcker aldrig: Borsify kräver bredare förändring mellan flera analytiker. Riktkursdispersion visas som nuläge. Förändring i dispersion påstås bara när Borsify faktiskt har ett äldre fryst PIT-snapshot; ingen historik backfillas.")
+
+        if isinstance(consensus_view, pd.DataFrame) and not consensus_view.empty and "Expectation Gap status" in consensus_view.columns:
+            _eg = consensus_view[
+                consensus_view.get("Expectation Gap kandidat", False).fillna(False).astype(bool)
+                | consensus_view.get("Expectation Gap varning", False).fillna(False).astype(bool)
+            ].copy()
+            if not _eg.empty:
+                with st.expander("Expectation Gap – förbättring kontra förväntningar", expanded=False):
+                    _eg = _eg.assign(
+                        __candidate=_eg.get("Expectation Gap kandidat", False).fillna(False).astype(int),
+                        __strong=_eg.get("Expectation Gap stark", False).fillna(False).astype(int),
+                        __upside=pd.to_numeric(_eg.get("Expectation Gap riktkurs potential"), errors="coerce").fillna(-99),
+                    ).sort_values(["__candidate", "__strong", "__upside"], ascending=[False, False, False]).head(10)
+                    _cols = [c for c in ["Ticker", "Namn", "Expectation Gap status", "Expectation Gap förändringsfamiljer", "Konsensus bullish andel", "Konsensus analytiker antal", "Riktkurs potential", "Expectation Gap förklaring"] if c in _eg.columns]
+                    st.dataframe(_eg[_cols], use_container_width=True, hide_index=True)
+                    st.caption("Expectation Gap är ett kontextlager, inte ett score. Borsify kräver först oberoende verifierad förändring och påstår aldrig att marknaden ligger efter när förväntningsdata är för tunn.")
+
+        if isinstance(consensus_view, pd.DataFrame) and not consensus_view.empty and "Crowded varning" in consensus_view.columns:
+            _crowded = consensus_view[consensus_view["Crowded varning"].fillna(False).astype(bool)].copy()
+            if not _crowded.empty:
+                with st.expander("Förväntningsrisk – när nästan alla redan är positiva", expanded=False):
+                    _cols = [c for c in ["Ticker", "Namn", "Crowded status", "Konsensus bullish andel", "Konsensus analytiker antal", "Riktkurs potential", "Värdering", "Crowded förklaring"] if c in _crowded.columns]
+                    st.dataframe(_crowded[_cols], use_container_width=True, hide_index=True)
+                    st.caption("Crowding är en riskflagga, inte en säljsignal och inte ett nytt score. Låg analystäckning eller popularitet i sig räcker aldrig.")
+
+        report_delta_view = st.session_state.get("bq_report_delta_radar", pd.DataFrame())
+        if isinstance(report_delta_view, pd.DataFrame) and not report_delta_view.empty and "Report Delta status" in report_delta_view.columns:
+            _rd = report_delta_view.copy()
+            _interesting = _rd[
+                (_rd.get("Report Delta kandidat", False).fillna(False).astype(bool))
+                | (_rd["Report Delta status"].astype(str).str.contains("negativ|marknaden säger emot", case=False, regex=True))
+            ].copy()
+            if not _interesting.empty:
+                with st.expander("Vad förändrades i senaste rapporten?", expanded=False):
+                    _interesting = _interesting.assign(
+                        __candidate=_interesting.get("Report Delta kandidat", False).fillna(False).astype(int),
+                        __under=_interesting.get("Report Delta underreaktion", False).fillna(False).astype(int),
+                        __pos=pd.to_numeric(_interesting.get("Report Delta positiva"), errors="coerce").fillna(-1),
+                        __neg=pd.to_numeric(_interesting.get("Report Delta negativa"), errors="coerce").fillna(99),
+                    ).sort_values(["__candidate", "__under", "__pos", "__neg"], ascending=[False, False, False, True]).head(10)
+                    _cols = [c for c in [
+                        "Ticker", "Namn", "Report Delta status", "Report Delta positiva", "Report Delta negativa",
+                        "Report Delta kursreaktion", "Report Delta fortsatt rörelse", "Report Delta guidance",
+                        "Report Delta förklaring"
+                    ] if c in _interesting.columns]
+                    st.dataframe(_interesting[_cols], use_container_width=True, hide_index=True)
+                    st.caption("Report Delta skapar inget nytt score. Den skiljer på vad bolagets siffror faktiskt ändrade, vad analytikerna gjorde efter rapporten och hur kursen reagerade. Saknad konsensus för omsättning/marginal fylls aldrig i med gissningar.")
+
+        owner_signal_view = st.session_state.get("bq_owner_signal_radar", pd.DataFrame())
+        if isinstance(owner_signal_view, pd.DataFrame) and not owner_signal_view.empty and "Ägarsignal status" in owner_signal_view.columns:
+            _os = owner_signal_view.copy()
+            _interesting = _os[
+                (_os.get("Ägarsignal kandidat", False).fillna(False).astype(bool))
+                | (_os["Ägarsignal status"].astype(str).str.contains("utspädning|skuldsättning|försiktighet", case=False, regex=True))
+            ].copy()
+            if not _interesting.empty:
+                with st.expander("Ägarsignaler: återköp, skuld och insiderköp", expanded=False):
+                    _interesting = _interesting.assign(
+                        __candidate=_interesting.get("Ägarsignal kandidat", False).fillna(False).astype(int),
+                        __strong=_interesting.get("Ägarsignal stark", False).fillna(False).astype(int),
+                        __buyers=pd.to_numeric(_interesting.get("Insider köpare antal"), errors="coerce").fillna(-1),
+                        __buyback=pd.to_numeric(_interesting.get("Kapitalallokering återköpsyield"), errors="coerce").fillna(-999),
+                    ).sort_values(["__candidate", "__strong", "__buyers", "__buyback"], ascending=[False, False, False, False]).head(10)
+                    _cols = [c for c in [
+                        "Ticker", "Namn", "Ägarsignal status", "Kapitalallokering återköpsyield",
+                        "Kapitalallokering skuldtrend", "Insider köpare antal", "Insider köp antal",
+                        "Insider sälj antal", "Ägarsignal förklaring"
+                    ] if c in _interesting.columns]
+                    st.dataframe(_interesting[_cols], use_container_width=True, hide_index=True)
+                    st.caption("Ägarsignalen skapar inget nytt score. Nettoåterköp bedöms efter observerad aktieutgivning, skuld vägs in och insiderstöd kräver flera oberoende verifierbara köp. Optioner, grants och saknad data räknas inte som köpbevis.")
+
+        management_view = st.session_state.get("bq_management_signal_radar", pd.DataFrame())
+        if isinstance(management_view, pd.DataFrame) and not management_view.empty and "Ledningssignal status" in management_view.columns:
+            _ms = management_view.copy()
+            _interesting = _ms[
+                (_ms.get("Ledningssignal kandidat", False).fillna(False).astype(bool))
+                | (_ms.get("Ledningssignal varning", False).fillna(False).astype(bool))
+            ].copy()
+            if not _interesting.empty:
+                with st.expander("Vad säger ledningen konkret?", expanded=False):
+                    _interesting = _interesting.assign(
+                        __candidate=_interesting.get("Ledningssignal kandidat", False).fillna(False).astype(int),
+                        __strong=_interesting.get("Ledningssignal stark", False).fillna(False).astype(int),
+                        __pos=pd.to_numeric(_interesting.get("Ledningssignal positiva"), errors="coerce").fillna(0),
+                        __neg=pd.to_numeric(_interesting.get("Ledningssignal negativa"), errors="coerce").fillna(99),
+                    ).sort_values(["__candidate", "__strong", "__pos", "__neg"], ascending=[False, False, False, True]).head(10)
+                    _cols = [c for c in [
+                        "Ticker", "Namn", "Ledningssignal status", "Ledningsminne status", "Ledningssignal positiva ämnen",
+                        "Ledningssignal negativa ämnen", "Ledningsminne förbättrade ämnen", "Ledningsminne försämrade ämnen",
+                        "Ledningssignal förklaring", "Ledningsminne förklaring"
+                    ] if c in _interesting.columns]
+                    st.dataframe(_interesting[_cols], use_container_width=True, hide_index=True)
+                    st.caption("Ledningslagret är medvetet konservativt: bara explicita CEO/CFO/VD-uttalanden om konkreta operativa ämnen räknas. Det är inte sentimentanalys och inte en fullständig rapporttranskriptanalys. Ett enstaka positivt uttalande räcker aldrig för en discovery-plats.")
+
+        value_chain_view = st.session_state.get("bq_value_chain_radar", pd.DataFrame())
+        verified_view = st.session_state.get("bq_verified_relationship_radar")
+        if isinstance(verified_view, pd.DataFrame) and not verified_view.empty and "Verifierad relation status" in verified_view.columns:
+            _vr = verified_view.copy()
+            _vr_i = _vr[_vr.get("Verifierad relation kandidat", False).fillna(False).astype(bool)].copy()
+            if not _vr_i.empty:
+                with st.expander("Verifierade bolagsrelationer – riktig ekonomisk koppling", expanded=False):
+                    _vr_i = _vr_i.assign(__strong=_vr_i.get("Verifierad relation stark", False).fillna(False).astype(int), __sources=pd.to_numeric(_vr_i.get("Verifierad relation källor antal"), errors="coerce").fillna(0)).sort_values(["__strong","__sources"], ascending=[False,False]).head(10)
+                    _cols=[c for c in ["Ticker","Namn","Verifierad relation status","Verifierad relation källbolag","Verifierad relation typ","Verifierad relation operativ","Verifierad relation evidens","Fundamentala upptäcktslinser","1 mån","Verifierad relation förklaring"] if c in _vr_i.columns]
+                    st.dataframe(_vr_i[_cols], use_container_width=True, hide_index=True)
+                    st.caption("Här visas bara explicit källbelagda relationer. Från v3.62 får bara riktade operativa relationer, främst kund → leverantör, skapa cross-company discovery. Ägarrelationer finns kvar som verifierad kontext men får inte längre låtsas vara operativ read-through.")
+
+        relationship_change_view = st.session_state.get("bq_relationship_change_radar", pd.DataFrame())
+        if isinstance(relationship_change_view, pd.DataFrame) and not relationship_change_view.empty and "Relationsförändring status" in relationship_change_view.columns:
+            _rc = relationship_change_view.copy()
+            _rc_i = _rc[
+                (_rc.get("Relationsförändring kandidat", False).fillna(False).astype(bool))
+                | (_rc["Relationsförändring status"].astype(str).str.contains("motbevis|redan rört|betydelsen", case=False, regex=True))
+            ].copy()
+            if not _rc_i.empty:
+                with st.expander("Relationen förändras – har kopplingen blivit viktigare?", expanded=False):
+                    _rc_i = _rc_i.assign(
+                        __strong=_rc_i.get("Relationsförändring stark", False).fillna(False).astype(int),
+                        __age=pd.to_numeric(_rc_i.get("Relationsförändring ålder dagar"), errors="coerce").fillna(99999),
+                    ).sort_values(["__strong", "__age"], ascending=[False, True]).head(10)
+                    _cols = [c for c in [
+                        "Ticker", "Namn", "Relationsförändring status", "Relationsförändring källbolag",
+                        "Relationsförändring typ", "Relationsförändring datum", "Relationsförändring materialitet",
+                        "Relationsförändring materialitet evidens", "1 mån", "Relationsförändring förklaring"
+                    ] if c in _rc_i.columns]
+                    st.dataframe(_rc_i[_cols], use_container_width=True, hide_index=True)
+                    st.caption("Detta lager skiljer en statisk kund-/leverantörsrelation från en explicit förändring som nytt avtal, förlängning eller högre volym. 'Materialitet' betyder här hur tydligt omfattningen är källbelagd – Borsify hittar aldrig på intäktsandelar eller resultateffekt.")
+
+        _rh = st.session_state.get("bq_relationship_registry_health", {})
+        if isinstance(_rh, dict) and _rh.get("relations", 0):
+            with st.expander("Relationsdatabas – täckning och källkvalitet", expanded=False):
+                st.write(
+                    f"{int(_rh.get('relations', 0))} verifierade relationer · "
+                    f"{int(_rh.get('source_companies', 0))} källbolag · "
+                    f"{int(_rh.get('target_companies', 0))} målbolag · "
+                    f"{int(_rh.get('customer_supplier_relations', 0))} kund→leverantör"
+                )
+                _share = _rh.get("primary_source_share")
+                if isinstance(_share, (int, float)) and pd.notna(_share):
+                    st.caption(f"Primärkällor: {_share:.0%} · Föråldrade verifieringar: {int(_rh.get('stale_relations', 0))}. Registret växer bara genom explicit källbelagda poster; ingen branschheuristik auto-promoveras.")
+
+        if isinstance(value_chain_view, pd.DataFrame) and not value_chain_view.empty and "Värdekedja status" in value_chain_view.columns:
+            _vc = value_chain_view.copy()
+            _interesting = _vc[(_vc.get("Värdekedja kandidat", False).fillna(False).astype(bool)) | (_vc["Värdekedja status"].astype(str).str.contains("motbevis|redan rört", case=False, regex=True))].copy()
+            if not _interesting.empty:
+                with st.expander("Värdekedjan rör sig – vilka bolag kan påverkas härnäst?", expanded=False):
+                    _interesting = _interesting.assign(__candidate=_interesting.get("Värdekedja kandidat", False).fillna(False).astype(int), __strong=_interesting.get("Värdekedja stark", False).fillna(False).astype(int), __sources=pd.to_numeric(_interesting.get("Värdekedja källor antal"), errors="coerce").fillna(0)).sort_values(["__candidate","__strong","__sources"], ascending=[False,False,False]).head(10)
+                    _cols=[c for c in ["Ticker","Namn","Sektor","Bransch","Värdekedja status","Värdekedja roll","Värdekedja källbolag","Värdekedja relation","Fundamentala upptäcktslinser","1 mån","Värdekedja förklaring"] if c in _interesting.columns]
+                    st.dataframe(_interesting[_cols], use_container_width=True, hide_index=True)
+                    st.caption("Värdekedjeläsningen använder transparenta branschroller och riktade ekonomiska samband. Den påstår inte att de namngivna bolagen har ett verifierat kund-/leverantörsavtal. Eget fundamentalt stöd krävs och färska negativa motbevis väger tyngre.")
+
+        sector_view = st.session_state.get("bq_sector_readthrough_radar", pd.DataFrame())
+        if isinstance(sector_view, pd.DataFrame) and not sector_view.empty and "Sektorläsning status" in sector_view.columns:
+            _sr = sector_view.copy()
+            _interesting = _sr[
+                (_sr.get("Sektorläsning kandidat", False).fillna(False).astype(bool))
+                | (_sr["Sektorläsning status"].astype(str).str.contains("motbevis|redan rört", case=False, regex=True))
+            ].copy()
+            if not _interesting.empty:
+                with st.expander("Sektorn rör sig – vilka peers kan stå på tur?", expanded=False):
+                    _interesting = _interesting.assign(
+                        __candidate=_interesting.get("Sektorläsning kandidat", False).fillna(False).astype(int),
+                        __strong=_interesting.get("Sektorläsning stark", False).fillna(False).astype(int),
+                        __sources=pd.to_numeric(_interesting.get("Sektorläsning källor antal"), errors="coerce").fillna(0),
+                    ).sort_values(["__candidate", "__strong", "__sources"], ascending=[False, False, False]).head(10)
+                    _cols = [c for c in [
+                        "Ticker", "Namn", "Sektor", "Bransch", "Sektorläsning status",
+                        "Sektorläsning nivå", "Sektorläsning källbolag", "Fundamentala upptäcktslinser",
+                        "1 mån", "Sektorläsning förklaring"
+                    ] if c in _interesting.columns]
+                    st.dataframe(_interesting[_cols], use_container_width=True, hide_index=True)
+                    st.caption("Sektorläsning är en discovery-ledtråd, inte bolagsspecifikt bevis. En peer måste ha eget fundamentalt stöd, får inte ha färska negativa motbevis och får inte redan ha rusat >12 % på en månad. Samma sektor betyder inte automatiskt samma värdekedja.")
+
+        acceleration_view = st.session_state.get("bq_estimate_revision_radar", pd.DataFrame())
+        if isinstance(acceleration_view, pd.DataFrame) and not acceleration_view.empty and "Förväntningsacceleration kandidat" in acceleration_view.columns:
+            _ea = acceleration_view[acceleration_view["Förväntningsacceleration kandidat"].fillna(False).astype(bool)].copy()
+            if not _ea.empty:
+                with st.expander("Förväntningar som accelererar", expanded=False):
+                    _ea = _ea.sort_values(
+                        ["Förväntningsacceleration stark", "Revisionsbalans 7d", "EPS förändring 7d"],
+                        ascending=[False, False, False], na_position="last"
+                    ).head(10)
+                    _cols = [c for c in ["Ticker", "Namn", "Förväntningsacceleration status", "EPS förändring 7d", "EPS förändring 30d", "Revisionsbalans 7d", "Fundamental förändring detalj", "Förväntningsacceleration förklaring"] if c in _ea.columns]
+                    st.dataframe(_ea[_cols], use_container_width=True, hide_index=True)
+                    st.caption("Acceleration är en discovery-signal, inte ett nytt score: Borsify letar efter estimat som förbättras snabbare nyligen och kräver revisionsbredd eller fundamental bekräftelse.")
 
         # Compare fresh events only with already-frozen point-in-time history.
         # The current run is deliberately not part of its own reference sample.
@@ -6325,76 +7140,116 @@ def main() -> None:
 
         discover_daily, discover_ideas, discover_radar = st.tabs(["Aktier", "Nya uppslag", f"Signaler ({unread_signals})"])
         with discover_daily:
-            st.markdown("## Aktier att titta på")
+            st.markdown("## Vad rekommenderar Borsify idag?")
             st.caption(
-                "Borsify har redan gjort grovjobbet. Börja med de två starkaste kandidaterna nedan – "
-                "öppna mer bara om du vill förstå analysen bakom."
+                "Tre olika frågor kräver tre olika svar. Borsify rankar därför aktier separat för kort sikt, upp till ett år och mycket lång ägarhorisont."
             )
 
-            def _compact_discovery_case(case, label: str, horizon_text: str, score_key: str, why_key: str, risk_key: str, qa_horizon: str, rank: int):
+            def _horizon_section(title: str, subtitle: str, horizon: str, score_col: str):
+                ranked = top_ranked(filtered, horizon, limit=10)
+                st.markdown(f"### {title}")
+                st.caption(subtitle)
+                if ranked.empty:
+                    st.info("Ingen aktie uppfyller Borsifys krav i den här kategorin just nu. Hellre tomt än ett svagt köpcase.")
+                    return ranked
+
+                ranked = add_action_signals(ranked, horizon)
+                history_profile = f"{profile}::horizon::{horizon}"
+                previous_horizon = previous_radar_snapshot(history_profile, limit=10)
+                ranked = add_change_signals(ranked, previous_horizon, score_col, horizon)
+                ranked = add_change_reasons(ranked, previous_horizon, horizon)
+                history_frame = ranked.copy()
+                history_frame["Borsify Score"] = pd.to_numeric(history_frame.get(score_col), errors="coerce")
+                save_radar_history(history_frame, history_profile)
+                first = ranked.iloc[0]
                 with st.container(border=True):
-                    left, right = st.columns([4.2, 1.0])
-                    left.markdown(f"### {label} · {_stock_identity(case)}")
-                    left.caption(horizon_text)
-                    score = _num(case.get(score_key))
-                    right.metric("Borsify", f"{score:.0f}/100" if np.isfinite(score) else "—")
-                    render_recommendation_price(case)
-                    render_recommendation_relevance(case)
+                    a, b = st.columns([4.2, 1.0])
+                    a.markdown(f"#### Förstaval · {_stock_identity(first)}")
+                    a.markdown(f"**Signal: {first.get('Signal', '—')}** · {first.get('Signal kort', '')}")
+                    a.caption(f"Förändring: {first.get('Förändring', '—')} · {first.get('Förändring förklaring', '')}")
+                    if str(first.get("Vad har förändrats", "")).strip():
+                        a.markdown(f"**Vad har förändrats?** {plain_finance_text(first.get('Vad har förändrats'))}")
+                    a.write(plain_finance_text(first.get("Varför köpa") or first.get("Horisontförklaring") or "—"))
+                    score = _num(first.get(score_col))
+                    b.metric("Borsify", f"{score:.0f}/100" if np.isfinite(score) else "—")
+                    st.caption(plain_finance_text(first.get("Signal förklaring") or ""))
                     st.markdown("**Varför nu?**")
-                    st.write(plain_finance_text(case.get(why_key) or "Ingen tydlig ny anledning just nu."))
+                    st.write(plain_finance_text(first.get("Varför nu") or "—"))
                     st.markdown("**Största risken**")
-                    risk_text = case.get(risk_key) or case.get("Case Vetoes") or case.get("Fleråriga varningar") or "Ingen tydlig huvudrisk kan verifieras i tillgängliga data."
-                    st.write(plain_finance_text(risk_text))
-                    with st.expander("Visa analysen bakom", expanded=False):
-                        st.write({
-                            "Sektor": case.get("Sektor", "—"),
-                            "Datakvalitet": case.get("Data Trust status", "—"),
-                            "Vad kan ändra marknadens syn?": plain_finance_text(case.get("Catalyst Signal", "—")),
-                            "Viktigaste möjliga händelsen": plain_finance_text(case.get("Primary Catalyst", "—")),
-                            "Förändrade förväntningar": plain_finance_text(case.get("Förväntningsförändring", case.get("Short Revisions", "—"))),
-                            "Kurs jämfört med marknaden": case.get("Short Relative Strength", case.get("Relative Strength", "—")),
-                        })
-                        render_case_plan(case)
-                        render_case_ai_qa(case, qa_horizon, rank)
+                    st.write(plain_finance_text(first.get("Största risk") or "—"))
+                    st.markdown("**När ska jag ompröva?**")
+                    st.write(plain_finance_text(first.get("Vad ändrar Borsifys syn") or "—"))
 
-            primary_shown = False
-            if not short_longlist.empty:
-                _compact_discovery_case(
-                    short_longlist.iloc[0], "Kortare sikt", "Ungefär 1–6 månader", "Short Alpha Score",
-                    "Short Why Now", "Short Counterargument", "short", 1
+                table = ranked.head(10).copy()
+                table.insert(0, "#", range(1, len(table) + 1))
+                table["Aktie"] = table.apply(_stock_identity, axis=1)
+                table["Score"] = pd.to_numeric(table.get(score_col), errors="coerce").round(0)
+                previous = table["Score"].shift(1)
+                table["Till platsen ovan"] = (table["Score"] - previous).where(previous.notna())
+                table["Till platsen ovan"] = table["Till platsen ovan"].apply(
+                    lambda x: "—" if pd.isna(x) else f"{x:+.0f} p"
                 )
-                primary_shown = True
-            if not deep_longlist.empty:
-                _compact_discovery_case(
-                    deep_longlist.iloc[0], "Längre sikt", "Flera år", "INVEST Score",
-                    "Why Now Summary", "Största risk", "long", 1
-                )
-                primary_shown = True
-            if not primary_shown:
-                st.info("Borsify hittade ingen tillräckligt stark kandidat i dagens urval.")
+                price = pd.to_numeric(table.get("Pris"), errors="coerce")
+                currencies = table.get("Valuta", pd.Series("", index=table.index)).fillna("").astype(str)
+                table["Kurs"] = [
+                    "—" if not np.isfinite(v) else f"{v:,.2f} {cur}".replace(",", " ").replace(".00 ", " ")
+                    for v, cur in zip(price, currencies)
+                ]
+                table["Land"] = table.get("Land", pd.Series("—", index=table.index)).fillna("—")
+                table["Risk"] = table.apply(lambda r: plain_finance_text(r.get("Största risk") or "—"), axis=1)
+                table["Varför ändrad?"] = table.get("Vad har förändrats", pd.Series("—", index=table.index)).apply(lambda x: plain_finance_text(x or "—"))
+                show_cols = ["#", "Aktie", "Land", "Kurs", "Signal", "Förändring", "Varför ändrad?", "Score", "Till platsen ovan", "Risk"]
+                st.markdown("**Topp 10 i kategorin**")
+                st.dataframe(table[show_cols], use_container_width=True, hide_index=True)
+                departed = dropped_from_top10(ranked, previous_horizon)
+                if departed:
+                    st.caption("Lämnat topp 10 sedan föregående sparade analys: " + ", ".join(departed) + ". Det är en omprövningssignal, inte automatiskt en säljsignal.")
+                with st.expander("Vad betyder signalerna?", expanded=False):
+                    for signal_name, signal_text in signal_legend(horizon):
+                        st.markdown(f"**{signal_name}** — {signal_text}")
+                    st.caption("Signalen sammanfattar redan godkända case. Den skapar inget nytt score och kan inte göra en underkänd aktie köpbar.")
+                    st.markdown("**Förändring sedan sist:** NY KÖPSIGNAL = ny i topp 10 med köpbar signal · STÄRKT = tydligt bättre score/placering · OFÖRÄNDRAD = stabil · FÖRSVAGAD = tydligt sämre score/placering.")
+                    st.caption("Från v3.44 fryser Borsify även värdering, kvalitet, marknadsläge, risk och datatäckning för topp 10. Därför kan STÄRKT/FÖRSVAGAD förklaras med vad som faktiskt ändrats, utan att dagens data skrivs bakåt på äldre analyser.")
+                    st.caption("En aktie som lämnar topp 10 markeras för omprövning, inte automatiskt som SÄLJ. Ett riktigt säljbeslut kräver att caset eller riskbilden faktiskt har försämrats.")
+                return ranked
 
-            with st.expander("Fler kandidater", expanded=False):
-                extra_rows = []
-                if len(short_longlist) > 1:
-                    for _, row in short_longlist.iloc[1:4].iterrows():
-                        extra_rows.append({
-                            "Aktie": _stock_identity(row),
-                            "Horisont": "1–6 månader",
-                            "Borsify": round(_num(row.get("Short Alpha Score"))) if np.isfinite(_num(row.get("Short Alpha Score"))) else None,
-                            "Varför nu": plain_finance_text(row.get("Short Why Now", "—")),
-                        })
-                if len(deep_longlist) > 1:
-                    for _, row in deep_longlist.iloc[1:4].iterrows():
-                        extra_rows.append({
-                            "Aktie": _stock_identity(row),
-                            "Horisont": "Flera år",
-                            "Borsify": round(_num(row.get("INVEST Score"))) if np.isfinite(_num(row.get("INVEST Score"))) else None,
-                            "Varför nu": plain_finance_text(row.get("Why Now Summary") or row.get("Catalyst Why Now") or "—"),
-                        })
-                if extra_rows:
-                    st.dataframe(pd.DataFrame(extra_rows), use_container_width=True, hide_index=True)
-                else:
-                    st.caption("Inga fler kandidater klarade dagens fördjupade kontroll.")
+            ranked_medium = _horizon_section(
+                "⚡ Köp nu – sälj i närtid",
+                "För lägen där Borsify ser ett aktuellt köpcase på ungefär några veckor till tre månader. Det är inte intradagshandel.",
+                "medium", "Mellan Score"
+            )
+            st.divider()
+            ranked_year = _horizon_section(
+                "📈 Äg upp till ett år",
+                "För bolag där värdering, kvalitet och utveckling kan ge ett starkt case under ungefär 3–12 månader.",
+                "year", "Års Score"
+            )
+            st.divider()
+            ranked_lifetime = _horizon_section(
+                "♾️ Äg resten av livet",
+                "Den hårdaste kategorin. Borsify prioriterar uthållig kvalitet, robust ekonomi och rimlig värdering. Aktien måste fortsätta förtjäna sin plats.",
+                "lifetime", "Livstid Score"
+            )
+
+            # v3.47: freeze the broad discovery universe, not only today's winners.
+            # Future "missed winner" analysis can therefore ask what Borsify failed to select
+            # without reconstructing old rankings with today's model.
+            try:
+                snapshot_source = add_horizon_scores(filtered)
+                recommended_sets = {
+                    "medium": set(ranked_medium.get("Ticker", pd.Series(dtype=str)).astype(str)) if ranked_medium is not None and not ranked_medium.empty else set(),
+                    "year": set(ranked_year.get("Ticker", pd.Series(dtype=str)).astype(str)) if ranked_year is not None and not ranked_year.empty else set(),
+                    "lifetime": set(ranked_lifetime.get("Ticker", pd.Series(dtype=str)).astype(str)) if ranked_lifetime is not None and not ranked_lifetime.empty else set(),
+                }
+                discovery_flags = discovery_selection_flags(snapshot_source, max_candidates=min(24, len(snapshot_source)))
+                missed_snapshot = build_universe_snapshot(
+                    snapshot_source, profile, market, datetime.now().date().isoformat(), recommended_sets,
+                    discovery_flags=discovery_flags, model_version=APP_VERSION
+                )
+                save_missed_winner_snapshot(missed_snapshot)
+                refresh_missed_winner_outcomes(filtered, profile, market)
+            except Exception:
+                pass
 
             with st.expander("Sök på ett särskilt sätt", expanded=False):
                 st.caption(f"Ditt val just nu: {discovery_intent}. {intent_plain_text(discovery_intent)}")
@@ -6407,6 +7262,14 @@ def main() -> None:
             with st.expander("Fler analysverktyg", expanded=False):
                 st.caption("Det här är för dig som vill granska motorn. Du behöver inte använda det för att följa Borsifys val.")
                 render_engine_board(filtered)
+                if "Fundamental förändring antal" in filtered.columns:
+                    _radar = filtered[pd.to_numeric(filtered["Fundamental förändring antal"], errors="coerce").fillna(0) > 0].copy()
+                    if not _radar.empty:
+                        st.markdown("**Fundamental förändringsradar**")
+                        _radar = _radar.sort_values(["Fundamental förändring antal", "Kvalitet"], ascending=[False, False]).head(10)
+                        _cols = [c for c in ["Ticker", "Namn", "Fundamental förändring", "Fundamental förändring detalj", "Fundamental jämförelsedatum", "Borsify Score"] if c in _radar.columns]
+                        st.dataframe(_radar[_cols], use_container_width=True, hide_index=True)
+                        st.caption("Bygger på förändring mot äldre frysta bredscans. Saknad historik ger ingen fördel och radarn ändrar inte Borsify Score.")
                 if not daily_shortlist.empty:
                     quick_cols = [c for c in ["Ticker", "Namn", "Borsify Score", "Dagens relevans", "Prioritet", "Värdering", "Kvalitet", "Risk"] if c in daily_shortlist.columns]
                     st.dataframe(daily_shortlist[quick_cols].copy(), use_container_width=True, hide_index=True)
@@ -6685,6 +7548,71 @@ Aktier med låg datatäckning får en försiktig rabatt. En hög score är en pr
             default_edge_symbol = str(filtered.iloc[0]["Ticker"]) if not filtered.empty else "INVE-B.ST"
             render_edge_lab(default_edge_symbol, list(symbols), benchmark_symbol, benchmark_name)
 
+            st.divider()
+            st.markdown("### Missade vinnare")
+            st.caption("Borsify fryser nu hela det analyserade universumet och kontrollerar senare vilka tydliga vinnare som aldrig nådde rekommendationslistorna. Det här är en prospektiv kvalitetskontroll, inte ett nytt score.")
+            missed_outcomes = get_missed_winner_outcomes(limit=10000)
+            c1, c2 = st.columns(2)
+            for col, horizon in [(c1, "1m"), (c2, "3m")]:
+                summary = missed_winner_summary(missed_outcomes, horizon)
+                col.metric(MISSED_WINNER_HORIZONS[horizon]["label"], f"{summary['misses']} missar" if summary["evaluated"] else "Bygger historik")
+                col.caption(summary["text"])
+            if missed_outcomes is not None and not missed_outcomes.empty:
+                misses = missed_outcomes[pd.to_numeric(missed_outcomes["missed_winner"], errors="coerce").fillna(0).eq(1)].copy()
+                if not misses.empty:
+                    misses["Utfall"] = (pd.to_numeric(misses["return_pct"], errors="coerce") * 100).round(1).map(lambda x: f"{x:+.1f}%")
+                    misses["Fryst score"] = pd.to_numeric(misses["frozen_score"], errors="coerce").round(0)
+                    misses["Period"] = misses["horizon"].map({"1m":"1 månad","3m":"3 månader"}).fillna(misses["horizon"])
+                    show = misses.sort_values("return_pct", ascending=False).head(20).rename(columns={"name":"Bolag","symbol":"Ticker","why_missed":"Varför missades den?","captured_date":"Fryst datum"})
+                    st.dataframe(show[["Fryst datum","Ticker","Bolag","Period","Utfall","Fryst score","Varför missades den?"]], use_container_width=True, hide_index=True)
+                else:
+                    st.info("Mogna kohorter finns, men inga tydliga missade vinnare har identifierats ännu.")
+            else:
+                st.info("Historiken börjar byggas från v3.47. Äldre dagar fylls inte i bakåt, eftersom det skulle använda information som inte var fryst då.")
+            if st.session_state.get("bq_missed_winner_migration_needed"):
+                st.warning("Missed Winners-historiken kräver v3.47-raderna i supabase_schema.sql för molnlagring. Analysen fylls inte bakåt innan tabellerna finns.")
+
+            st.markdown("#### Missmönster")
+            st.caption("Borsify jämför nu de missade vinnarnas frysta egenskaper med hela den utvärderade kohorten. Ett mönster måste återkomma och vara överrepresenterat; det ändrar aldrig modellen automatiskt.")
+            missed_snapshots = get_missed_winner_snapshots(limit=20000)
+            pattern_table = build_miss_pattern_table(missed_outcomes, missed_snapshots)
+            pattern_summary = miss_pattern_summary(pattern_table)
+            st.info(pattern_summary["text"])
+            if pattern_table is not None and not pattern_table.empty:
+                pattern_show = pattern_table.copy()
+                pattern_show["Andel av missar"] = (pattern_show["miss_share"] * 100).round(0).map(lambda x: f"{x:.0f}%")
+                pattern_show["Andel av hela kohorten"] = (pattern_show["cohort_share"] * 100).round(0).map(lambda x: f"{x:.0f}%")
+                pattern_show["Överrepresentation"] = pattern_show["overrepresentation"].round(2).map(lambda x: f"{x:.2f}×" if pd.notna(x) else "–")
+                pattern_show["Medianutfall"] = (pattern_show["median_return"] * 100).round(1).map(lambda x: f"{x:+.1f}%" if pd.notna(x) else "–")
+                pattern_show = pattern_show.rename(columns={"pattern":"Mönster","misses":"Missar","status":"Bedömning"})
+                st.dataframe(pattern_show[["Mönster","Missar","Andel av missar","Andel av hela kohorten","Överrepresentation","Medianutfall","Bedömning"]], use_container_width=True, hide_index=True)
+
+            st.markdown("#### Discovery Learning Loop")
+            st.caption("När samma typ av vinnare missas tillräckligt ofta föreslår Borsify en liten, förregistrerad challenger i själva discovery-steget. Förslaget ändrar aldrig produktionen direkt och får bara bedömas på nya framtida case.")
+            learning_proposals = build_discovery_learning_proposals(pattern_table)
+            learning_summary = discovery_learning_summary(learning_proposals)
+            st.info(learning_summary["text"])
+            if learning_proposals is not None and not learning_proposals.empty:
+                proposal_show = learning_proposals.copy()
+                proposal_show["Överrepresentation"] = proposal_show["overrepresentation"].round(2).map(lambda x: f"{x:.2f}×" if pd.notna(x) else "–")
+                proposal_show["Medianutfall"] = (proposal_show["median_return"] * 100).round(1).map(lambda x: f"{x:+.1f}%" if pd.notna(x) else "–")
+                proposal_show = proposal_show.rename(columns={"pattern":"Missmönster","challenger":"Challenger","proposal":"Föreslagen teständring","misses":"Missar","status":"Status","next_step":"Nästa steg"})
+                st.dataframe(proposal_show[["Missmönster","Challenger","Föreslagen teständring","Missar","Överrepresentation","Medianutfall","Status","Nästa steg"]], use_container_width=True, hide_index=True)
+
+            st.markdown("#### Discovery Champion vs Challenger")
+            st.caption("Från v3.50 är alternativa discovery-regler låsta innan framtida utfall uppstår. Champion och challengers får samma frysta universum och samma poolstorlek. Äldre observationer räknas inte.")
+            discovery_registry = discovery_registry_table()
+            with st.expander("Visa förregistrerade discovery-regler", expanded=False):
+                st.dataframe(discovery_registry[["Challenger","Missmönster","Låst regel","Förregistrerad version","Definition"]], use_container_width=True, hide_index=True)
+            discovery_cc = prospective_discovery_results(missed_snapshots, missed_outcomes)
+            discovery_cc_summary = discovery_challenger_summary(discovery_cc)
+            st.info(discovery_cc_summary["text"])
+            if discovery_cc is not None and not discovery_cc.empty:
+                cc_show = discovery_cc.copy()
+                for c in ["Champion träffgrad","Challenger träffgrad","Skillnad träffgrad","Champion median","Challenger median"]:
+                    cc_show[c] = pd.to_numeric(cc_show[c], errors="coerce").map(lambda x: "–" if pd.isna(x) else f"{x*100:+.1f}%" if "Skillnad" in c or "median" in c.lower() else f"{x*100:.1f}%")
+                st.dataframe(cc_show[["Challenger","Horisont","Oberoende kohorter","Vinnare","Champion fångade","Challenger fångade","Champion träffgrad","Challenger träffgrad","Skillnad träffgrad","Champion median","Challenger median","Status"]], use_container_width=True, hide_index=True)
+            st.caption("Minst tre oberoende kohorter och sex vinnare krävs innan jämförelsen får en riktning. En vinnande challenger promoveras aldrig automatiskt.")
 
 
 if __name__ == "__main__":

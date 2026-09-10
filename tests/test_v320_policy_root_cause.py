@@ -63,5 +63,5 @@ def test_summary_never_auto_changes_policy():
 
 def test_v320_is_current_version_and_ui_present():
     app=open('app.py',encoding='utf-8').read()
-    assert 'APP_VERSION = "3.38.0"' in app
+    assert 'APP_VERSION = "3.73.0"' in app
     assert 'Policy Root Cause Diagnostics' in app

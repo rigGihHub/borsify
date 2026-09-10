@@ -372,3 +372,83 @@ create table if not exists public.production_policy_events (
 );
 create index if not exists idx_production_policy_events_effective_at
   on public.production_policy_events (effective_at desc);
+
+-- v3.44: frozen explanation inputs for horizon change reasons.
+-- JSONB keeps the radar schema compact while preserving point-in-time values.
+alter table public.radar_history add column if not exists details jsonb;
+
+-- v3.47.0: broad point-in-time universe snapshots for Missed Winners Engine.
+create table if not exists public.missed_winner_snapshots (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  snapshot_id text not null,
+  symbol text not null,
+  name text not null default '',
+  profile text not null,
+  market text not null,
+  captured_date date not null,
+  entry_price double precision not null check (entry_price > 0),
+  borsify_score double precision,
+  medium_score double precision,
+  year_score double precision,
+  lifetime_score double precision,
+  valuation double precision,
+  quality double precision,
+  setup double precision,
+  risk double precision,
+  coverage double precision,
+  recommended_medium integer not null default 0,
+  recommended_year integer not null default 0,
+  recommended_lifetime integer not null default 0,
+  created_at timestamptz not null default now(),
+  primary key (user_id, snapshot_id)
+);
+alter table public.missed_winner_snapshots enable row level security;
+drop policy if exists "missed_winner_snapshots_select_own" on public.missed_winner_snapshots;
+create policy "missed_winner_snapshots_select_own" on public.missed_winner_snapshots for select using (auth.uid() = user_id);
+drop policy if exists "missed_winner_snapshots_insert_own" on public.missed_winner_snapshots;
+create policy "missed_winner_snapshots_insert_own" on public.missed_winner_snapshots for insert with check (auth.uid() = user_id);
+drop policy if exists "missed_winner_snapshots_update_own" on public.missed_winner_snapshots;
+create policy "missed_winner_snapshots_update_own" on public.missed_winner_snapshots for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create index if not exists missed_winner_snapshots_date_idx on public.missed_winner_snapshots(user_id, captured_date desc);
+
+create table if not exists public.missed_winner_outcomes (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  snapshot_id text not null,
+  symbol text not null,
+  name text not null default '',
+  captured_date date not null,
+  evaluated_date date not null,
+  horizon text not null,
+  entry_price double precision not null,
+  evaluated_price double precision not null,
+  return_pct double precision not null,
+  return_percentile double precision not null,
+  was_recommended integer not null default 0,
+  missed_winner integer not null default 0,
+  frozen_score double precision,
+  why_missed text not null default '',
+  created_at timestamptz not null default now(),
+  primary key (user_id, snapshot_id, horizon)
+);
+alter table public.missed_winner_outcomes enable row level security;
+drop policy if exists "missed_winner_outcomes_select_own" on public.missed_winner_outcomes;
+create policy "missed_winner_outcomes_select_own" on public.missed_winner_outcomes for select using (auth.uid() = user_id);
+drop policy if exists "missed_winner_outcomes_insert_own" on public.missed_winner_outcomes;
+create policy "missed_winner_outcomes_insert_own" on public.missed_winner_outcomes for insert with check (auth.uid() = user_id);
+drop policy if exists "missed_winner_outcomes_update_own" on public.missed_winner_outcomes;
+create policy "missed_winner_outcomes_update_own" on public.missed_winner_outcomes for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create index if not exists missed_winner_outcomes_date_idx on public.missed_winner_outcomes(user_id, evaluated_date desc);
+
+-- v3.50.0: frozen prospective Discovery Champion vs Challenger selection flags.
+alter table public.missed_winner_snapshots add column if not exists discovery_champion_selected integer;
+alter table public.missed_winner_snapshots add column if not exists discovery_challenger_flags jsonb;
+alter table public.missed_winner_snapshots add column if not exists discovery_registry_version text;
+alter table public.missed_winner_snapshots add column if not exists model_version text;
+
+-- v3.52.0: broad point-in-time fundamentals for Fundamental Change Radar.
+alter table public.missed_winner_snapshots add column if not exists revenue_growth double precision;
+alter table public.missed_winner_snapshots add column if not exists earnings_growth double precision;
+alter table public.missed_winner_snapshots add column if not exists profit_margin double precision;
+alter table public.missed_winner_snapshots add column if not exists roe double precision;
+alter table public.missed_winner_snapshots add column if not exists fcf_yield double precision;
+alter table public.missed_winner_snapshots add column if not exists forward_pe double precision;

@@ -43,6 +43,6 @@ def test_failure_cohort_uses_independent_sample_and_summary():
 
 def test_v312_ui_and_version_present():
     app=open('app.py', encoding='utf-8').read()
-    assert 'APP_VERSION = "3.38.0"' in app
+    assert 'APP_VERSION = "3.73.0"' in app
     assert 'Drift Attribution · vilka typer av case står för tappet?' in app
     assert 'failure_cohort_table' in app

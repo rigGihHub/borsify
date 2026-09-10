@@ -74,7 +74,7 @@ def test_regime_archetype_requires_frozen_market_regime():
 
 def test_v314_ui_version_and_governance_present():
     app = open('app.py', encoding='utf-8').read()
-    assert 'APP_VERSION = "3.38.0"' in app
+    assert 'APP_VERSION = "3.73.0"' in app
     assert 'Regime-aware Archetypes · fungerar samma kombination i olika börsklimat?' in app
     assert 'regime_archetype_table' in app
     assert 'inga regler ändras automatiskt' in app

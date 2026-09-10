@@ -46,7 +46,7 @@ def test_missing_assets_do_not_invent_accruals():
 
 def test_v299_ui_and_version_are_present():
     app = (Path(__file__).resolve().parents[1] / "app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "3.38.0"' in app
+    assert 'APP_VERSION = "3.73.0"' in app
     assert "build_earnings_quality_metrics" in app
     assert "assess_earnings_quality" in app
 

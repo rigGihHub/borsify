@@ -59,7 +59,7 @@ def test_short_pit_summary_requires_decision_and_price_date():
 
 def test_v290_ui_exposes_frozen_decision_audit():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.38.0"' in app
+    assert 'APP_VERSION = "3.73.0"' in app
     assert "Vad visste Borsify när beslutet togs?" in app
     assert "Borsify fyller inte i saknade gamla uppgifter i efterhand" in app
 

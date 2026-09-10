@@ -58,7 +58,7 @@ def test_candidate_requires_two_prospective_wins_and_large_sample():
 
 def test_v307_ui_and_version_are_wired():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.38.0"' in app
+    assert 'APP_VERSION = "3.73.0"' in app
     assert "Prospektivt Challenger-register" in app
     assert "Case från före registreringen får aldrig räknas" in app
     assert "Ingen automatisk promotion" in app

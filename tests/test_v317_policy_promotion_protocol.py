@@ -86,7 +86,7 @@ def test_empty_history_waits_instead_of_promoting():
 
 def test_v317_ui_and_version_contract():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.38.0"' in app
+    assert 'APP_VERSION = "3.73.0"' in app
     assert "Policy Promotion Protocol" in app
     assert "policy_promotion_protocol" in app
     assert "aktiverar aldrig en policy automatiskt" in app

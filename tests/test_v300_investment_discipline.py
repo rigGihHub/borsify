@@ -46,7 +46,7 @@ def test_severe_case_adds_caution_but_not_veto():
 def test_v300_integration_and_version():
     app = open("app.py", encoding="utf-8").read()
     ledger = open("recommendation_ledger.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.38.0"' in app
+    assert 'APP_VERSION = "3.73.0"' in app
     assert "build_investment_discipline_metrics" in app
     assert "assess_investment_discipline" in app
     assert '"Kapitaldisciplin status"' in ledger
