@@ -30,5 +30,5 @@ def test_missing_target_does_not_invent_limited_upside():
 
 def test_release_and_ui_present():
     app=Path('app.py').read_text()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert 'Förväntningsrisk – när nästan alla redan är positiva' in app

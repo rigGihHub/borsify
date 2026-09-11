@@ -65,6 +65,6 @@ def test_verified_relationship_has_priority_inside_single_cross_company_slot():
 def test_version_and_ui_wiring():
     app=open("app.py",encoding="utf-8").read()
     ledger=open("recommendation_ledger.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "Verifierade bolagsrelationer – riktig ekonomisk koppling" in app
     assert "Verifierad relation källa" in ledger

@@ -10,7 +10,7 @@ APP = (ROOT / "app.py").read_text(encoding="utf-8")
 
 
 def test_release_version_and_scandinavia_is_default_market():
-    assert 'APP_VERSION = "3.73.0"' in APP
+    assert 'APP_VERSION = "3.81.0"' in APP
     assert '"Sverige + Norge + Danmark"' in APP
     assert 'index=list(MARKET_CONFIGS).index("Sverige + Norge + Danmark")' in APP
     # Country expansion must remain directly available in the left sidebar.

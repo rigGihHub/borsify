@@ -79,7 +79,7 @@ def test_empty_history_remains_registered_not_backfilled():
 
 def test_v316_ui_version_and_no_auto_policy_activation():
     app = open('app.py', encoding='utf-8').read()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert 'Prospective Policy Registry' in app
     assert 'prospective_policy_results' in app
     assert 'Ingen policy aktiveras här' in app

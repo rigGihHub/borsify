@@ -80,6 +80,6 @@ def test_model_health_table_has_expected_controls():
 
 def test_v310_ui_and_version():
     app=open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "Model Health Monitor · mår champion fortfarande bra?" in app
     assert "Ingen rollback sker automatiskt" in app

@@ -71,7 +71,7 @@ def test_no_consensus_score_and_version_ui_ledger_wiring():
     ledger = (root / "recommendation_ledger.py").read_text(encoding="utf-8")
     finalist = (root / "finalist_selection.py").read_text(encoding="utf-8")
     assert "Konsensus Score" not in engine
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "Analytikerkollektivet ändrar sig – Consensus Change" in app
     assert "Konsensus breadth förändring" in ledger
     assert 'reason_keys[idx] = "consensus_change"' in finalist

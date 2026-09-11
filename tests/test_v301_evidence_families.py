@@ -79,7 +79,7 @@ def test_family_rows_have_six_stable_groups():
 
 def test_app_wires_evidence_families_before_quality_gate():
     app = Path("app.py").read_text()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "build_evidence_families" in app
     assert app.index("assessment.update(build_evidence_families") < app.index("assessment.update(build_case_quality_gate")
     assert "evidence_family_rows" in app

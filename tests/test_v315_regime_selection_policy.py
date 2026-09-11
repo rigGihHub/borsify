@@ -44,7 +44,7 @@ def test_policy_requires_weak_market_point_in_time_data():
 
 def test_v315_ui_version_and_no_automatic_rule_change():
     app = open('app.py', encoding='utf-8').read()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert 'Regime-aware Selection Policy' in app
     assert 'regime_selection_policy_table' in app
     assert 'ändrar aldrig köpgränser eller regler automatiskt' in app

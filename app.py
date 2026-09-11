@@ -114,6 +114,14 @@ from literature_signal_validation import (
 )
 from news_underreaction_validation import validation_table as news_underreaction_validation_table, validation_summary as news_underreaction_validation_summary, MIN_TOTAL_CASES as NEWS_UNDERREACTION_MIN_CASES, MIN_GROUP_CASES as NEWS_UNDERREACTION_MIN_GROUP
 from expectation_gap_validation import validation_table as expectation_gap_validation_table, validation_summary as expectation_gap_validation_summary, MIN_TOTAL_CASES as EXPECTATION_GAP_MIN_CASES, MIN_GROUP_CASES as EXPECTATION_GAP_MIN_GROUP
+from prospective_signal_scorecard import build_prospective_signal_scorecard, scorecard_summary as prospective_signal_scorecard_summary, STATUS_REVIEW as SCORECARD_REVIEW, STATUS_SUPPORT as SCORECARD_SUPPORT
+from research_kill_promote_queue import build_research_queue, research_queue_summary, ACTION_REVIEW as RESEARCH_REVIEW, ACTION_PROMOTE as RESEARCH_PROMOTE
+from research_review_dossier import build_review_dossiers, dossier_summary as research_dossier_summary
+from research_dossier_robustness import apply_dossier_robustness
+from research_incremental_value import apply_incremental_value
+from research_cost_turnover import apply_cost_turnover
+from research_data_quality import apply_data_quality
+from research_signal_decision_gate import apply_signal_decision_gate, decision_gate_summary, DECISION_PAUSE as SIGNAL_GATE_PAUSE, DECISION_PROMOTE as SIGNAL_GATE_PROMOTE
 from signal_governance import (
     build_signal_governance, signal_governance_summary,
     ACTION_KEEP, ACTION_MIXED, ACTION_DEEMPHASISE, ACTION_RETIRE, ACTION_WAIT,
@@ -189,7 +197,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "3.73.0"
+APP_VERSION = "3.81.0"
 APP_NAME = "Borsify"
 APP_DOMAIN = "borsify.se"
 from discovery_engine import build_discovery_pool, discovery_coverage_summary
@@ -5602,6 +5610,89 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         f"Minst {EXPECTATION_GAP_MIN_CASES} oberoende prospektiva case totalt och {EXPECTATION_GAP_MIN_GROUP} i vardera gruppen krävs innan hypotesen kan få status Stöd/Ifrågasatt. "
                         "Valideringen ändrar aldrig ranking, score eller köpgränser automatiskt."
                     )
+
+                    st.markdown("#### Prospective Signal Scorecard · vad håller för test?")
+                    st.caption(
+                        "En kompakt styrningsvy för Borsifys nyare testbara signalhypoteser. Samma fyra lägen används överallt: Väntar på data, Oklart, Preliminärt stöd eller Behöver granskas. "
+                        "Scorecarden är deskriptiv och får aldrig ändra ranking, score, vikt eller köpgräns automatiskt."
+                    )
+                    signal_scorecard = build_prospective_signal_scorecard(recs, outs)
+                    signal_scorecard_head = prospective_signal_scorecard_summary(signal_scorecard)
+                    if signal_scorecard_head.get("status") == SCORECARD_REVIEW:
+                        st.warning(str(signal_scorecard_head.get("text", "")))
+                    elif signal_scorecard_head.get("status") == SCORECARD_SUPPORT:
+                        st.success(str(signal_scorecard_head.get("text", "")))
+                    else:
+                        st.info(str(signal_scorecard_head.get("text", "")))
+                    if not signal_scorecard.empty:
+                        st.dataframe(
+                            signal_scorecard[["Hypotes", "Familj", "Status", "Mogna horisonter", "Största sample", "Nästa steg"]],
+                            use_container_width=True, hide_index=True,
+                        )
+                    st.caption("Ett grönt läge betyder preliminärt stöd i Borsifys egna frysta utfall, inte bevisad alpha. Ett rött läge betyder granska – inte ta bort automatiskt.")
+
+                    st.markdown("#### Research Kill/Promote Queue · vad ska vi göra härnäst?")
+                    st.caption(
+                        "Översätter scorecarden till en prioriterad forskningskö. Negativa prospektiva utfall granskas först, moget preliminärt stöd kan bli kandidat för promotion-granskning och resten fortsätter samla data. "
+                        "Kön ändrar aldrig produktionsmodellen automatiskt."
+                    )
+                    research_queue = build_research_queue(signal_scorecard)
+                    research_queue_head = research_queue_summary(research_queue)
+                    if research_queue_head.get("status") == RESEARCH_REVIEW:
+                        st.warning(str(research_queue_head.get("text", "")))
+                    elif research_queue_head.get("status") == RESEARCH_PROMOTE:
+                        st.success(str(research_queue_head.get("text", "")))
+                    else:
+                        st.info(str(research_queue_head.get("text", "")))
+                    if not research_queue.empty:
+                        st.dataframe(
+                            research_queue[["Prioritet", "Åtgärd", "Hypotes", "Status", "Mogna horisonter", "Största sample", "Nästa kontroll"]],
+                            use_container_width=True, hide_index=True,
+                        )
+                    st.caption("Granska kritiskt betyder inte automatisk kill. Promotion-granskning betyder inte automatisk promotion. Båda kräver separat metodkontroll och uttryckligt produktionsbeslut.")
+
+                    st.markdown("#### Research Review Dossier · vad måste bevisas före beslut?")
+                    st.caption(
+                        "Skapar ett konservativt granskningsunderlag endast för hypoteser som ligger i Granska kritiskt eller Promotion-granskning. "
+                        "Regimrobusthet, signalöverlapp, inkrementellt värde, kostnads-/omsättningsrobusthet och datakvalitet mäts nu direkt på frysta observationer när underlaget räcker. Datakvalitetsrevisionen granskar fryst täckning, kursfärskhet, hämtningstid och möjliga systematiska bortfall. Historisk spread/slippage eller datakällediversitet rekonstrueras aldrig när sådan PIT-provenance saknas."
+                    )
+                    research_dossiers = apply_signal_decision_gate(apply_data_quality(apply_cost_turnover(apply_incremental_value(apply_dossier_robustness(build_review_dossiers(research_queue), recs, outs), recs, outs), recs, outs), recs, outs))
+                    research_dossier_head = research_dossier_summary(research_dossiers)
+                    if research_dossier_head.get("status") == RESEARCH_REVIEW:
+                        st.warning(str(research_dossier_head.get("text", "")))
+                    elif research_dossier_head.get("status") == RESEARCH_PROMOTE:
+                        st.success(str(research_dossier_head.get("text", "")))
+                    else:
+                        st.info(str(research_dossier_head.get("text", "")))
+                    if not research_dossiers.empty:
+                        st.dataframe(
+                            research_dossiers[["Hypotes", "Beslut", "Gate", "Mogna horisonter", "Största sample", "Regimrobusthet", "Signalöverlapp", "Incrementellt värde", "Kostnad/omsättning", "Out-of-sample", "Datakvalitet", "Kvarvarande blockerare"]],
+                            use_container_width=True, hide_index=True,
+                        )
+                        with st.expander("Visa beslutsmotivering per dossier", expanded=False):
+                            for _, dossier in research_dossiers.iterrows():
+                                st.markdown(f"**{dossier['Hypotes']} · {dossier['Rekommendation']}**")
+                                st.write(str(dossier["Evidensläge"]))
+                                st.caption(str(dossier["Nästa beslut"]))
+                    st.caption("Dossiern är ett styrningsunderlag. Regim-, överlapps-, inkrementella, kostnads-/omsättnings- och datakvalitetstester är konservativa forskningskontroller och kan aldrig själva promovera, döda, pausa eller ändra en produktionssignal.")
+
+                    st.markdown("#### Signal Decision Gate · ett strikt forskningsbeslut")
+                    st.caption("Kokar ned dossiern till tre styrningsbeslut: fortsätt samla data, pausa/avvisa-kandidat eller redo för manuell promotion-prövning. PASS kräver att alla centrala kontroller verkligen är klara och godkända; gaten ändrar aldrig produktionen automatiskt.")
+                    gate_head = decision_gate_summary(research_dossiers)
+                    if gate_head.get("status") == SIGNAL_GATE_PAUSE:
+                        st.warning(str(gate_head.get("text", "")))
+                    elif gate_head.get("status") == SIGNAL_GATE_PROMOTE:
+                        st.success(str(gate_head.get("text", "")))
+                    else:
+                        st.info(str(gate_head.get("text", "")))
+                    if not research_dossiers.empty:
+                        st.dataframe(research_dossiers[["Hypotes", "Beslut", "Gate", "Skäl", "Kvarvarande blockerare"]], use_container_width=True, hide_index=True)
+                        with st.expander("Visa gate-beslut per hypotes", expanded=False):
+                            for _, dossier in research_dossiers.iterrows():
+                                st.markdown(f"**{dossier['Hypotes']} · {dossier['Beslut']}**")
+                                st.write(str(dossier["Skäl"]))
+                                st.caption(str(dossier["Manuell åtgärd"]))
+                    st.caption("Signal Decision Gate är forskningsstyrning, inte auto-trading eller automatisk modellpromotion. Varje PASS kräver fortfarande ett uttryckligt manuellt beslut före produktionsändring.")
 
                     st.markdown("#### Evidence Maturity · vad vet vi faktiskt – och vad är fortfarande en hypotes?")
                     st.caption("En gemensam mognadsvy för signaler, challengers och policyer. Historiskt stöd, prospektiv evidens och produktionsbeslut hålls isär så att många diagnostikpaneler inte ser starkare ut än underlaget är.")

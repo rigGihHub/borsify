@@ -48,7 +48,7 @@ def test_policy_health_summary_requires_manual_rollback_review():
 def test_v319_ui_and_version_contract():
     root = Path(__file__).resolve().parents[1]
     app = (root / "app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "Policy Health Monitor · hjälper den aktiva policyn fortfarande?" in app
     assert "policy_health_table" in app
     assert "aldrig själv ändra urvalsregler eller genomföra rollback" in app

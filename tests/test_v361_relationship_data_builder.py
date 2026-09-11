@@ -81,7 +81,7 @@ def test_seed_registry_has_real_primary_source_coverage_and_valid_tickers():
 
 def test_v361_version_and_advanced_coverage_ui_are_wired():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "relationship_registry_health" in app
     assert "Relationsdatabas – täckning och källkvalitet" in app
     assert "Relationship Score" not in open("relationship_data_builder.py", encoding="utf-8").read()

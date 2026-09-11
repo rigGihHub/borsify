@@ -48,7 +48,7 @@ def test_missing_old_details_are_not_backfilled_from_today():
 
 
 def test_v344_wiring_is_explanatory_not_a_new_score():
-    assert 'APP_VERSION = "3.73.0"' in APP
+    assert 'APP_VERSION = "3.81.0"' in APP
     assert 'from horizon_change_reasons import add_change_reasons, snapshot_details' in APP
     assert 'ranked = add_change_reasons(ranked, previous_horizon, horizon)' in APP
     assert '"Varför ändrad?"' in APP

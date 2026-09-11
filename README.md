@@ -1,4 +1,29 @@
-# Borsify v2.93.0
+# Borsify v3.76.0
+
+## v3.76.0 – Research Review Dossier
+
+- Skapar granskningsdossierer för hypoteser i **Granska kritiskt** eller **Promotion-granskning**.
+- Visar evidensläge, mogna horisonter, sample och blockerande metodkontroller före beslut.
+- Regimrobusthet, signalöverlapp, kostnad/omsättning och datakvalitet markeras **Ej verifierad** när de inte faktiskt är mätta per hypotes.
+- Negativa hypoteser pausas inte eller dödas automatiskt; promotion-kandidater promoveras inte automatiskt.
+- Ingen ranking, score, vikt, gate eller produktionspolicy ändras av dossiern.
+
+
+## v3.75.0 – Research Kill/Promote Queue
+
+- Gör Prospective Signal Scorecard handlingsbar genom en prioriterad forskningskö.
+- **Granska kritiskt** prioriteras högst när prospektiva utfall går åt fel håll. Det innebär inte automatisk borttagning.
+- **Promotion-granskning** kräver preliminärt stöd, minst två mogna horisonter och minst 30 oberoende case. Det innebär inte automatisk promotion.
+- **Samla mer data** används för väntande, oklara och ännu för tunna lovande hypoteser.
+- Kön ändrar aldrig ranking, score, vikt, gate, champion eller produktionspolicy automatiskt.
+
+## v3.74.0 – Prospective Signal Scorecard
+
+- Samlar Borsifys nyare testbara signalhypoteser i en enda kompakt styrningsvy.
+- Normaliserar status till **Väntar på data**, **Oklart**, **Preliminärt stöd** eller **Behöver granskas**.
+- Visar mogna horisonter, största oberoende sample och nästa metodsteg per hypotes.
+- Om någon hypotes går åt fel håll prioriteras granskningsvarningen framför positiva resultat.
+- Scorecarden är deskriptiv och ändrar aldrig ranking, score, vikt, gate eller köpgräns automatiskt.
 
 
 ## v3.40.0 – Scandinavian broad default

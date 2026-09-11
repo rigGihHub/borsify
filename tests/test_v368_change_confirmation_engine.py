@@ -63,6 +63,6 @@ def test_two_negative_families_create_warning_not_buy_candidate():
 
 def test_release_wiring_and_version():
     app = Path('app.py').read_text(encoding='utf-8')
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert 'from change_confirmation_engine import build_change_confirmation' in app
     assert 'Förändringsbekräftelse status' in app

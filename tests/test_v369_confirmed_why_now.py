@@ -56,7 +56,7 @@ def test_missing_history_is_neutral():
 
 def test_release_wiring_and_version():
     app = Path('app.py').read_text(encoding='utf-8')
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert 'from confirmed_why_now import build_confirmed_why_now' in app
     assert 'bq_confirmed_why_now_radar' in app
     assert 'Varför just nu – verifierat från flera håll' in app

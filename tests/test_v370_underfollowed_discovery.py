@@ -65,6 +65,6 @@ def test_discovery_pool_exposes_underfollowed_reason():
 
 def test_release_version_and_ui_are_wired():
     app = Path("app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "Underfollowed – förbättras innan analytikerna hunnit bli många" in app
     assert "bq_underfollowed_discovery" in app

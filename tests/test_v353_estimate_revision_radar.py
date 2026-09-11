@@ -62,7 +62,7 @@ def test_finalist_pool_reserves_one_estimate_revision_doorway_after_incumbent_co
 def test_v353_wiring_and_version():
     app = Path("app.py").read_text(encoding="utf-8")
     final = Path("finalist_selection.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "add_estimate_revision_radar" in app
     assert "Estimatförändringar i kandidatpoolen" in app
     assert "select_estimate_revision_candidates" in final

@@ -61,7 +61,7 @@ def test_finalist_pool_uses_only_one_expectation_family_slot_and_acceleration_ha
 def test_v354_wiring_and_version():
     app = Path("app.py").read_text(encoding="utf-8")
     final = Path("finalist_selection.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "build_expectation_acceleration" in app
     assert "Förväntningar som accelererar" in app
     assert "select_expectation_acceleration_candidates" in final

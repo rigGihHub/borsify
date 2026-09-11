@@ -50,6 +50,6 @@ def test_departures_are_not_called_sell_signals():
 
 def test_version_and_ui_wiring():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert '"Förändring"' in app
     assert "Lämnat topp 10 sedan föregående sparade analys" in app

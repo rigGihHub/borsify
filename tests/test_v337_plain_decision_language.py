@@ -6,7 +6,7 @@ APP = Path("app.py").read_text(encoding="utf-8")
 
 
 def test_v337_version_and_presentation_layer_is_wired_in():
-    assert 'APP_VERSION = "3.73.0"' in APP
+    assert 'APP_VERSION = "3.81.0"' in APP
     assert 'from decision_language import simplify_decision_text' in APP
     assert 'return simplify_decision_text(value)' in APP
 

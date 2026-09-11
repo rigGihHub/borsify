@@ -48,5 +48,5 @@ def test_small_target_upside_is_warning_not_favorable():
 
 def test_release_and_ui_present():
     app=Path('app.py').read_text()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert 'Expectation Gap – förbättring kontra förväntningar' in app

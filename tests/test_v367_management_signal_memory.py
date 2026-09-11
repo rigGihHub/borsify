@@ -69,6 +69,6 @@ def test_previous_snapshot_excludes_current_fingerprint():
 
 def test_version_and_app_wiring():
     app=(ROOT/'app.py').read_text(encoding='utf-8')
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert 'compare_management_signal_memory' in app
     assert 'Ledningsminne status' in app

@@ -107,7 +107,7 @@ def test_version_wiring_and_pit_freeze_are_present():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     finalist = (ROOT / "finalist_selection.py").read_text(encoding="utf-8")
     ledger = (ROOT / "recommendation_ledger.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "build_capital_allocation_insider_radar" in app
     assert 'st.session_state["bq_owner_signal_radar"]' in app
     assert "select_owner_signal_candidates" in finalist

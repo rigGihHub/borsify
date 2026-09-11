@@ -75,7 +75,7 @@ def test_registry_detects_runtime_definition_mismatch(tmp_path):
 
 def test_ui_exposes_read_only_registry_and_version():
     app = (Path(__file__).resolve().parents[1] / "app.py").read_text()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "Produktionsmodell · champion och rollbackhistorik" in app
     assert "Visa produktions- och rollbackhistorik" in app
     assert "ingen modell kan bytas här automatiskt" in app.lower()

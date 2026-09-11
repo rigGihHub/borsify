@@ -54,7 +54,7 @@ def test_v358_wiring_and_no_new_score():
     finalist = open("finalist_selection.py", encoding="utf-8").read()
     ledger = open("recommendation_ledger.py", encoding="utf-8").read()
     module = open("sector_readthrough_engine.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert 'add_sector_readthrough(discovery_pool)' in app
     assert 'bq_sector_readthrough_radar' in app
     assert 'reason_keys[idx] = "sector_readthrough"' in finalist

@@ -50,7 +50,7 @@ def test_change_log_contains_champion_challenger_and_no_auto_promotion_language(
 
 def test_v306_ui_and_version_are_wired():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "Champion–Challenger" in app
     assert "Modellens ändringslogg" in app
     assert "produktionsmodellen automatiskt" in app

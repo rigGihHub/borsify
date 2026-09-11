@@ -73,6 +73,6 @@ def test_missing_verified_report_date_creates_no_snapshot():
 def test_release_wiring():
     root = Path(__file__).resolve().parents[1]
     app = (root / "app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "compare_report_delta_memory" in app
     assert "Rapportminne status" in app

@@ -68,7 +68,7 @@ def test_interaction_requires_enough_history():
 
 def test_v313_ui_version_and_governance_present():
     app = open('app.py', encoding='utf-8').read()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert 'Case Archetypes · fungerar vissa signaler bättre tillsammans?' in app
     assert 'interaction_archetype_table' in app
     assert 'ändrar aldrig vikter eller regler automatiskt' in app

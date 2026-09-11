@@ -40,7 +40,7 @@ def test_selector_and_wiring_no_new_score():
     out=add_value_chain_readthrough(_frame())
     assert select_value_chain_candidates(out,1)[0][0]==1
     app=open('app.py',encoding='utf-8').read(); fin=open('finalist_selection.py',encoding='utf-8').read(); led=open('recommendation_ledger.py',encoding='utf-8').read(); mod=open('value_chain_readthrough_engine.py',encoding='utf-8').read()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert 'add_value_chain_readthrough(discovery_pool)' in app
     assert 'bq_value_chain_radar' in app
     assert 'reason_keys[idx] = "value_chain_readthrough"' in fin

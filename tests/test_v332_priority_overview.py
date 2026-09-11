@@ -4,7 +4,7 @@ APP = Path("app.py").read_text(encoding="utf-8")
 
 
 def test_version():
-    assert 'APP_VERSION = "3.73.0"' in APP
+    assert 'APP_VERSION = "3.81.0"' in APP
 
 
 def test_overview_has_one_clear_first_choice():

@@ -57,4 +57,4 @@ def test_homepage_table_has_more_decision_context():
     assert '"Land", "Kurs", "Signal", "Förändring", "Varför ändrad?", "Score", "Till platsen ovan", "Risk"' in APP
     assert 'Vad betyder signalerna?' in APP
     assert 'Signal: {first.get' in APP
-    assert 'APP_VERSION = "3.73.0"' in APP
+    assert 'APP_VERSION = "3.81.0"' in APP

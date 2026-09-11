@@ -55,7 +55,7 @@ def test_version_ui_selection_and_pit_wiring():
     app=(ROOT/'app.py').read_text(encoding='utf-8')
     finalist=(ROOT/'finalist_selection.py').read_text(encoding='utf-8')
     ledger=(ROOT/'recommendation_ledger.py').read_text(encoding='utf-8')
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert 'build_management_signal' in app
     assert 'bq_management_signal_radar' in app
     assert 'select_management_signal_candidates' in finalist

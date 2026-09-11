@@ -79,7 +79,7 @@ def test_seed_change_metadata_and_v363_ui_wiring():
     assert telia["change_type"] == "contract_extension"
     assert telia["materiality_level"] == "multiyear"
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "Relationen förändras – har kopplingen blivit viktigare?" in app
     engine=open("relationship_change_radar.py",encoding="utf-8").read()
     assert "Relationship Score" not in engine

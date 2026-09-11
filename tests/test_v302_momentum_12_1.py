@@ -44,6 +44,6 @@ def test_short_engine_exposes_separate_momentum_evidence():
 def test_app_version_and_ledger_freeze_new_fields():
     app = open("app.py", encoding="utf-8").read()
     ledger = open("recommendation_ledger.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert '"12–1 momentum"' in ledger
     assert '"Short 12–1 Momentum"' in ledger

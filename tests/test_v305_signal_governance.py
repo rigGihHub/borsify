@@ -68,7 +68,7 @@ def test_summary_never_claims_automatic_change():
 
 def test_app_version_and_governance_ui_are_wired():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "Vilka signaler ska Borsify behålla – eller börja ifrågasätta?" in app
     assert "build_signal_governance" in app
     assert "Case räknas aldrig ihop mellan horisonter" in app

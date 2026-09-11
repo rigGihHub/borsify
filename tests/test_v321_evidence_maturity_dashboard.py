@@ -28,6 +28,6 @@ def test_dashboard_language_never_auto_promotes():
 
 def test_v321_ui_and_version():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "Evidence Maturity" in app
     assert "vad vet vi faktiskt" in app

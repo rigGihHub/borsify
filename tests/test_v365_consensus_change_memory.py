@@ -60,6 +60,6 @@ def test_sqlite_memory_is_point_in_time_and_daily_idempotent():
 def test_release_wiring():
     root = Path(__file__).resolve().parents[1]
     app = (root / "app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "3.73.0"' in app
+    assert 'APP_VERSION = "3.81.0"' in app
     assert "compare_consensus_memory" in app
     assert "Konsensusminne status" in app
