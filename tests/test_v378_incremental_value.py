@@ -13,7 +13,7 @@ def _row(i, post_positive, eq_positive, momentum_positive=False):
     }
     return {
         "record_id": f"r{i}", "symbol": f"S{i}", "captured_date": f"2026-09-{(i%28)+1:02d}",
-        "horizon_type": "long", "model_version": "3.81.0", "snapshot_json": json.dumps(snap),
+        "horizon_type": "long", "model_version": "4.29.0", "snapshot_json": json.dumps(snap),
     }
 
 
@@ -64,6 +64,6 @@ def test_apply_removes_incremental_blocker_only_when_measured():
 
 def test_app_wires_incremental_value_and_release_version():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "3.81.0"' in app
+    assert 'APP_VERSION = "4.34.0"' in app
     assert "apply_incremental_value(apply_dossier_robustness(build_review_dossiers(research_queue), recs, outs), recs, outs)" in app
     assert '"Incrementellt värde"' in app

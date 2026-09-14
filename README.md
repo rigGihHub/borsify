@@ -1,4 +1,60 @@
-# Borsify v3.76.0
+# Borsify v4.34.0
+
+## v4.34.0 – Fundamental Value Range
+
+- Lägger till ett separat rådgivande värdeintervall runt transparenta Bear/Base/Bull-scenarier.
+- Kräver positiv EPS, verifierbar tillväxthistorik och kassaflödesbekräftelse; saknad data blir aldrig ett positivt antagande.
+- Blockerar generisk EPS/P-E-värdering för bank, finans, försäkring och fastighet/REIT tills dedikerade sektormodeller finns.
+- Visar grova intervall i stället för en exakt riktkurs och markerar att historisk utspädning inte kan antas vara noll.
+- Hög skuldsättning och låg Analysis Confidence sänker tilliten utan att smygändra själva scenariot.
+- Fryser underlag och resultat point-in-time och gör dem tillgängliga för Case AI.
+- Påverkar inte Borsify Score eller huvudrankingen före prospektiv validering.
+
+## v4.33.0 – Market-Implied Expectations
+
+- Jämför sektorjusterad värderingsbörda med observerad KPI-, estimat- och förändringsevidens.
+- Skiljer låga förväntningar som börjar överträffas från en billig aktie utan förbättring och ett bra bolag där mycket redan verkar krävas.
+- Value Trap och redan avancerad re-rating blockerar en stark positiv klassning.
+- Tunt värderingsunderlag eller låg Analysis Confidence ger okänd/försvagad bedömning i stället för falsk precision.
+- Absoluta multiplar visas endast som stöd; den sektorjusterade värderingsmotorn avgör förväntningsbördan.
+- Detta är uttryckligen inte en reverse DCF eller en exakt marknadsprognos.
+- Signalen visas i Decision Brief och Top 10, fryses point-in-time och påverkar inte rankingen före prospektiv evidens.
+
+## v4.32.0 – Runtime integrity
+
+## v4.32.0 – Runtime integrity
+
+- Ersätter tysta fel i fem kritiska point-in-time- och lärandeflöden med central runtime-diagnostik.
+- Bevakar News Event Memory, Recommendation Relevance, Case Plans, rekommendationsutfall och Missed Winners-historik.
+- Visar tydligt när grundrankingen fungerar men historik- eller lärandefunktioner är ofullständiga.
+- Sparar endast komponent, feltyp, påverkan och tidpunkt; externa felpayloads eller känsliga detaljer visas inte.
+- En komponent återgår automatiskt till frisk status efter en senare lyckad körning.
+- Ingen ranking, signalvikt eller produktionspolicy ändras.
+
+## v4.31.0 – Decision-first UX
+
+## v4.31.0 – Decision-first UX
+
+- Samlar befintlig evidens till ett Decision Brief: beslut, tes, market-wrong-förklaring, recognition-path, timing, risk, omprövningsvillkor och datatillit.
+- Decision Brief är presentation-only: inget nytt score, ingen ny rankingvikt och ingen uppgradering av en svag signal.
+- Förstavalet visar affären och motargumentet före interna modellnamn; hela signalstacken finns kvar hopfälld.
+- Top 10 reduceras till tio beslutskolumner. Den fulla tekniska jämförelsen finns kvar i en separat expander.
+- Lägger till fasvis prestandamätning för kursdata, fundamenta, analys/lagring, total tid, nya Yahoo-anrop och fundamental cacheträff.
+- Decision Brief fryses i Point-in-Time Ledger så att det går att granska vad användaren faktiskt fick se.
+
+## v4.30.0 – Recognition Window
+
+## v4.30.0 – Recognition Window
+
+- Klassar en redan verifierad Catalyst-to-Recognition-väg som nära, medellång, lång eller okänd.
+- Använder endast uttryckliga point-in-time-tidsfönster; vag eller saknad timing förblir okänd och omvandlas aldrig till ett påhittat datum.
+- Skiljer framtida katalysatorer från färska redan inträffade händelser. En färsk händelse kräver verifierad post-report- och KPI-/estimatsupport för ett nära efterreaktionsfönster.
+- Lågt Analysis Confidence blockerar ett bestämt tidsfönster.
+- Jämför observerad riktkurspotential med en grov väntetidströskel, men märker uttryckligen riktkursen som konsensusstöd och inte bevis på faktisk uppsida.
+- Fryser hela Recognition Window-bedömningen i Point-in-Time Ledger.
+- Visas i förstaval och Top 10 men påverkar inte ranking, Deal Conviction eller produktionspolicy före prospektiv validering.
+
+## v3.76.0 – Research Review Dossier
 
 ## v3.76.0 – Research Review Dossier
 

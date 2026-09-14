@@ -47,6 +47,7 @@ def ensure_report_delta_memory_table(conn: sqlite3.Connection) -> None:
             candidate INTEGER NOT NULL DEFAULT 0,
             underreaction INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT '',
+            guidance TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY(symbol, report_date)
         )
@@ -85,6 +86,7 @@ def snapshot_from_report_delta(
         "candidate": int(bool(r.get("Report Delta kandidat"))),
         "underreaction": int(bool(r.get("Report Delta underreaktion"))),
         "status": str(r.get("Report Delta status") or ""),
+        "guidance": str(r.get("Report Delta guidance") or ""),
     }
 
 
@@ -106,7 +108,7 @@ def save_report_snapshot(conn: sqlite3.Connection, snapshot: dict[str, Any] | No
         "symbol", "report_date", "captured_date", "eps_surprise", "revenue_yoy",
         "revenue_acceleration", "margin_change", "fcf_yoy", "earnings_yoy",
         "eps_estimate_change", "revision_balance", "evidence_count", "positive_count",
-        "negative_count", "candidate", "underreaction", "status",
+        "negative_count", "candidate", "underreaction", "status", "guidance",
     ]
     conn.execute(
         f"INSERT OR IGNORE INTO report_delta_snapshots({','.join(cols)}) VALUES ({','.join(['?'] * len(cols))})",

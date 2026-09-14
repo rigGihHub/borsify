@@ -57,6 +57,6 @@ def test_apply_gate_and_app_wiring():
     out=apply_signal_decision_gate(pd.DataFrame([_row()]))
     assert out.iloc[0]["Beslut"] == DECISION_PROMOTE
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "3.81.0"' in app
+    assert 'APP_VERSION = "4.34.0"' in app
     assert "Signal Decision Gate" in app
     assert "apply_signal_decision_gate(apply_data_quality(" in app

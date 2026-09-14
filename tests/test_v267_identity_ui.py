@@ -6,4 +6,4 @@ def test_main_recommendation_views_use_stock_identity():
     assert 'table["Aktie"] = table.apply(_stock_identity, axis=1)' in APP
 
 def test_why_now_is_present_on_primary_cards():
-    assert 'st.markdown("**Varför nu?**")' in APP
+    assert '**Vad kan stänga gapet**' in APP

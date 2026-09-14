@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from typing import Any, Iterable
+import math
+import numpy as np
 
 import pandas as pd
 
@@ -206,3 +208,44 @@ def signal_governance_summary(table: pd.DataFrame) -> dict[str, str]:
         "status": ACTION_WAIT,
         "text": "De nya signalerna är fortfarande för unga för promotion, nedtoning eller avveckling. Borsify väntar på fler mogna utfall.",
     }
+
+# v4.11 Evidence Lab governance nominations
+def nominate_signal_actions(evidence:pd.DataFrame|None, redundancy:pd.DataFrame|None,
+                            min_cases:int=20, promote_edge:float=.03, retire_edge:float=-.03)->pd.DataFrame:
+    cols=["Signal","Action","Evidence","Reason"]
+    if evidence is None or evidence.empty:return pd.DataFrame(columns=cols)
+    red={}
+    if redundancy is not None and not redundancy.empty:
+        for _,r in redundancy.iterrows():
+            a,b=str(r["Signal A"]),str(r["Signal B"])
+            c=float(r["Korrelation"])
+            red.setdefault(a,[]).append((b,c)); red.setdefault(b,[]).append((a,c))
+    rows=[]
+    for _,r in evidence.iterrows():
+        sig=str(r["Signal"]); n=int(r.get("Signal N",0)); ctl=int(r.get("Control N",0))
+        try:edge=float(r.get("Median edge"))
+        except Exception:edge=np.nan
+        enough=n>=min_cases and ctl>=min_cases
+        overlaps=sorted(red.get(sig,[]),key=lambda x:abs(x[1]),reverse=True)
+        if enough and overlaps and abs(overlaps[0][1])>=.80:
+            action="MERGE REVIEW"
+            reason=f"Hög överlappning med {overlaps[0][0]} ({overlaps[0][1]:.0%}); risk för dubbelräkning."
+        elif enough and math.isfinite(edge) and edge>=promote_edge:
+            action="PROMOTE CANDIDATE"
+            reason=f"Median edge {edge:+.1%} mot kontroll med {n} signal- och {ctl} kontrollutfall."
+        elif enough and math.isfinite(edge) and edge<=retire_edge:
+            action="RETIRE/DOWNWEIGHT CANDIDATE"
+            reason=f"Median edge {edge:+.1%} mot kontroll; signalen underpresterar i moget facit."
+        else:
+            action="KEEP OBSERVING"
+            reason="För litet eller för svagt facit för modelländring."
+        rows.append({"Signal":sig,"Action":action,"Evidence":f"N {n}/{ctl} · edge {edge:+.1%}" if math.isfinite(edge) else f"N {n}/{ctl}",
+                     "Reason":reason})
+    return pd.DataFrame(rows,columns=cols)
+
+def governance_summary(actions:pd.DataFrame|None)->str:
+    if actions is None or actions.empty:return "För lite point-in-time-data för signalstyrning."
+    c=actions["Action"].value_counts().to_dict()
+    return (f"{c.get('PROMOTE CANDIDATE',0)} promote · {c.get('MERGE REVIEW',0)} merge review · "
+            f"{c.get('RETIRE/DOWNWEIGHT CANDIDATE',0)} retire/downweight · {c.get('KEEP OBSERVING',0)} fortsätt observera. "
+            "Detta är nomineringar, inte automatiska modelländringar.")

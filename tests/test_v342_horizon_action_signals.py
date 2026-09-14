@@ -54,7 +54,8 @@ def test_legends_exist_for_all_three_homepage_horizons():
 
 
 def test_homepage_table_has_more_decision_context():
-    assert '"Land", "Kurs", "Signal", "Förändring", "Varför ändrad?", "Score", "Till platsen ovan", "Risk"' in APP
+    assert '"#", "Aktie", "Signal", "Förväntningar", "Köpläge", "Varför nu", "Recognition Window", "Risk", "Datatillit", "Score"' in APP
+    assert 'Visa teknisk jämförelsetabell' in APP
     assert 'Vad betyder signalerna?' in APP
     assert 'Signal: {first.get' in APP
-    assert 'APP_VERSION = "3.81.0"' in APP
+    assert 'APP_VERSION = "4.34.0"' in APP
