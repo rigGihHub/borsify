@@ -14,7 +14,7 @@ def test_clear_fundamentals_cache_forces_persistent_refresh(tmp_path):
 
 def test_manual_refresh_is_primary_and_clears_both_caches():
     app = Path("app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.34.0"' in app
+    assert 'APP_VERSION = "4.34.1"' in app
     assert 'st.button("↻ Uppdatera data", type="primary"' in app
     assert "st.cache_data.clear()" in app
     assert "clear_fundamentals_cache(DB_PATH)" in app

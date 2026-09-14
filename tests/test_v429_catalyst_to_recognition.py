@@ -42,6 +42,6 @@ def test_no_mispricing_base_means_no_path():
 def test_app_wires_signal_but_not_into_deal_conviction():
     app=open("app.py",encoding="utf-8").read()
     deal=open("deal_conviction.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.0"' in app
+    assert 'APP_VERSION = "4.34.1"' in app
     assert "add_catalyst_to_recognition(ranked)" in app
     assert "Catalyst-to-Recognition" not in deal

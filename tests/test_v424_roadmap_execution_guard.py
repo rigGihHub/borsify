@@ -24,6 +24,6 @@ def test_next_safe_item_is_first():
 
 def test_app_exposes_execution_plan():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.0"' in app
+    assert 'APP_VERSION = "4.34.1"' in app
     assert "Säker genomförandeplan" in app
     assert "build_execution_plan(_risk_roadmap)" in app

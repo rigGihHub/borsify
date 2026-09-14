@@ -64,7 +64,7 @@ def test_high_debt_reduces_confidence_but_does_not_double_count_debt_in_value():
 def test_version_and_integration_are_explicit():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     ledger = (ROOT / "recommendation_ledger.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.34.0"' in app
+    assert 'APP_VERSION = "4.34.1"' in app
     assert "build_fundamental_value_range" in app
     assert "Fundamental Value Range ranking effect" in ledger
     assert "Påverkar inte Borsify Score eller huvudrankingen" in app

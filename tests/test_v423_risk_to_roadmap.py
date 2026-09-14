@@ -30,6 +30,6 @@ def test_focus_uses_first_prioritised_item():
 
 def test_app_exposes_risk_to_roadmap():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.0"' in app
+    assert 'APP_VERSION = "4.34.1"' in app
     assert 'st.markdown("#### Risk-to-Roadmap")' in app
     assert "build_risk_roadmap(_risk_register)" in app

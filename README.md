@@ -1,4 +1,10 @@
-# Borsify v4.34.0
+# Borsify v4.34.1
+
+## v4.34.1 – Direct public launch
+
+- Tar bort den interna delade lösenordsspärren så att live-länken öppnar Borsify direkt.
+- Vanliga användarkonton via Supabase finns kvar för personlig bevakning och molnsynk.
+- Analysen startar inte längre bakom en blockerande intern låsruta.
 
 ## v4.34.0 – Fundamental Value Range
 
@@ -350,7 +356,6 @@ v1.9 kräver **ingen ny databasmigrering jämfört med v1.7/v1.8**. Om du uppgra
 Streamlit använder:
 
 ```toml
-APP_ACCESS_PASSWORD = "CHOOSE_A_STRONG_PASSWORD"
 SUPABASE_URL = "https://YOUR_PROJECT.supabase.co"
 SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY"
 ```
@@ -382,7 +387,6 @@ Lägg aldrig riktiga nycklar i repot. Streamlit-värden ska läggas i appens **S
 För Streamlit används exempelvis:
 
 ```toml
-APP_ACCESS_PASSWORD = "CHOOSE_A_STRONG_PASSWORD"
 SUPABASE_URL = "https://YOUR_PROJECT.supabase.co"
 SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY"
 ```
@@ -398,9 +402,7 @@ För den schemalagda GitHub Action-körningen används vid behov:
 
 ### Åtkomst till den publikt hostade appen
 
-När `APP_ACCESS_PASSWORD` finns i Streamlit Secrets stoppas appen innan någon marknadsdata eller användarvy laddas. Besökaren måste först ange lösenordet. Om nyckeln saknas är appen öppen, vilket är praktiskt vid lokal utveckling men inte rekommenderat för den publika testmiljön.
-
-Detta skyddar **appen**, inte källkoden: ett publikt GitHub-repo kan fortfarande läsas av andra. Därför får inga hemligheter finnas i repot.
+Liveappen är öppen direkt från sin URL. Supabase-inloggning är frivillig och används bara för personliga funktioner som bevakning och molnsynk. Inga hemligheter får finnas i repot.
 ## v2.1.0 hotfix
 
 - Rättar Streamlit Cloud-krasch i `ProgressColumn` genom att använda nyckelordsargument för `min_value` och `max_value`.

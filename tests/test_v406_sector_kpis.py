@@ -29,5 +29,5 @@ def test_bank_does_not_fake_cet1_from_generic_balance_sheet():
 
 def test_app_wires_sector_kpis_and_version():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.0"' in app
+    assert 'APP_VERSION = "4.34.1"' in app
     assert "extract_sector_kpis(" in app

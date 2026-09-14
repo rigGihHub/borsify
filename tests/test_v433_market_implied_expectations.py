@@ -54,6 +54,6 @@ def test_low_confidence_blocks_strong_label():
 def test_app_wires_advisory_layer_without_ranking_effect():
     app = open("app.py", encoding="utf-8").read()
     rankings = open("horizon_rankings.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.0"' in app
+    assert 'APP_VERSION = "4.34.1"' in app
     assert "add_market_implied_expectations(ranked)" in app
     assert "Market-Implied Expectations" not in rankings

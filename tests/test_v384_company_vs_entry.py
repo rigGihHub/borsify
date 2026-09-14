@@ -20,7 +20,7 @@ def test_add_company_quality_adds_plain_language_axis():
 
 def test_app_exposes_company_and_entry_axes_and_release():
     app=open('app.py',encoding='utf-8').read()
-    assert 'APP_VERSION = "4.34.0"' in app
+    assert 'APP_VERSION = "4.34.1"' in app
     assert '**Bra bolag?**' in app
     assert '**Bra köpläge?**' in app
     assert 'table["Köpläge"] = table.get("Ingångsläge"' in app

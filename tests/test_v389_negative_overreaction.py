@@ -46,7 +46,7 @@ def test_dataframe_layer_preserves_rows_and_adds_fields():
 def test_release_ui_and_ranking_wiring():
     app=open("app.py",encoding="utf-8").read()
     rankings=open("horizon_rankings.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.0"' in app
+    assert 'APP_VERSION = "4.34.1"' in app
     assert "Quality on sale – negativ överreaktion" in app
     assert '"Negativ överreaktion"' in app
     assert "add_negative_overreaction(out)" in rankings

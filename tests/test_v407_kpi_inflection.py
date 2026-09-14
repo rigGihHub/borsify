@@ -22,6 +22,6 @@ def test_missing_leading_kpis_are_explicit_in_explanation():
 
 def test_app_wires_kpi_inflection_but_deal_conviction_does_not_weight_it_yet():
     app=open("app.py",encoding="utf-8").read(); deal=open("deal_conviction.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.0"' in app
+    assert 'APP_VERSION = "4.34.1"' in app
     assert "assess_kpi_inflection" in app
     assert "KPI Inflection nivå" not in deal

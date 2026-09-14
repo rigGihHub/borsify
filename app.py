@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 import re
 import json
-import hmac
 import sqlite3
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -250,7 +249,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "4.34.0"
+APP_VERSION = "4.34.1"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""
@@ -1522,40 +1521,6 @@ def _fmt_date(value: Any) -> str:
         return ts.strftime("%Y-%m-%d")
     except Exception:
         return str(value)[:10] if value else "—"
-
-
-def _site_access_password() -> str:
-    """Optional shared site password stored only in Streamlit Secrets."""
-    try:
-        return str(st.secrets.get("APP_ACCESS_PASSWORD", "")).strip()
-    except Exception:
-        return ""
-
-
-def require_site_access() -> None:
-    """Gate a public Streamlit deployment behind an app-level password when configured.
-
-    Local development remains open if APP_ACCESS_PASSWORD is not configured.
-    The password itself never belongs in source control.
-    """
-    expected = _site_access_password()
-    if not expected:
-        return
-    if st.session_state.get("bq_site_access") is True:
-        return
-
-    st.subheader("Borsify är låst")
-    st.caption("Ange åtkomstlösenordet för att öppna appen.")
-    with st.form("site_access_form", clear_on_submit=True):
-        supplied = st.text_input("Åtkomstlösenord", type="password")
-        submitted = st.form_submit_button("Öppna Borsify", type="primary", use_container_width=True)
-    if submitted:
-        if hmac.compare_digest(supplied, expected):
-            st.session_state["bq_site_access"] = True
-            st.rerun()
-        else:
-            st.error("Fel lösenord.")
-    st.stop()
 
 
 def _supabase_config() -> tuple[str, str]:
@@ -6609,7 +6574,6 @@ def main() -> None:
     """, unsafe_allow_html=True)
     st.markdown(f"""<div class='bq-hero'><div><span class='bq-mark'>BQ</span><span class='bq-title'>{APP_NAME}</span></div><div class='bq-sub'>Hitta intressanta aktier — och förstå varför · <span class='bq-domain'>{APP_DOMAIN}</span></div></div>""", unsafe_allow_html=True)
 
-    require_site_access()
     init_db()
     universe_df = load_universe_file()
     file_universe_symbols = universe_df["Ticker"].tolist()

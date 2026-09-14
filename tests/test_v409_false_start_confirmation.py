@@ -33,6 +33,6 @@ def test_outcome_calibration_uses_only_frozen_state():
 
 def test_app_wires_engine_without_deal_conviction_weight():
     app=open("app.py",encoding="utf-8").read(); deal=open("deal_conviction.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.0"' in app
+    assert 'APP_VERSION = "4.34.1"' in app
     assert "classify_early_signals" in app
     assert "False Start frozen state" not in deal
