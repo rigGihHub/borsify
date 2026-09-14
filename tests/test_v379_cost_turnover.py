@@ -64,6 +64,6 @@ def test_partial_verification_keeps_blocker_when_liquidity_missing():
 
 def test_app_wires_cost_turnover_and_release_version():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.1"' in app
+    assert 'APP_VERSION = "4.35.0"' in app
     assert "apply_cost_turnover(apply_incremental_value(apply_dossier_robustness(build_review_dossiers(research_queue), recs, outs), recs, outs), recs, outs)" in app
     assert "kostnads-/omsättningsrobusthet" in app

@@ -67,7 +67,7 @@ def test_app_wires_signal_and_ledger_freezes_it_without_ranking_effect():
     deal = open("deal_conviction.py", encoding="utf-8").read()
     rankings = open("horizon_rankings.py", encoding="utf-8").read()
     ledger = open("recommendation_ledger.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.1"' in app
+    assert 'APP_VERSION = "4.35.0"' in app
     assert "add_recognition_window(ranked)" in app
     assert '"Recognition Window", "Recognition Window status"' in ledger
     assert "Recognition Window" not in deal

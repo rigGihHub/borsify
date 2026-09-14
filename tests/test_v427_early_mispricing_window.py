@@ -22,7 +22,7 @@ def test_low_confidence_downgrades_positive_early_case():
 
 def test_app_and_ledger_expose_frozen_signal():
     app=open('app.py',encoding='utf-8').read(); led=open('recommendation_ledger.py',encoding='utf-8').read()
-    assert 'APP_VERSION = "4.34.1"' in app
+    assert 'APP_VERSION = "4.35.0"' in app
     assert 'add_early_mispricing_window(ranked)' in app
     assert '"Tidig felprissättning"' in app
     assert '"Early Mispricing status"' in led

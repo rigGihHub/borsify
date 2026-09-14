@@ -16,7 +16,7 @@ def test_price_filter_is_in_sek():
     assert 'max_price_sek = st.number_input("Max pris"' in APP
 
 def test_country_filter_reduces_symbols_before_scan():
-    scan=APP.index('with st.spinner(f"Borsify analyserar {len(scan_symbols)} aktier…")')
+    scan=APP.index('st.status(f"Analyserar {len(scan_symbols)} aktier"')
     country_filter=APP.index('if _market_label_for_ticker(sym) in set(selected_countries)')
     assert country_filter < scan
 

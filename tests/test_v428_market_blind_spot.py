@@ -24,7 +24,7 @@ def test_low_confidence_degrades_positive_blind_spot():
 
 def test_app_integrates_and_does_not_rank_by_blind_spot():
     app=open('app.py',encoding='utf-8').read()
-    assert 'APP_VERSION = "4.34.1"' in app
+    assert 'APP_VERSION = "4.35.0"' in app
     assert 'add_market_blind_spot(ranked)' in app
     assert '"Early Mispricing", "Market Blind Spot", "Catalyst-to-Recognition"' in app
     assert '"Recognition Window payoff", "Market-Implied Expectations", "Deal Conviction", "Analysis Confidence"' in app

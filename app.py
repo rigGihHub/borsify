@@ -47,6 +47,7 @@ from search_explanation import (
     main_risk_text, data_status_text, near_miss_reason,
 )
 from fundamental_cache import clear_fundamentals_cache, CACHE_MAX_AGE_HOURS
+from scan_snapshot_cache import get_scan_snapshot, put_scan_snapshot, clear_scan_snapshots
 from scan_pipeline import assess_price_history
 from staged_scan_validation import validate_candidate_pool, activation_readiness
 from prefilter_history import save_prefilter_validation, get_prefilter_validation_history
@@ -249,7 +250,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "4.34.1"
+APP_VERSION = "4.35.0"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""
@@ -919,7 +920,7 @@ def build_daily_shortlist(df: pd.DataFrame, profile: str, limit: int = 5) -> pd.
     return ranked.head(limit).copy()
 
 
-def scan_universe(symbols: list[str]) -> tuple[pd.DataFrame, list[str]]:
+def scan_universe(symbols: list[str], progress_callback=None) -> tuple[pd.DataFrame, list[str]]:
     """Price-first scan with persistent fundamentals caching.
 
     Stage 1 validates quote/history data before any expensive Yahoo get_info call.
@@ -943,6 +944,8 @@ def scan_universe(symbols: list[str]) -> tuple[pd.DataFrame, list[str]]:
 
     price_started = time.perf_counter()
     price_map = fetch_bulk_price_history(tuple(symbols))
+    if callable(progress_callback):
+        progress_callback("prices", len(price_map), len(symbols))
     usable_histories: dict[str, pd.DataFrame] = {}
 
     for sym in symbols:
@@ -973,7 +976,8 @@ def scan_universe(symbols: list[str]) -> tuple[pd.DataFrame, list[str]]:
 
     fundamentals: dict[str, dict[str, Any]] = {}
     fundamental_started = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=min(6, max(1, len(usable_histories)))) as executor:
+    completed_fundamentals = 0
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(usable_histories)))) as executor:
         futures = {executor.submit(fetch_fundamentals, sym): sym for sym in usable_histories}
         for future in as_completed(futures):
             sym = futures[future]
@@ -991,6 +995,9 @@ def scan_universe(symbols: list[str]) -> tuple[pd.DataFrame, list[str]]:
                     "Valuta": "SEK", "Fundamental hämtad": "—",
                 }
                 errors.append(f"{sym}: fundamentaldata {type(exc).__name__}")
+            completed_fundamentals += 1
+            if callable(progress_callback):
+                progress_callback("fundamentals", completed_fundamentals, len(usable_histories))
     metrics["fundamental_seconds"] = round(time.perf_counter() - fundamental_started, 3)
 
     for sym, hist in usable_histories.items():
@@ -6656,6 +6663,7 @@ def main() -> None:
         try:
             cleared_fundamentals = clear_fundamentals_cache(DB_PATH)
             st.session_state["bq_manual_refresh_cleared_fundamentals"] = int(cleared_fundamentals)
+            st.session_state["bq_manual_refresh_cleared_scans"] = int(clear_scan_snapshots(DB_PATH))
         except Exception as exc:
             st.session_state["bq_manual_refresh_error"] = f"Beständig fundamentalcache kunde inte rensas: {exc}"
         st.info("Hämtar färsk kurs-, bolags-, analytiker- och rapportdata och räknar om analysen …")
@@ -6799,7 +6807,6 @@ def main() -> None:
     else:
         symbols = []
 
-    if refresh: st.cache_data.clear()
     if not symbols:
         st.warning("Inga aktier finns kvar med de valda länderna. Välj minst ett land.")
         st.stop()
@@ -6824,8 +6831,35 @@ def main() -> None:
         st.stop()
 
     start = time.perf_counter()
-    with st.spinner(f"Borsify analyserar {len(scan_symbols)} aktier…"):
-        raw_df, errors = scan_universe(scan_symbols)
+    raw_df, scan_snapshot = get_scan_snapshot(DB_PATH, scan_symbols, max_age_minutes=120) if not refresh else (pd.DataFrame(), {"hit": False, "reason": "manual_refresh"})
+    errors: list[str] = []
+    if bool(scan_snapshot.get("hit")):
+        age_minutes = float(scan_snapshot.get("age_minutes", 0) or 0)
+        st.success(f"Visar senast kompletta analys direkt · {len(raw_df)} aktier · sparad för {age_minutes:.0f} min sedan.")
+        st.session_state["bq_scan_metrics"] = {
+            "requested": len(scan_symbols), "price_usable": len(raw_df),
+            "snapshot_hit": True, "snapshot_age_minutes": age_minutes,
+            "price_seconds": 0.0, "fundamental_seconds": 0.0,
+        }
+    else:
+        _scan_status = st.status(f"Analyserar {len(scan_symbols)} aktier", expanded=True)
+        _scan_progress = st.progress(0, text="Förbereder kurshämtning …")
+
+        def _show_scan_progress(stage: str, completed: int, total: int) -> None:
+            denominator = max(1, int(total))
+            if stage == "prices":
+                share = min(0.30, 0.30 * completed / denominator)
+                label = f"Kursdata {completed}/{denominator}"
+            else:
+                share = 0.30 + 0.65 * completed / denominator
+                label = f"Bolagsdata {completed}/{denominator}"
+            _scan_progress.progress(min(95, int(round(share * 100))), text=label)
+
+        raw_df, errors = scan_universe(scan_symbols, progress_callback=_show_scan_progress)
+        if not raw_df.empty:
+            put_scan_snapshot(DB_PATH, scan_symbols, raw_df)
+        _scan_progress.progress(100, text=f"Grundanalys klar · {len(raw_df)} aktier")
+        _scan_status.update(label="Grundanalys klar", state="complete", expanded=False)
     if raw_df.empty:
         st.error("Ingen marknadsdata kunde hämtas. Yahoo Finance kan tillfälligt begränsa anrop.")
         if errors: st.code("\n".join(errors[:12]))

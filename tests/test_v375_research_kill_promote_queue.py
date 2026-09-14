@@ -53,6 +53,6 @@ def test_summary_prioritises_review_over_promotion():
 
 def test_app_contains_research_queue_and_release_version():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.1"' in app
+    assert 'APP_VERSION = "4.35.0"' in app
     assert "Research Kill/Promote Queue" in app
     assert "build_research_queue(signal_scorecard)" in app

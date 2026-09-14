@@ -68,7 +68,7 @@ def test_app_and_ranking_wire_release():
     app=open("app.py",encoding="utf-8").read()
     rank=open("horizon_rankings.py",encoding="utf-8").read()
     ledger=open("recommendation_ledger.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.1"' in app
+    assert 'APP_VERSION = "4.35.0"' in app
     assert "Mispriced acceleration" in app
     assert "add_mispriced_acceleration(ranked)" in app
     assert "add_mispriced_acceleration(out)" in rank

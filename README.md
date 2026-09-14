@@ -1,4 +1,14 @@
-# Borsify v4.34.1
+# Borsify v4.35.0
+
+## v4.35.0 – Fast Resume
+
+- Sparar den senast kompletta marknadsscanningen per exakt tickeruniversum i lokal SQLite-cache i två timmar.
+- Återställer även den underliggande kurshistoriken så att riskmått och ranking räknas på samma data som originalkörningen.
+- Vanliga appöppningar kan visa den kompletta analysen direkt utan nya Yahoo-anrop när en färsk snapshot finns.
+- Manuell uppdatering rensar både snapshot-, Streamlit- och fundamentalcache och gör en verkligt färsk körning.
+- Visar separat progress för kursdata och bolagsdata under en full scanning.
+- Ökar fundamentalhämtningen försiktigt från sex till åtta samtidiga arbetare.
+- Ingen prisbaserad förgallring, rankingändring eller ny positiv signal införs.
 
 ## v4.34.1 – Direct public launch
 

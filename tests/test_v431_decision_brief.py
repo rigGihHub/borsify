@@ -32,6 +32,6 @@ def test_missing_evidence_is_exposed_not_invented():
 def test_app_wires_brief_after_recognition_without_ranking_effect():
     app = open("app.py", encoding="utf-8").read()
     rankings = open("horizon_rankings.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.1"' in app
+    assert 'APP_VERSION = "4.35.0"' in app
     assert "add_decision_briefs(ranked)" in app
     assert "Decision Brief" not in rankings

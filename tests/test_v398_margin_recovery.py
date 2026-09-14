@@ -35,7 +35,7 @@ def test_app_and_ranking_wired():
     app=open("app.py",encoding="utf-8").read()
     rank=open("horizon_rankings.py",encoding="utf-8").read()
     ledger=open("recommendation_ledger.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.1"' in app
+    assert 'APP_VERSION = "4.35.0"' in app
     assert "add_margin_recovery_before_consensus(ranked)" in app
     assert "add_margin_recovery_before_consensus(out)" in rank
     assert '"Deal Conviction Score"' in rank

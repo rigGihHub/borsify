@@ -28,6 +28,6 @@ def test_estimate_date_is_capture_date_not_fake_historical_timestamp():
 
 def test_app_wires_tracker_but_not_deal_conviction():
     app=open("app.py",encoding="utf-8").read(); deal=open("deal_conviction.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.34.1"' in app
+    assert 'APP_VERSION = "4.35.0"' in app
     assert "save_events(" in app
     assert "Inflection Sequence lead days" not in deal
