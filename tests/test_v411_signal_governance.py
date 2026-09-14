@@ -23,7 +23,7 @@ def test_high_redundancy_prioritises_merge_review():
 
 def test_app_has_no_hardcoded_old_snapshot_date():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.35.0"' in app
+    assert 'APP_VERSION = "4.36.0"' in app
     assert '"2026-09-09"' not in app
     assert "_borsify_today()" in app
     assert "Signal Kill / Promote Candidates" in app

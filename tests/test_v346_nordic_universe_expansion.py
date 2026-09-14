@@ -6,7 +6,7 @@ APP = (ROOT / 'app.py').read_text(encoding='utf-8')
 
 
 def test_version_and_default_market_remain_scandinavian():
-    assert 'APP_VERSION = "4.35.0"' in APP
+    assert 'APP_VERSION = "4.36.0"' in APP
     assert 'index=list(MARKET_CONFIGS).index("Sverige + Norge + Danmark")' in APP
 
 

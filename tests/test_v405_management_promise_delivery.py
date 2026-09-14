@@ -27,6 +27,6 @@ def test_delivery_rate_requires_actual_same_metric():
 
 def test_app_exposes_feature_without_deal_conviction_weight():
     app=open("app.py",encoding="utf-8").read(); deal=open("deal_conviction.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.35.0"' in app
+    assert 'APP_VERSION = "4.36.0"' in app
     assert "Management Promise vs Delivery" in app
     assert "Management promise" not in deal

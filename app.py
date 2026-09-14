@@ -48,6 +48,7 @@ from search_explanation import (
 )
 from fundamental_cache import clear_fundamentals_cache, CACHE_MAX_AGE_HOURS
 from scan_snapshot_cache import get_scan_snapshot, put_scan_snapshot, clear_scan_snapshots
+from first_choice_gate import add_first_choice_gate
 from scan_pipeline import assess_price_history
 from staged_scan_validation import validate_candidate_pool, activation_readiness
 from prefilter_history import save_prefilter_validation, get_prefilter_validation_history
@@ -250,7 +251,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "4.35.0"
+APP_VERSION = "4.36.0"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""
@@ -918,6 +919,59 @@ def build_daily_shortlist(df: pd.DataFrame, profile: str, limit: int = 5) -> pd.
 
     ranked = rank_close_daily_candidates(pool)
     return ranked.head(limit).copy()
+
+
+def add_full_deal_evidence(df: pd.DataFrame, horizon: str) -> pd.DataFrame:
+    """Apply the existing advisory evidence stack without creating a new score."""
+    ranked = add_action_signals(df, horizon)
+    ranked = add_entry_timing(ranked, horizon)
+    ranked = add_company_quality(ranked)
+    ranked = add_position_entry_guidance(ranked)
+    ranked = add_good_deal(ranked, horizon)
+    ranked = add_negative_overreaction(ranked)
+    ranked = add_mispriced_acceleration(ranked)
+    ranked = add_hidden_inflection(ranked)
+    ranked = add_quality_compounder_ignored(ranked, horizon)
+    ranked = add_underfollowed_quality(ranked, horizon)
+    ranked = add_earnings_power_noise(ranked, horizon)
+    ranked = add_operating_leverage_setup(ranked, horizon)
+    ranked = add_balance_sheet_optionality(ranked, horizon)
+    ranked = add_cash_conversion_inflection(ranked)
+    ranked = add_margin_recovery_before_consensus(ranked)
+    ranked = add_revision_breadth(ranked)
+    ranked = add_deal_conviction(ranked, horizon)
+    ranked = add_analysis_confidence(ranked)
+    ranked = add_confidence_adjusted_decision(ranked)
+    ranked = add_exceptional_deal_nose(ranked, horizon)
+    ranked = add_value_trap_test(ranked)
+    ranked = add_early_mispricing_window(ranked)
+    ranked = add_market_blind_spot(ranked)
+    ranked = add_catalyst_to_recognition(ranked)
+    ranked = add_recognition_window(ranked)
+    ranked = add_market_implied_expectations(ranked)
+    ranked = add_decision_briefs(ranked)
+    return add_business_management_intelligence(ranked)
+
+
+def build_evidence_gated_shortlist(df: pd.DataFrame, profile: str, limit: int = 5) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Select today's card from a diverse finalist pool and expose every blocker.
+
+    The gate is deliberately not an alpha score. It only prevents a red entry,
+    likely value trap, red company assessment or low-confidence analysis from being
+    presented as a strong first choice. The incumbent score remains untouched.
+    """
+    if df is None or df.empty:
+        empty = df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
+        return empty, empty
+    finalists = build_discovery_pool(df, max_candidates=min(12, len(df)))
+    finalists = add_full_deal_evidence(finalists, "year")
+    finalists = add_case_readiness(finalists, "long")
+    cases = pd.DataFrame([_daily_case(row, profile) for _, row in finalists.iterrows()], index=finalists.index)
+    finalists = finalists.drop(columns=[c for c in cases.columns if c in finalists.columns], errors="ignore").join(cases)
+
+    finalists = add_first_choice_gate(finalists)
+    approved = rank_close_daily_candidates(finalists[finalists["Förstaval godkänd"]].copy())
+    return approved.head(limit).copy(), finalists
 
 
 def scan_universe(symbols: list[str], progress_callback=None) -> tuple[pd.DataFrame, list[str]]:
@@ -4375,24 +4429,28 @@ def render_overview(
         first_risk = plain_finance_text(str(first.get("Kontrollera", "Kontrollera att den senaste bolagsinformationen fortfarande gäller.")))
 
         with st.container(border=True):
-            st.caption("1 · FÖRSTAVAL")
+            st.caption("1 · EVIDENSGRANSKAT FÖRSTAVAL")
             st.markdown(f"### {first_name}")
             score_text = f" · Borsify {first_score:.0f}/100" if np.isfinite(first_score) else ""
             st.caption(f"{first_ticker}{score_text}")
-            st.markdown(f"**Varför nu:** {first_why}")
-            st.caption(f"Risk: {first_risk}")
+            st.markdown(f"**Beslut:** {first.get('Signal', '—')} · {first.get('Signal kort', '')}")
+            st.markdown(f"**Tes:** {plain_finance_text(first.get('Decision Brief tes', first_why))}")
+            st.markdown(f"**Varför marknaden kan ha fel:** {plain_finance_text(first.get('Decision Brief market wrong', '—'))}")
+            st.markdown(f"**Vad kan stänga gapet:** {plain_finance_text(first.get('Decision Brief recognition', '—'))}")
+            st.markdown(f"**Timing:** {first.get('Decision Brief timing', '❔ Okänd')}")
+            st.markdown(f"**Största risk:** {plain_finance_text(first.get('Decision Brief risk', first_risk))}")
+            st.caption(f"Datatillit: {first.get('Decision Brief confidence', first.get('Analysis Confidence', '—'))}")
             with st.expander(f"Visa analysen av {first_ticker}", expanded=False):
                 render_detail(first, profile, key_prefix="overview_first")
 
         if len(focus_cases) > 1:
             st.caption("ALTERNATIV")
-            alt_cols = st.columns(min(2, len(focus_cases) - 1))
             for pos in range(1, len(focus_cases)):
                 case = focus_cases.iloc[pos]
                 score = _num(case.get("Borsify Score"))
                 name = str(case.get("Namn", case.get("Ticker", "—")))
                 ticker = str(case.get("Ticker", "—"))
-                with alt_cols[pos - 1].container(border=True):
+                with st.container(border=True):
                     st.markdown(f"**{pos + 1}. {name}**")
                     score_text = f" · {score:.0f}/100" if np.isfinite(score) else ""
                     st.caption(f"{ticker}{score_text}")
@@ -7014,7 +7072,8 @@ def main() -> None:
     discovery_pool_global = build_discovery_pool(filtered, max_candidates=min(24, len(filtered)))
     st.session_state["bq_discovery_coverage"] = discovery_coverage_summary(filtered, discovery_pool_global)
     top = filtered.head(top_n).copy()
-    daily_shortlist = build_daily_shortlist(filtered, profile, limit=min(5, len(filtered)))
+    daily_shortlist, evidence_finalists = build_evidence_gated_shortlist(filtered, profile, limit=min(5, len(filtered)))
+    st.session_state["bq_evidence_finalists"] = evidence_finalists
     elapsed = time.perf_counter() - start
     if isinstance(st.session_state.get("bq_scan_metrics"), dict):
         st.session_state["bq_scan_metrics"]["analysis_seconds"] = round(analysis_seconds, 3)
@@ -7464,34 +7523,7 @@ def main() -> None:
                     st.info("Ingen aktie uppfyller Borsifys krav i den här kategorin just nu. Hellre tomt än ett svagt köpcase.")
                     return ranked
 
-                ranked = add_action_signals(ranked, horizon)
-                ranked = add_entry_timing(ranked, horizon)
-                ranked = add_company_quality(ranked)
-                ranked = add_position_entry_guidance(ranked)
-                ranked = add_good_deal(ranked, horizon)
-                ranked = add_negative_overreaction(ranked)
-                ranked = add_mispriced_acceleration(ranked)
-                ranked = add_hidden_inflection(ranked)
-                ranked = add_quality_compounder_ignored(ranked, horizon)
-                ranked = add_underfollowed_quality(ranked, horizon)
-                ranked = add_earnings_power_noise(ranked, horizon)
-                ranked = add_operating_leverage_setup(ranked, horizon)
-                ranked = add_balance_sheet_optionality(ranked, horizon)
-                ranked = add_cash_conversion_inflection(ranked)
-                ranked = add_margin_recovery_before_consensus(ranked)
-                ranked = add_revision_breadth(ranked)
-                ranked = add_deal_conviction(ranked, horizon)
-                ranked = add_analysis_confidence(ranked)
-                ranked = add_confidence_adjusted_decision(ranked)
-                ranked = add_exceptional_deal_nose(ranked, horizon)
-                ranked = add_value_trap_test(ranked)
-                ranked = add_early_mispricing_window(ranked)
-                ranked = add_market_blind_spot(ranked)
-                ranked = add_catalyst_to_recognition(ranked)
-                ranked = add_recognition_window(ranked)
-                ranked = add_market_implied_expectations(ranked)
-                ranked = add_decision_briefs(ranked)
-                ranked = add_business_management_intelligence(ranked)
+                ranked = add_full_deal_evidence(ranked, horizon)
                 # Entry timing may downgrade the action wording, but never upgrades a weak case.
                 _red = ranked["Ingångsläge nivå"].eq("red")
                 _orange = ranked["Ingångsläge nivå"].eq("orange")

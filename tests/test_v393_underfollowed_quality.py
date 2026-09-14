@@ -42,7 +42,7 @@ def test_app_and_ranking_wire_release():
     app=open("app.py",encoding="utf-8").read()
     rank=open("horizon_rankings.py",encoding="utf-8").read()
     ledger=open("recommendation_ledger.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.35.0"' in app
+    assert 'APP_VERSION = "4.36.0"' in app
     assert "Underfollowed Quality" in app
     assert "add_underfollowed_quality(ranked, horizon)" in app
     assert "add_underfollowed_quality(out, horizon)" in rank

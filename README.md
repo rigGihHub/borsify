@@ -1,4 +1,13 @@
-# Borsify v4.35.0
+# Borsify v4.36.0
+
+## v4.36.0 – Evidence-gated First Choice
+
+- Startsidans förstaval hämtas nu från en diversifierad finalistpool med flera befintliga upptäcktslinser, inte bara de högsta breda poängen.
+- Samma fulla affärsstack som i horisontvyerna körs innan förstavalet presenteras.
+- Trolig value trap, rött köpläge, röd bolagsbedömning eller lågt analysförtroende blockerar etiketten starkt förstaval.
+- Gaten skapar inget nytt score och ändrar inte Borsify Score eller huvudrankingen.
+- Förstakortet visar tes, möjlig felprissättning, recognition-path, timing, största risk och datatillit direkt.
+- Alternativen visas i en kolumn för bättre mobil läsbarhet.
 
 ## v4.35.0 – Fast Resume
 

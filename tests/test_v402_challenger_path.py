@@ -40,7 +40,7 @@ def test_paths_only_for_number_two_and_three():
 
 def test_app_wires_v402():
     app=open('app.py',encoding='utf-8').read()
-    assert 'APP_VERSION = "4.35.0"' in app
+    assert 'APP_VERSION = "4.36.0"' in app
     assert 'from challenger_path import challenger_paths' in app
     assert 'Vad krävs för att #2 eller #3 ska bli #1?' in app
     assert 'villkor, inte prognoser' in app

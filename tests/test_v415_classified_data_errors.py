@@ -66,6 +66,6 @@ def test_fundamental_timeout_surfaces_classified_error(monkeypatch,tmp_path):
 def test_app_version_and_provenance_field():
     app=open("app.py",encoding="utf-8").read()
     ledger=open("recommendation_ledger.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.35.0"' in app
+    assert 'APP_VERSION = "4.36.0"' in app
     assert "Deep source error types" in app
     assert '"Deep source error types"' in ledger

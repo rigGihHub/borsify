@@ -14,7 +14,7 @@ def test_negative_signals_block_hidden_inflection():
 
 def test_app_and_ranking_wired():
     app=open("app.py",encoding="utf-8").read(); rank=open("horizon_rankings.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.35.0"' in app
+    assert 'APP_VERSION = "4.36.0"' in app
     assert "Hidden inflection" in app
     assert "add_hidden_inflection(ranked)" in app
     assert "add_hidden_inflection(out)" in rank

@@ -49,6 +49,6 @@ def test_summary_prioritises_negative_review():
 
 def test_app_contains_dossier_and_release_version():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "4.35.0"' in app
+    assert 'APP_VERSION = "4.36.0"' in app
     assert "Research Review Dossier" in app
     assert "build_review_dossiers(research_queue)" in app

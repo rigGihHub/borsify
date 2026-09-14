@@ -33,4 +33,4 @@ def test_us_expansion_contains_additional_large_and_mid_cap_candidates():
 
 def test_release_version_is_289():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.35.0"' in app
+    assert 'APP_VERSION = "4.36.0"' in app

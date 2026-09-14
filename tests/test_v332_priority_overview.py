@@ -4,11 +4,11 @@ APP = Path("app.py").read_text(encoding="utf-8")
 
 
 def test_version():
-    assert 'APP_VERSION = "4.35.0"' in APP
+    assert 'APP_VERSION = "4.36.0"' in APP
 
 
 def test_overview_has_one_clear_first_choice():
-    assert '1 · FÖRSTAVAL' in APP
+    assert '1 · EVIDENSGRANSKAT FÖRSTAVAL' in APP
     assert 'Borsifys starkaste köpcase just nu.' in APP
 
 
