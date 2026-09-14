@@ -106,3 +106,15 @@ def purge_old_fundamentals(
             (cutoff,),
         )
         return int(cur.rowcount or 0)
+
+
+def clear_fundamentals_cache(db_path: str | Path) -> int:
+    """Remove all persistent fundamental snapshots before an explicit manual refresh.
+
+    This is intentionally separate from normal TTL expiry: ordinary reruns keep the
+    persistent cache for speed, while the user-facing refresh action can guarantee a
+    fresh provider request on the next scan.
+    """
+    with _connect(db_path) as conn:
+        cur=conn.execute("DELETE FROM fundamental_cache")
+        return int(cur.rowcount or 0)

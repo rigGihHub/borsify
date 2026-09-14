@@ -78,6 +78,23 @@ def _debt_change(balance: pd.DataFrame | None) -> float:
         return latest / prior - 1
     return np.nan
 
+def _latest_net_debt(balance: pd.DataFrame | None) -> float:
+    """Latest total debt minus cash/cash-equivalents when both are observable."""
+    debt = _find_row(balance, ["Total Debt"])
+    cash = _find_row(balance, [
+        "Cash Cash Equivalents And Short Term Investments",
+        "Cash And Cash Equivalents",
+        "Cash",
+    ])
+    if debt.empty or cash.empty:
+        return np.nan
+    common = debt.index.intersection(cash.index)
+    if len(common) == 0:
+        return np.nan
+    net = pd.to_numeric(debt.loc[common], errors="coerce") - pd.to_numeric(cash.loc[common], errors="coerce")
+    net = net.dropna().sort_index(ascending=False)
+    return _latest(net)
+
 
 def build_capital_allocation_metrics(
     cashflow: pd.DataFrame | None,
@@ -123,6 +140,7 @@ def build_capital_allocation_metrics(
         "Kapitalallokering emissionsyield": issuance_yield,
         "Kapitalallokering kontantutdelningsyield": dividend_yield_cash,
         "Kapitalallokering skuldtrend": _debt_change(balance),
+        "Kapitalallokering nettoskuld": _latest_net_debt(balance),
     }
 
 

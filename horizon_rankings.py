@@ -11,6 +11,19 @@ from relative_strength import add_relative_strength, relative_strength_label
 from market_regime import add_market_regime, filter_market_regime_eligible, market_regime_user_text
 from case_readiness import add_case_readiness, filter_top_case_ready
 from liquidity_guard import add_liquidity_guard, filter_execution_ready
+from good_deal import add_good_deal
+from negative_overreaction import add_negative_overreaction
+from mispriced_acceleration import add_mispriced_acceleration
+from hidden_inflection import add_hidden_inflection
+from quality_compounder_ignored import add_quality_compounder_ignored
+from underfollowed_quality import add_underfollowed_quality
+from earnings_power_noise import add_earnings_power_noise
+from operating_leverage_setup import add_operating_leverage_setup
+from balance_sheet_optionality import add_balance_sheet_optionality
+from cash_conversion_inflection import add_cash_conversion_inflection
+from margin_recovery_before_consensus import add_margin_recovery_before_consensus
+from revision_breadth import add_revision_breadth
+from deal_conviction import add_deal_conviction
 
 def _num(v: Any) -> float:
     try:
@@ -153,6 +166,23 @@ def top_ranked(df: pd.DataFrame, horizon: str, limit: int = 3) -> pd.DataFrame:
     if out.empty:
         return out
 
+    # Good Deal is a conservative tie-break inside the already-approved universe.
+    # It cannot rescue a failed gate, but it can prefer unpriced/asymmetric cases
+    # over equally strong cases where expectations and price have already run.
+    out=add_good_deal(out,horizon)
+    out=add_negative_overreaction(out)
+    out=add_mispriced_acceleration(out)
+    out=add_hidden_inflection(out)
+    out=add_quality_compounder_ignored(out, horizon)
+    out=add_underfollowed_quality(out, horizon)
+    out=add_earnings_power_noise(out, horizon)
+    out=add_operating_leverage_setup(out, horizon)
+    out=add_balance_sheet_optionality(out, horizon)
+    out=add_cash_conversion_inflection(out)
+    out=add_margin_recovery_before_consensus(out)
+    out=add_revision_breadth(out)
+    out=add_deal_conviction(out,horizon)
+
     # Risk/reward is a secondary ranking input for the two short horizons. It can
     # separate otherwise similar candidates, but does not override the core buy gate.
     if gate_horizon in {"day","medium"}:
@@ -162,13 +192,13 @@ def top_ranked(df: pd.DataFrame, horizon: str, limit: int = 3) -> pd.DataFrame:
         # Relative strength is deliberately only a tie-break/confirmation layer.
         # It cannot lift a failed candidate into the buy list.
         out=out.sort_values(
-            [col,"Case Readiness","Relativ styrka","RR rangvärde","Datatäckning"],
-            ascending=[False,False,False,False,False]
+            [col,"Deal Conviction Score","Affärsläge rangvärde","Case Readiness","Relativ styrka","RR rangvärde","Datatäckning"],
+            ascending=[False,False,False,False,False,False,False]
         ).head(limit).copy()
     else:
         out=out.sort_values(
-            [col,"Case Readiness","Datatäckning"],
-            ascending=[False,False,False]
+            [col,"Deal Conviction Score","Affärsläge rangvärde","Case Readiness","Datatäckning"],
+            ascending=[False,False,False,False,False]
         ).head(limit).copy()
         out["RR plan"]=[build_risk_reward(r,gate_horizon) for _,r in out.iterrows()]
 

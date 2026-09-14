@@ -66,9 +66,9 @@ def snapshot_columns(horizon_type: str) -> list[str]:
     """
     common = [
         "Ticker", "Namn", "Pris", "Valuta", "Prisdatum", "Sektor", "Bransch",
-        "Datatäckning", "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
+        "Datatäckning", "Data Failure status", "Data Failure blockerare", "Data Failure försvagat", "Data Failure fungerande", "Data Failure penalty", "Data Failure förklaring", "Analysis Confidence", "Analysis Confidence Score", "Analysis Confidence nivå", "Analysis Confidence blockerare", "Analysis Confidence varningar", "Analysis Confidence förklaring", "Analysis Confidence datatäckning", "Analysis Confidence källhälsa", "Analysis Confidence bransch-KPI", "Analysis Confidence djup", "Analysis Confidence evidens", "Decision Support", "Decision Support quadrant", "Decision Support nivå", "Decision Support action", "Decision Support förklaring", "Decision Support conviction", "Decision Support confidence", "Deep source status", "Deep source errors", "Deep source error types", "Deep source attempts", "Deep source circuits open", "Deep source circuit open", "Deep source missing", "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
         "ROE", "Vinstmarginal", "Skuld/eget kapital", "Risk", "Värdering", "Kvalitet", "Marknadsläge",
-        "Fundamental hämtad", "_Fundamental cache",
+        "Fundamental hämtad", "_Fundamental cache", "Fundamental source status", "Fundamental source errors", "Fundamental source attempts", "Fundamental circuit open",
         "Idiosynkratisk volatilitet status", "Idiosynkratisk volatilitet",
         "Idiosynkratisk volatilitet andel", "Idiosynkratisk beta", "Idiosynkratisk volatilitet sessioner",
     ]
@@ -125,7 +125,7 @@ def snapshot_columns(horizon_type: str) -> list[str]:
         "Report Delta kursreaktion", "Report Delta fortsatt rörelse", "Report Delta förklaring",
         "Kapitalallokering nettoåterköp", "Kapitalallokering återköpsyield",
         "Kapitalallokering emissionsyield", "Kapitalallokering kontantutdelningsyield",
-        "Kapitalallokering skuldtrend", "Insider köp antal", "Insider köpare antal",
+        "Kapitalallokering skuldtrend", "Kapitalallokering nettoskuld", "Insider köp antal", "Insider köpare antal",
         "Insider sälj antal", "Insider köp värde", "Insider kluster", "Insider starkt kluster",
         "Insider period dagar", "Insider förklaring", "Ägarsignal status", "Ägarsignal kandidat",
         "Ägarsignal stark", "Ägarsignal positiva", "Ägarsignal varningar", "Ägarsignal förklaring",
@@ -145,6 +145,53 @@ def snapshot_columns(horizon_type: str) -> list[str]:
         "Riktkurs låg", "Riktkurs dispersion", "Riktkurs potential", "Konsensusförändring förklaring",
         "Förändringsbekräftelse kandidat", "Förändringsbekräftelse stark", "Förändringsbekräftelse positiva familjer",
         "Förändringsbekräftelse positiva familjer antal", "Förändringsbekräftelse negativa familjer",
+        "Negativ överreaktion", "Negativ överreaktion nivå", "Negativ överreaktion rangvärde",
+        "Negativ överreaktion prisstöt", "Negativ överreaktion stöd", "Negativ överreaktion varningar",
+        "Negativ överreaktion förklaring", "Fallande kniv varning",
+        "Mispriced acceleration", "Mispriced acceleration nivå", "Mispriced acceleration rangvärde",
+        "Mispriced acceleration familjer", "Mispriced acceleration stöd", "Mispriced acceleration varningar",
+        "Mispriced acceleration förklaring",
+        "Hidden inflection", "Hidden inflection nivå", "Hidden inflection rangvärde",
+        "Hidden inflection stöd", "Hidden inflection varningar", "Hidden inflection förklaring",
+        "Ignored compounder", "Ignored compounder nivå", "Ignored compounder rangvärde",
+        "Ignored compounder kvalitetspoäng", "Ignored compounder ointressepoäng",
+        "Ignored compounder stöd", "Ignored compounder varningar", "Ignored compounder förklaring",
+        "Underfollowed Quality", "Underfollowed Quality nivå", "Underfollowed Quality rangvärde",
+        "Underfollowed Quality kvalitetspoäng", "Underfollowed Quality analytiker", "Underfollowed Quality nyhetsflöde",
+        "Underfollowed Quality stöd", "Underfollowed Quality varningar", "Underfollowed Quality förklaring",
+        "Earnings power noise", "Earnings power noise nivå", "Earnings power noise rangvärde",
+        "Earnings power temporary verified", "Earnings power headline weakness",
+        "Earnings power stöd", "Earnings power varningar", "Earnings power förklaring",
+        "Operating leverage", "Operating leverage nivå", "Operating leverage rangvärde",
+        "Operating leverage stöd", "Operating leverage varningar", "Operating leverage förklaring",
+        "Operating leverage cost base verified",
+        "Balance-sheet optionality", "Balance-sheet optionality nivå", "Balance-sheet optionality rangvärde",
+        "Balance-sheet optionality nettoskuld", "Balance-sheet optionality nettokassa verifierad",
+        "Balance-sheet optionality stöd", "Balance-sheet optionality varningar", "Balance-sheet optionality förklaring",
+        "Cash conversion inflection", "Cash conversion inflection nivå", "Cash conversion inflection rangvärde",
+        "Cash conversion inflection stöd", "Cash conversion inflection varningar", "Cash conversion inflection förklaring",
+        "Margin recovery", "Margin recovery nivå", "Margin recovery rangvärde",
+        "Margin recovery stöd", "Margin recovery varningar", "Margin recovery förklaring",
+        "Revision breadth", "Revision breadth nivå", "Revision breadth rangvärde", "Revision breadth andel",
+        "Revision breadth stöd", "Revision breadth varningar", "Revision breadth förklaring",
+        "Deal Conviction", "Deal Conviction nivå", "Deal Conviction Score",
+        "Value Trap Test", "Value Trap verdict", "Value Trap nivå", "Value Trap support score", "Value Trap risk score", "Value Trap stöd", "Value Trap varningar", "Value Trap förklaring",
+        "Early Mispricing", "Early Mispricing status", "Early Mispricing nivå", "Early Mispricing Score", "Early Mispricing improvement families", "Early Mispricing muted reactions", "Early Mispricing stöd", "Early Mispricing motargument", "Early Mispricing förklaring",
+        "Market Blind Spot", "Market Blind Spot status", "Market Blind Spot nivå", "Market Blind Spot Score", "Market Blind Spot families", "Market Blind Spot reasons", "Market Blind Spot counter", "Market Blind Spot förklaring",
+        "Catalyst-to-Recognition", "Catalyst-to-Recognition status", "Catalyst-to-Recognition nivå", "Catalyst-to-Recognition Score", "Catalyst-to-Recognition mechanisms", "Catalyst-to-Recognition reasons", "Catalyst-to-Recognition warnings", "Catalyst-to-Recognition förklaring",
+        "Recognition Window", "Recognition Window status", "Recognition Window nivå", "Recognition Window Score", "Recognition Window timing input", "Recognition Window payoff", "Recognition Window payoff status", "Recognition Window observed upside", "Recognition Window reasons", "Recognition Window warnings", "Recognition Window förklaring",
+        "Market-Implied Expectations", "Market-Implied Expectations status", "Market-Implied Expectations nivå", "Market-Implied Expectations burden", "Market-Implied Expectations improvement families", "Market-Implied Expectations muted reactions", "Market-Implied Expectations evidence count", "Market-Implied Expectations stöd", "Market-Implied Expectations varningar", "Market-Implied Expectations förklaring",
+        "Decision Brief beslut", "Decision Brief kort", "Decision Brief tes", "Decision Brief market wrong", "Decision Brief expectations", "Decision Brief recognition", "Decision Brief timing", "Decision Brief payoff", "Decision Brief risk", "Decision Brief invalidation", "Decision Brief confidence",
+        "Deal Conviction oberoende familjer", "Deal Conviction familjer", "Deal Conviction negativa familjer",
+        "Deal Conviction förklaring",
+        "Business profile", "Business key KPIs", "Business observed generic KPIs", "Business KPI gaps", "Business KPI coverage",
+        "KPI Omsättning QoQ", "KPI Bruttomarginal", "KPI Rörelsemarginal", "KPI FCF QoQ", "KPI Lager QoQ", "KPI Skuld/eget kapital rapport", "KPI-specifika observerade", "KPI-specifika saknas", "KPI strukturerad täckning",
+        "KPI Inflection", "KPI Inflection nivå", "KPI Inflection confidence", "KPI Inflection stöd", "KPI Inflection varningar", "KPI Inflection ledande KPI observerad", "KPI Inflection förklaring",
+        "Inflection Sequence", "Inflection Sequence steg", "Inflection Sequence lead days", "Inflection Sequence förklaring",
+        "False Start status", "False Start mogna", "False Start confirmed", "False Start false", "False Start confirmation rate", "False Start median dagar", "False Start förklaring", "False Start frozen state",
+        "Management execution", "Management execution nivå", "Management execution stöd", "Management execution varningar",
+        "Management execution evidens", "Management execution förklaring",
+        "Management promise status", "Management promise antal", "Management promise verifierbara", "Management promise levererade", "Management promise träff", "Management promise förklaring",
         "Expectation Gap status", "Expectation Gap kandidat", "Expectation Gap stark", "Expectation Gap varning",
         "Expectation Gap förändringsfamiljer", "Expectation Gap bullish andel", "Expectation Gap analytiker antal",
         "Expectation Gap riktkurs potential", "Expectation Gap förklaring",
@@ -204,6 +251,14 @@ def snapshot_columns(horizon_type: str) -> list[str]:
         "Operativ avkastning/tillgångar senaste", "Operativ avkastning/tillgångar trend",
         "Mispricing Signal", "Mispricing Confidence", "Scenario Status", "Scenario Verdict",
         "Scenario Asymmetry", "Scenario Confidence", "Scenario Risk Label", "Scenario Note",
+        "Fundamental Value Range", "Fundamental Value Range status", "Fundamental Value Range confidence",
+        "Fundamental Value Range horizon years", "Fundamental Value Range bear low", "Fundamental Value Range bear high",
+        "Fundamental Value Range base low", "Fundamental Value Range base high",
+        "Fundamental Value Range bull low", "Fundamental Value Range bull high",
+        "Fundamental Value Range base return low", "Fundamental Value Range base return high",
+        "Fundamental Value Range summary", "Fundamental Value Range assumptions",
+        "Fundamental Value Range warnings", "Fundamental Value Range reason",
+        "Fundamental Value Range ranking effect",
         "Bear EPS growth", "Bear exit P/E", "Bear upside", "Base EPS growth", "Base exit P/E",
         "Base upside", "Bull EPS growth", "Bull exit P/E", "Bull upside",
         "Varför marknaden kan ha fel", "Devil's Advocate", "Deep fetch error",
@@ -561,3 +616,73 @@ def calibration_by_gate(recommendations: pd.DataFrame, outcomes: pd.DataFrame, h
             "Loss10": float((group["return_pct"] <= -0.10).mean()),
         })
     return pd.DataFrame(rows).sort_values(["MedianReturn", "Antal"], ascending=[False, False])
+def calibration_by_deal_conviction(recommendations: pd.DataFrame, outcomes: pd.DataFrame, horizon: str) -> dict[str, Any]:
+    """Prospective calibration of the Deal Conviction score frozen at recommendation time.
+
+    Never reconstructs Deal Conviction for older records. Rows without a frozen numeric
+    value are excluded, which avoids look-ahead / model-version leakage.
+    """
+    empty = {
+        "status": "För lite prospektiv conviction-data",
+        "eligible": 0,
+        "excluded_legacy": 0,
+        "table": pd.DataFrame(),
+        "monotonic": None,
+        "message": "Deal Conviction kalibreras först från rekommendationer där värdet faktiskt frystes vid beslutstillfället.",
+    }
+    if recommendations is None or recommendations.empty or outcomes is None or outcomes.empty:
+        return empty
+    if "Deal Conviction Score" not in recommendations.columns:
+        return empty
+    o=outcomes[outcomes["horizon"] == horizon].copy()
+    if o.empty:
+        return empty
+    keep=["record_id","Deal Conviction Score"]
+    if "Deal Conviction oberoende familjer" in recommendations.columns:
+        keep.append("Deal Conviction oberoende familjer")
+    merged=o.merge(recommendations[keep],on="record_id",how="left")
+    merged["conviction"]=pd.to_numeric(merged["Deal Conviction Score"],errors="coerce")
+    merged["return_pct"]=pd.to_numeric(merged["return_pct"],errors="coerce")
+    legacy=int(merged["conviction"].isna().sum())
+    valid=merged.dropna(subset=["conviction","return_pct"]).copy()
+    if valid.empty:
+        out=dict(empty); out["excluded_legacy"]=legacy; return out
+
+    bins=[-0.001,24.999,49.999,74.999,100.001]
+    labels=["0–24","25–49","50–74","75–100"]
+    valid["Convictiongrupp"]=pd.cut(valid["conviction"],bins=bins,labels=labels,include_lowest=True)
+    rows=[]
+    for label,g in valid.groupby("Convictiongrupp",observed=False):
+        if g.empty: continue
+        excess=pd.to_numeric(g.get("excess_return_pct"),errors="coerce") if "excess_return_pct" in g.columns else pd.Series(dtype=float)
+        rows.append({
+            "Conviction":str(label),
+            "Antal":int(len(g)),
+            "Medianutfall":float(g["return_pct"].median()),
+            "Snittutfall":float(g["return_pct"].mean()),
+            "Träff %":float((g["return_pct"]>0).mean()),
+            "≥ +10 %":float((g["return_pct"]>=.10).mean()),
+            "≤ −10 %":float((g["return_pct"]<=-.10).mean()),
+            "Median över index":float(excess.dropna().median()) if not excess.empty and excess.notna().any() else np.nan,
+        })
+    table=pd.DataFrame(rows)
+    # Monotonicity is descriptive only and requires enough observations in every compared bucket.
+    mature=table[table["Antal"]>=5].copy() if not table.empty else table
+    monotonic=None
+    if len(mature)>=3:
+        order={"0–24":0,"25–49":1,"50–74":2,"75–100":3}
+        mature["_o"]=mature["Conviction"].map(order)
+        mature=mature.sort_values("_o")
+        vals=mature["Medianutfall"].tolist()
+        monotonic=all(b>=a for a,b in zip(vals,vals[1:]))
+    status="Prospektiv conviction-data finns – ännu inte statistiskt bevis"
+    if len(valid)<20:
+        status="För lite prospektiv conviction-data för slutsats"
+    return {
+        "status":status,
+        "eligible":int(len(valid)),
+        "excluded_legacy":legacy,
+        "table":table,
+        "monotonic":monotonic,
+        "message":"Endast frysta point-in-time Deal Conviction-värden används. Tabellen är deskriptiv; Borsify ändrar inte vikter automatiskt från små kohorter.",
+    }
