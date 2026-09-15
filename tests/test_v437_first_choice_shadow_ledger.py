@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from first_choice_audit import build_first_choice_record, get_first_choice_records, save_first_choice_records
+from first_choice_audit import build_first_choice_record, get_first_choice_records, latest_first_choice, save_first_choice_records
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,10 +60,22 @@ def test_no_empty_symbol_is_persisted(tmp_path):
     assert save_first_choice_records(db, [record]) == 0
 
 
+def test_latest_choice_returns_only_frozen_gated_role(tmp_path):
+    db = tmp_path / "borsify.db"
+    captured = datetime(2026, 9, 15, 8, 30, tzinfo=timezone.utc)
+    save_first_choice_records(db, [
+        build_first_choice_record(_row("OLD"), "incumbent", "p", "m", captured),
+        build_first_choice_record(_row("NEW"), "evidence_gated", "p", "m", captured),
+    ])
+    latest = latest_first_choice(db, "p", "m")
+    assert latest is not None
+    assert latest["symbol"] == "NEW"
+
+
 def test_app_freezes_both_choices_without_changing_score():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     audit = (ROOT / "first_choice_audit.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.37.0"' in app
+    assert 'APP_VERSION = "4.38.0"' in app
     assert '"incumbent", profile, market' in app
     assert '"evidence_gated", profile, market' in app
     assert "bq_first_choice_gate_changed" in app

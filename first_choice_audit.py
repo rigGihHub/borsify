@@ -54,7 +54,8 @@ def build_first_choice_record(
         "Ticker", "Namn", "Pris", "Prisdatum", "Borsify Score", "Dagens relevans",
         "Value Trap verdict", "Ingångsläge nivå", "Bolagsbedömning nivå",
         "Analysis Confidence nivå", "Analysis Confidence Score", "Deal Conviction Score",
-        "Recognition Window status", "Decision Brief tes", "Decision Brief risk",
+        "Recognition Window status", "Decision Brief tes", "Decision Brief market wrong",
+        "Decision Brief recognition", "Decision Brief timing", "Decision Brief risk",
         "Förstaval godkänd", "Förstaval blockerare",
     ]
     snapshot = {field: _safe(row.get(field)) for field in frozen_fields}
@@ -118,3 +119,22 @@ def get_first_choice_records(db_path: str | Path, limit: int = 500) -> pd.DataFr
             "SELECT * FROM first_choice_audit ORDER BY captured_at DESC LIMIT ?",
             connection, params=(max(1, int(limit)),),
         )
+
+
+def latest_first_choice(db_path: str | Path, profile: str, market: str) -> dict[str, Any] | None:
+    """Return the latest genuinely frozen gated card; never synthesise one."""
+    with sqlite3.connect(str(db_path)) as connection:
+        _ensure_table(connection)
+        row = connection.execute(
+            """SELECT captured_at,symbol,snapshot_json FROM first_choice_audit
+               WHERE profile=? AND market=? AND role='evidence_gated'
+               ORDER BY captured_at DESC LIMIT 1""",
+            (str(profile), str(market)),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        snapshot = json.loads(str(row[2]))
+    except (TypeError, json.JSONDecodeError):
+        return None
+    return {"captured_at": str(row[0]), "symbol": str(row[1]), "snapshot": snapshot}

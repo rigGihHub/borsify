@@ -49,6 +49,6 @@ def test_small_samples_do_not_claim_edge():
 
 def test_app_exposes_decision_quality_calibration():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.37.0"' in app
+    assert 'APP_VERSION = "4.38.0"' in app
     assert "Decision Quality Calibration" in app
     assert "decision_quality_table" in app

@@ -49,7 +49,8 @@ from search_explanation import (
 from fundamental_cache import clear_fundamentals_cache, CACHE_MAX_AGE_HOURS
 from scan_snapshot_cache import get_scan_snapshot, put_scan_snapshot, clear_scan_snapshots
 from first_choice_gate import add_first_choice_gate
-from first_choice_audit import build_first_choice_record, save_first_choice_records
+from first_choice_audit import build_first_choice_record, save_first_choice_records, latest_first_choice
+from up_and_coming import select_up_and_coming
 from scan_pipeline import assess_price_history
 from staged_scan_validation import validate_candidate_pool, activation_readiness
 from prefilter_history import save_prefilter_validation, get_prefilter_validation_history
@@ -252,7 +253,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "4.37.0"
+APP_VERSION = "4.38.0"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""
@@ -4477,6 +4478,7 @@ def render_overview(
             with st.expander("Visa analysen", expanded=False):
                 render_detail(candidates.loc[choices[selected]], profile, key_prefix="overview")
 
+
         with st.expander("Fler val och verktyg", expanded=False):
             if not daily_shortlist.empty:
                 high_priority = int((daily_shortlist["Prioritet"] == "Hög").sum())
@@ -4513,6 +4515,44 @@ def render_overview(
             if idx:
                 st.write(f"{benchmark_name}: {idx['index']:.2f} ({fmt_pct(idx.get('daily'))})")
             st.caption(f"Borsify v{APP_VERSION}. Data kan ibland vara fördröjd eller saknas.")
+
+
+def render_up_and_coming(df: pd.DataFrame, profile: str) -> pd.DataFrame:
+    """Render smaller evidence-backed companies without promising future winners."""
+    st.markdown("## 🚀 Up and coming")
+    st.caption("Mindre bolag med observerad tillväxt och flera oberoende styrketecken. Ingen lista kan veta vilka som får en fantastisk framtid.")
+    pool = build_discovery_pool(df, max_candidates=min(24, len(df)))
+    reviewed = add_full_deal_evidence(pool, "year")
+    ranked = select_up_and_coming(reviewed, limit=10)
+    if ranked.empty:
+        st.info("Inget mindre bolag klarar kraven just nu. Borsify fyller inte listan med svaga eller dåligt verifierade case.")
+        return ranked
+    first = ranked.iloc[0]
+    with st.container(border=True):
+        st.caption("STARKAST OBSERVERADE EMERGING-CASE")
+        st.markdown(f"### {_stock_identity(first)}")
+        st.markdown(f"**{first.get('Up and coming', '—')}**")
+        st.write(plain_finance_text(first.get("Up and coming stöd", "—")))
+        st.markdown(f"**Tes:** {plain_finance_text(first.get('Decision Brief tes', '—'))}")
+        st.markdown(f"**Vad kan stänga gapet:** {plain_finance_text(first.get('Decision Brief recognition', '—'))}")
+        st.markdown(f"**Största risk:** {plain_finance_text(first.get('Decision Brief risk', '—'))}")
+        st.caption(f"Datatillit: {first.get('Decision Brief confidence', first.get('Analysis Confidence', '—'))}")
+    table = ranked.copy()
+    table.insert(0, "#", range(1, len(table) + 1))
+    table["Aktie"] = table.apply(_stock_identity, axis=1)
+    table["Börsvärde"] = pd.to_numeric(table.get("Börsvärde BSEK"), errors="coerce").map(lambda x: "—" if pd.isna(x) else f"{x:.1f} md SEK")
+    table["Tillväxt"] = pd.to_numeric(table.get("Omsättningstillväxt"), errors="coerce").map(lambda x: "—" if pd.isna(x) else f"{x:.0%}")
+    st.dataframe(table[["#", "Aktie", "Up and coming", "Börsvärde", "Tillväxt", "Up and coming evidensfamiljer"]], use_container_width=True, hide_index=True)
+    for rank, (_, row) in enumerate(ranked.iterrows(), start=1):
+        ticker = str(row.get("Ticker", "—"))
+        if st.button(f"{rank}. {_stock_identity(row)} →", key=f"open_upcoming_{ticker}_{rank}", use_container_width=True):
+            st.session_state["bq_open_upcoming_ticker"] = ticker
+    open_ticker = str(st.session_state.get("bq_open_upcoming_ticker") or "")
+    match = ranked[ranked["Ticker"].astype(str).eq(open_ticker)] if open_ticker else pd.DataFrame()
+    if not match.empty:
+        render_detail(match.iloc[0], profile, key_prefix=f"upcoming_{open_ticker}", horizon="year")
+    st.caption("Urvalet kräver verifierat börsvärde, tillväxt och minst tre evidensfamiljer. Det påverkar inte Borsify Score.")
+    return ranked
 
 def save_ai_usage(request_id: str, symbol: str, model: str, input_tokens: int, output_tokens: int, cost_usd: float) -> None:
     """Persist successful AI usage. Cloud persistence is per signed-in user; SQLite is the safe fallback."""
@@ -6901,6 +6941,24 @@ def main() -> None:
             "price_seconds": 0.0, "fundamental_seconds": 0.0,
         }
     else:
+        previous_choice = latest_first_choice(DB_PATH, profile, market)
+        if previous_choice:
+            previous_snapshot = previous_choice.get("snapshot", {}) or {}
+            try:
+                previous_time = pd.Timestamp(previous_choice.get("captured_at"))
+                if previous_time.tzinfo is None:
+                    previous_time = previous_time.tz_localize("UTC")
+                previous_age_hours = max(0.0, (pd.Timestamp.now(tz="UTC") - previous_time).total_seconds() / 3600.0)
+                previous_age = f"{previous_age_hours:.0f} timmar gammal"
+            except Exception:
+                previous_age = "ålder okänd"
+            with st.container(border=True):
+                st.caption(f"SENAST KOMPLETTA FÖRSTAVAL · {previous_age} · UPPDATERAS NU")
+                st.markdown(f"### {previous_snapshot.get('Namn') or previous_choice.get('symbol', '—')}")
+                st.caption(str(previous_choice.get("symbol", "—")))
+                st.markdown(f"**Tidigare tes:** {plain_finance_text(previous_snapshot.get('Decision Brief tes', '—'))}")
+                st.markdown(f"**Tidigare största risk:** {plain_finance_text(previous_snapshot.get('Decision Brief risk', '—'))}")
+                st.warning("Detta är föregående frysta analys, inte ett aktuellt köpråd. Färsk analys pågår.")
         _scan_status = st.status(f"Analyserar {len(scan_symbols)} aktier", expanded=True)
         _scan_progress = st.progress(0, text="Förbereder kurshämtning …")
 
@@ -7186,6 +7244,10 @@ def main() -> None:
         st.rerun()
     if _q3.button("♾️ Köp för resten av livet", use_container_width=True, key="quick_horizon_lifetime"):
         st.session_state["bq_horizon_focus"] = "lifetime"
+        st.session_state["main_page"] = "Fler aktier"
+        st.rerun()
+    if st.button("🚀 Visa bästa up and coming-aktierna", use_container_width=True, key="quick_up_and_coming"):
+        st.session_state["bq_horizon_focus"] = "upcoming"
         st.session_state["main_page"] = "Fler aktier"
         st.rerun()
 
@@ -7725,6 +7787,8 @@ def main() -> None:
             ranked_medium = pd.DataFrame()
             ranked_year = pd.DataFrame()
             ranked_lifetime = pd.DataFrame()
+            if _focus == "upcoming":
+                render_up_and_coming(filtered, profile)
             if not _focus or _focus == "medium":
                 ranked_medium = _horizon_section(
                     "⚡ Köp nu – sälj i närtid",

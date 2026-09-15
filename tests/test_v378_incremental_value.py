@@ -64,6 +64,6 @@ def test_apply_removes_incremental_blocker_only_when_measured():
 
 def test_app_wires_incremental_value_and_release_version():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.37.0"' in app
+    assert 'APP_VERSION = "4.38.0"' in app
     assert "apply_incremental_value(apply_dossier_robustness(build_review_dossiers(research_queue), recs, outs), recs, outs)" in app
     assert '"Incrementellt värde"' in app

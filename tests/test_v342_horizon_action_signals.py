@@ -58,4 +58,4 @@ def test_homepage_table_has_more_decision_context():
     assert 'Visa teknisk jämförelsetabell' in APP
     assert 'Vad betyder signalerna?' in APP
     assert 'Signal: {first.get' in APP
-    assert 'APP_VERSION = "4.37.0"' in APP
+    assert 'APP_VERSION = "4.38.0"' in APP

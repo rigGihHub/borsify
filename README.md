@@ -1,4 +1,13 @@
-# Borsify v4.37.0
+# Borsify v4.38.0
+
+## v4.38.0 – Up and Coming + Honest Cold Start
+
+- Ny direktknapp för mindre up and coming-bolag.
+- Kandidater kräver verifierat börsvärde 0,5–50 md SEK, faktisk tillväxt och minst tre oberoende evidensfamiljer.
+- Value traps, röd bolagsbedömning, rött köpläge, mycket hög skuld och låg analysconfidence blockeras.
+- Urvalet lovar inte framtida vinnare och påverkar inte Borsify Score.
+- Alla kandidater är klickbara till full analys och AI-frågor.
+- Vid kallstart visas senaste frysta förstaval omedelbart, tydligt märkt med ålder och att färsk analys pågår.
 
 ## v4.37.0 – First Choice Shadow Ledger
 
