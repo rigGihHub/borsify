@@ -42,6 +42,6 @@ def test_analysis_confidence_is_not_in_deal_conviction():
 def test_app_exposes_confidence_and_version():
     app=open("app.py",encoding="utf-8").read()
     ledger=open("recommendation_ledger.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.38.2"' in app
+    assert 'APP_VERSION = "4.39.0"' in app
     assert "assess_analysis_confidence" in app
     assert '"Analysis Confidence Score"' in ledger

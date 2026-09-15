@@ -49,6 +49,7 @@ from search_explanation import (
 from fundamental_cache import clear_fundamentals_cache, CACHE_MAX_AGE_HOURS
 from scan_snapshot_cache import get_scan_snapshot, put_scan_snapshot, clear_scan_snapshots
 from first_choice_gate import add_first_choice_gate
+from price_batching import partial_fallback_symbols, symbol_batches
 from first_choice_audit import build_first_choice_record, save_first_choice_records
 try:
     # Streamlit Cloud can briefly retain an older imported module while deploying a
@@ -261,7 +262,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "4.38.2"
+APP_VERSION = "4.39.0"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""
@@ -1002,24 +1003,41 @@ def scan_universe(symbols: list[str], progress_callback=None) -> tuple[pd.DataFr
         "fundamental_yahoo": 0,
         "fundamental_persistent_cache": 0,
         "single_price_fallbacks": 0,
+        "price_batches": 0,
+        "empty_price_batches": 0,
         "price_seconds": 0.0,
         "fundamental_seconds": 0.0,
     }
 
     price_started = time.perf_counter()
-    price_map = fetch_bulk_price_history(tuple(symbols))
-    if callable(progress_callback):
-        progress_callback("prices", len(price_map), len(symbols))
+    price_map: dict[str, pd.DataFrame] = {}
+    completed_prices = 0
+    for batch in symbol_batches(symbols, batch_size=40):
+        metrics["price_batches"] += 1
+        if callable(progress_callback):
+            progress_callback("prices", completed_prices, len(symbols))
+        batch_map = fetch_bulk_price_history(batch)
+        price_map.update(batch_map)
+        if not batch_map and len(batch) > 1:
+            metrics["empty_price_batches"] += 1
+            errors.append(
+                f"Kursbatch {metrics['price_batches']}: inget bulksvar för {len(batch)} aktier; "
+                "enskilda fallback-anrop hoppades över för att undvika rate-limit/låsning"
+            )
+        for sym in partial_fallback_symbols(batch, batch_map, max_fallbacks=8):
+            metrics["single_price_fallbacks"] += 1
+            fallback = fetch_single_price_history(sym)
+            if fallback is not None and not fallback.empty:
+                price_map[sym] = fallback
+        completed_prices += len(batch)
+        if callable(progress_callback):
+            progress_callback("prices", completed_prices, len(symbols))
     usable_histories: dict[str, pd.DataFrame] = {}
 
     for sym in symbols:
         hist = price_map.get(sym)
         if hist is None or hist.empty:
-            metrics["single_price_fallbacks"] += 1
-            hist = fetch_single_price_history(sym)
-
-        if hist is None or hist.empty:
-            errors.append(f"{sym}: ingen kurshistorik efter bulk + fallback")
+            errors.append(f"{sym}: ingen användbar kurshistorik efter batchhämtning")
             metrics["price_rejected_before_fundamentals"] += 1
             continue
 

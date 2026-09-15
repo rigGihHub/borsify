@@ -39,6 +39,6 @@ def test_deep_health_from_session_is_shown():
 
 def test_app_exposes_source_health_dashboard():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.38.2"' in app
+    assert 'APP_VERSION = "4.39.0"' in app
     assert "Datakällornas status" in app
     assert "build_source_health_rows" in app

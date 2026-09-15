@@ -46,7 +46,7 @@ def bulk_price_history(symbols: tuple[str, ...]) -> tuple[dict[str, pd.DataFrame
     data, _res = call_with_resilience(
         lambda: _yf().download(
             tickers=list(symbols), period="1y", interval="1d", auto_adjust=True,
-            actions=False, group_by="ticker", threads=True, progress=False,
+            actions=False, group_by="ticker", threads=True, progress=False, timeout=12,
         ),
         provider_key="yahoo:bulk_prices", context="bulk_price_history",
     )

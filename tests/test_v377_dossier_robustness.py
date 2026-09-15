@@ -61,5 +61,5 @@ def test_apply_only_removes_blockers_when_check_is_measured():
 
 def test_app_wires_robustness_and_release_version():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.38.2"' in app
+    assert 'APP_VERSION = "4.39.0"' in app
     assert "apply_dossier_robustness(build_review_dossiers(research_queue), recs, outs)" in app

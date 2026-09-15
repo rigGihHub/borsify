@@ -54,7 +54,7 @@ def test_missing_price_structure_returns_no_fake_zone():
 
 def test_app_exposes_better_entry_zone_and_release():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.38.2"' in app
+    assert 'APP_VERSION = "4.39.0"' in app
     assert "**Bättre ingångszon:**" in app
     assert '"Bättre ingång"' in app
     assert "inte en prognos eller garanterad köpnivå" in app
