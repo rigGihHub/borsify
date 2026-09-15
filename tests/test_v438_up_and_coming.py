@@ -73,7 +73,7 @@ def test_ranking_uses_evidence_then_growth_without_new_mega_score():
 
 def test_app_has_direct_button_clickable_list_and_honest_copy():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.38.1"' in app
+    assert 'APP_VERSION = "4.38.2"' in app
     assert "🚀 Visa bästa up and coming-aktierna" in app
     assert 'bq_horizon_focus"] = "upcoming"' in app
     assert "render_up_and_coming(filtered, profile)" in app

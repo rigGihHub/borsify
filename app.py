@@ -49,7 +49,15 @@ from search_explanation import (
 from fundamental_cache import clear_fundamentals_cache, CACHE_MAX_AGE_HOURS
 from scan_snapshot_cache import get_scan_snapshot, put_scan_snapshot, clear_scan_snapshots
 from first_choice_gate import add_first_choice_gate
-from first_choice_audit import build_first_choice_record, save_first_choice_records, latest_first_choice
+from first_choice_audit import build_first_choice_record, save_first_choice_records
+try:
+    # Streamlit Cloud can briefly retain an older imported module while deploying a
+    # commit that adds a new helper. Cold-start history is optional and must never
+    # prevent the core application from starting.
+    from first_choice_audit import latest_first_choice
+except ImportError:
+    def latest_first_choice(*_args, **_kwargs):
+        return None
 from up_and_coming import select_up_and_coming
 from scan_pipeline import assess_price_history
 from staged_scan_validation import validate_candidate_pool, activation_readiness
@@ -253,7 +261,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "4.38.1"
+APP_VERSION = "4.38.2"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""

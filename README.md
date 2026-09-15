@@ -1,4 +1,10 @@
-# Borsify v4.38.1
+# Borsify v4.38.2
+
+## v4.38.2 – Streamlit Import Hotfix
+
+- Gör den nya kallstartshistoriken bakåtkompatibel under Streamlit Clouds modulbyte vid deploy.
+- Om en äldre `first_choice_audit` tillfälligt ligger kvar startar kärnappen ändå; endast det valfria tidigare beslutskortet hoppas över.
+- Up and coming-urvalet och övriga analysfunktioner påverkas inte.
 
 ## v4.38.1 – Microcap + Avanza Guard
 

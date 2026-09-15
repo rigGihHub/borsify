@@ -33,7 +33,7 @@ def test_add_entry_timing_keeps_rows():
 
 def test_ui_has_direct_horizon_buttons_clickable_stocks_ai_and_version():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.38.1"' in app
+    assert 'APP_VERSION = "4.38.2"' in app
     assert "⚡ Köp nu · sälj snart" in app
     assert "📈 Köp nu · behåll 1 år" in app
     assert "♾️ Köp för resten av livet" in app

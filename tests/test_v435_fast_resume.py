@@ -50,7 +50,7 @@ def test_manual_clear_removes_snapshot(tmp_path):
 
 def test_app_wires_fast_resume_without_prefiltering():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.38.1"' in app
+    assert 'APP_VERSION = "4.38.2"' in app
     assert "get_scan_snapshot(DB_PATH, scan_symbols, max_age_minutes=120)" in app
     assert "put_scan_snapshot(DB_PATH, scan_symbols, raw_df)" in app
     assert "clear_scan_snapshots(DB_PATH)" in app

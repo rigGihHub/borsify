@@ -75,7 +75,7 @@ def test_latest_choice_returns_only_frozen_gated_role(tmp_path):
 def test_app_freezes_both_choices_without_changing_score():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     audit = (ROOT / "first_choice_audit.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.38.1"' in app
+    assert 'APP_VERSION = "4.38.2"' in app
     assert '"incumbent", profile, market' in app
     assert '"evidence_gated", profile, market' in app
     assert "bq_first_choice_gate_changed" in app

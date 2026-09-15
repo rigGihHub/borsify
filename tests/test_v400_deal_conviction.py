@@ -21,7 +21,7 @@ def test_short_horizon_ignores_long_duration_optionality_family():
 
 def test_app_and_ranking_use_conviction_instead_of_signal_stack():
     app=open("app.py",encoding="utf-8").read(); rank=open("horizon_rankings.py",encoding="utf-8").read(); ledger=open("recommendation_ledger.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.38.1"' in app
+    assert 'APP_VERSION = "4.38.2"' in app
     assert "add_deal_conviction(ranked, horizon)" in app
     assert '"Deal Conviction Score"' in rank
     assert '[col,"Revision breadth rangvärde"' not in rank

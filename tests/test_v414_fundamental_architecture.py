@@ -3,7 +3,7 @@ import fundamental_acquisition as fa
 
 def test_app_delegates_fundamentals():
     app=Path("app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.38.1"' in app
+    assert 'APP_VERSION = "4.38.2"' in app
     assert "_fetch_fundamentals_source(symbol, DB_PATH, major_currency, CACHE_MAX_AGE_HOURS)" in app
     assert "get_cached_fundamentals(DB_PATH" not in app
     assert "put_cached_fundamentals(DB_PATH" not in app

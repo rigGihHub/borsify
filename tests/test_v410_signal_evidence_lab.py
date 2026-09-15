@@ -33,6 +33,6 @@ def test_lab_never_claims_automatic_reweighting():
 
 def test_app_wires_lab_and_version():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.38.1"' in app
+    assert 'APP_VERSION = "4.38.2"' in app
     assert "Signal Evidence Lab" in app
     assert "build_signal_evidence" in app
