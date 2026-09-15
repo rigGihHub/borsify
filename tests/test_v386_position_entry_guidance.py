@@ -26,7 +26,7 @@ def test_dataframe_adds_guidance_columns():
 
 def test_app_wires_position_guidance_and_version():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.36.0"' in app
+    assert 'APP_VERSION = "4.37.0"' in app
     assert "add_position_entry_guidance(ranked)" in app
     assert '"Positionsråd"' in app
     assert "**Position:**" in app

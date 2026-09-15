@@ -32,7 +32,7 @@ def test_single_candidate_is_handled():
 
 def test_app_wires_top_pick_explainer_and_version():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.36.0"' in app
+    assert 'APP_VERSION = "4.37.0"' in app
     assert 'from top_pick_explainer import explain_top_pick' in app
     assert '#### Varför är den här #1?' in app
     assert 'Vad #2–#3 gör bättre' in app

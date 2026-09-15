@@ -51,7 +51,7 @@ def test_summary_never_auto_promotes_model():
 def test_release_ui_and_snapshot_fields_present():
     app=Path("app.py").read_text()
     ledger=Path("recommendation_ledger.py").read_text()
-    assert 'APP_VERSION = "4.36.0"' in app
+    assert 'APP_VERSION = "4.37.0"' in app
     assert "Expectation Gap · slår hypotesen vanlig positiv förändring?" in app
     assert '"Expectation Gap kandidat"' in ledger
     assert '"Förändringsbekräftelse kandidat"' in ledger

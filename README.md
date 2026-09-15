@@ -1,4 +1,12 @@
-# Borsify v4.36.0
+# Borsify v4.37.0
+
+## v4.37.0 – First Choice Shadow Ledger
+
+- Fryser dagens ursprungliga förstaval och det evidensgranskade förstavalet sida vid sida.
+- Sparar pris, datum, score, blockerare och centrala beslutsfält point-in-time.
+- Samma roll/ticker/profil/marknad sparas högst en gång per dag, så Streamlit-reruns skapar inte falska observationer.
+- Visar öppet om evidensgaten ändrade ettan eller behöll den.
+- Ingen historisk backfill, automatisk promotion eller rankingändring görs.
 
 ## v4.36.0 – Evidence-gated First Choice
 

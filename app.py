@@ -49,6 +49,7 @@ from search_explanation import (
 from fundamental_cache import clear_fundamentals_cache, CACHE_MAX_AGE_HOURS
 from scan_snapshot_cache import get_scan_snapshot, put_scan_snapshot, clear_scan_snapshots
 from first_choice_gate import add_first_choice_gate
+from first_choice_audit import build_first_choice_record, save_first_choice_records
 from scan_pipeline import assess_price_history
 from staged_scan_validation import validate_candidate_pool, activation_readiness
 from prefilter_history import save_prefilter_validation, get_prefilter_validation_history
@@ -251,7 +252,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "4.36.0"
+APP_VERSION = "4.37.0"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""
@@ -7074,6 +7075,22 @@ def main() -> None:
     top = filtered.head(top_n).copy()
     daily_shortlist, evidence_finalists = build_evidence_gated_shortlist(filtered, profile, limit=min(5, len(filtered)))
     st.session_state["bq_evidence_finalists"] = evidence_finalists
+    ungated_first = rank_close_daily_candidates(evidence_finalists.copy()).head(1) if not evidence_finalists.empty else pd.DataFrame()
+    gated_first = daily_shortlist.head(1)
+    st.session_state["bq_first_choice_gate_changed"] = bool(
+        not ungated_first.empty and not gated_first.empty
+        and str(ungated_first.iloc[0].get("Ticker")) != str(gated_first.iloc[0].get("Ticker"))
+    )
+    try:
+        first_choice_records = []
+        if not ungated_first.empty:
+            first_choice_records.append(build_first_choice_record(ungated_first.iloc[0], "incumbent", profile, market))
+        if not gated_first.empty:
+            first_choice_records.append(build_first_choice_record(gated_first.iloc[0], "evidence_gated", profile, market))
+        save_first_choice_records(DB_PATH, first_choice_records)
+        resolve_runtime_issue(st.session_state, "first_choice_audit")
+    except Exception as exc:
+        record_runtime_issue(st.session_state, "first_choice_audit", exc, "jämförelsen mellan gammalt och evidensgranskat förstaval kunde inte frysas")
     elapsed = time.perf_counter() - start
     if isinstance(st.session_state.get("bq_scan_metrics"), dict):
         st.session_state["bq_scan_metrics"]["analysis_seconds"] = round(analysis_seconds, 3)
@@ -7129,6 +7146,10 @@ def main() -> None:
                 f"Datakontroll: {cache_hits} bolag från cache · {yahoo_fund} nya hämtningar"
                 + (f" · {rejected_early} stoppades tidigt på grund av kursdata" if rejected_early else "")
             )
+        if st.session_state.get("bq_first_choice_gate_changed"):
+            st.caption("Förstaval-gaten ändrade dagens etta. Både den ursprungliga och den evidensgranskade kandidaten har frysts för framtida utfallskontroll.")
+        else:
+            st.caption("Förstaval-gaten behöll dagens ursprungliga etta. Jämförelsen har frysts för framtida utfallskontroll.")
     if errors:
         with st.expander(f"Datakällan saknade {len(errors)} ticker(s) — övriga analyserades"):
             st.caption("Detta beror oftast på tillfälliga Yahoo-problem, ändrad ticker eller otillräcklig kurshistorik. Det påverkar inte aktier som redan har lästs in.")
