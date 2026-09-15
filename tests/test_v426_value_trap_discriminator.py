@@ -33,6 +33,6 @@ def test_advisory_only():
 
 def test_app_wires_value_trap_layer():
     app=open('app.py',encoding='utf-8').read()
-    assert 'APP_VERSION = "4.38.0"' in app
+    assert 'APP_VERSION = "4.38.1"' in app
     assert 'add_value_trap_test(ranked)' in app
     assert '"Value Trap-test"' in app

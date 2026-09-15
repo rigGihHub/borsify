@@ -17,7 +17,7 @@ def _case(**changes):
         "KPI Inflection nivå": 2, "Revision breadth nivå": 1,
         "Analysis Confidence nivå": 3, "Value Trap verdict": "MARKET_WRONG",
         "Bolagsbedömning nivå": "green", "Ingångsläge nivå": "green",
-        "Års Score": 72,
+        "Års Score": 72, "Avanza-universum": True, "Omsättning MSEK/dag": 1.0,
     }
     row.update(changes)
     return row
@@ -40,9 +40,16 @@ def test_growth_alone_is_not_enough():
     assert result["Up and coming godkänd"] is False
 
 
-def test_missing_market_cap_and_microcap_are_blocked():
+def test_missing_market_cap_is_blocked_but_microcap_can_qualify():
     assert "börsvärde saknas" in assess_up_and_coming(_case(**{"Börsvärde BSEK": None}))["Up and coming blockerare"]
-    assert "för litet" in assess_up_and_coming(_case(**{"Börsvärde BSEK": 0.2}))["Up and coming blockerare"]
+    assert assess_up_and_coming(_case(**{"Börsvärde BSEK": 0.2}))["Up and coming godkänd"] is True
+
+
+def test_avanza_catalog_and_observed_liquidity_are_required():
+    outside = assess_up_and_coming(_case(**{"Avanza-universum": False}))
+    illiquid = assess_up_and_coming(_case(**{"Omsättning MSEK/dag": 0.05}))
+    assert "Avanza-katalog" in outside["Up and coming blockerare"]
+    assert "handelsaktivitet" in illiquid["Up and coming blockerare"]
 
 
 def test_value_trap_red_entry_and_low_confidence_are_blocked():
@@ -66,12 +73,14 @@ def test_ranking_uses_evidence_then_growth_without_new_mega_score():
 
 def test_app_has_direct_button_clickable_list_and_honest_copy():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.38.0"' in app
+    assert 'APP_VERSION = "4.38.1"' in app
     assert "🚀 Visa bästa up and coming-aktierna" in app
     assert 'bq_horizon_focus"] = "upcoming"' in app
     assert "render_up_and_coming(filtered, profile)" in app
     assert "Ingen lista kan veta vilka som får en fantastisk framtid" in app
     assert "open_upcoming_" in app
+    assert 'filtered["Avanza-universum"]' in app
+    assert "Kontrollera alltid hos Avanza" in app
 
 
 def test_cold_start_card_is_explicitly_stale_not_current():

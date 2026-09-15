@@ -28,6 +28,6 @@ def test_conviction_buckets_are_point_in_time_values():
 
 def test_app_exposes_calibration_without_claiming_proof():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.38.0"' in app
+    assert 'APP_VERSION = "4.38.1"' in app
     assert "Kalibrering av Deal Conviction" in app
     assert "ännu inte ett bevis" in app

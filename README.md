@@ -1,9 +1,16 @@
-# Borsify v4.38.0
+# Borsify v4.38.1
+
+## v4.38.1 – Microcap + Avanza Guard
+
+- Tar bort den felaktigt grova nedre gränsen på 0,5 md SEK för up and coming-bolag.
+- Kräver i stället medlemskap i Borsifys Avanza-katalog, positivt börsvärde, aktuell marknadsdata och minst 0,10 MSEK observerad dagsomsättning.
+- Säger uttryckligen att katalogmedlemskap inte bevisar att Avanza accepterar en order i realtid; detta måste kontrolleras hos Avanza.
+- Övriga kvalitets-, tillväxt-, skuld-, value-trap- och datakrav behålls.
 
 ## v4.38.0 – Up and Coming + Honest Cold Start
 
 - Ny direktknapp för mindre up and coming-bolag.
-- Kandidater kräver verifierat börsvärde 0,5–50 md SEK, faktisk tillväxt och minst tre oberoende evidensfamiljer.
+- Kandidater kräver ett mindre positivt börsvärde, faktisk tillväxt och minst tre oberoende evidensfamiljer.
 - Value traps, röd bolagsbedömning, rött köpläge, mycket hög skuld och låg analysconfidence blockeras.
 - Urvalet lovar inte framtida vinnare och påverkar inte Borsify Score.
 - Alla kandidater är klickbara till full analys och AI-frågor.

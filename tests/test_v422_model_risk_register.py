@@ -30,4 +30,4 @@ def test_v421_false_positive_regression_is_fixed():
     assert "_mh = assess_model_health(" in app
     assert 'st.markdown("#### Model Health · evidensmognad")' in app
     assert 'st.markdown("#### Model Risk Register")' in app
-    assert 'APP_VERSION = "4.38.0"' in app
+    assert 'APP_VERSION = "4.38.1"' in app

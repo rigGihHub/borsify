@@ -34,6 +34,6 @@ def test_success_can_resolve_previous_component_failure():
 
 def test_app_records_critical_failures_instead_of_passing():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "4.38.0"' in app
+    assert 'APP_VERSION = "4.38.1"' in app
     for component in ["news_event_memory", "recommendation_relevance", "case_plans", "recommendation_outcomes", "missed_winner_history"]:
         assert f'record_runtime_issue(st.session_state, "{component}"' in app

@@ -38,6 +38,6 @@ def test_model_health_is_advisory_only():
 
 def test_app_exposes_model_health():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.38.0"' in app
+    assert 'APP_VERSION = "4.38.1"' in app
     assert "#### Model Health" in app
     assert "assess_model_health" in app

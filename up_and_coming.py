@@ -27,11 +27,16 @@ def assess_up_and_coming(row: pd.Series | dict[str, Any]) -> dict[str, Any]:
     quality = _num(row.get("Kvalitet"))
     coverage = _num(row.get("Datatäckning"))
     confidence = _num(row.get("Analysis Confidence nivå"))
+    turnover = _num(row.get("Omsättning MSEK/dag"))
+    avanza_catalog = bool(row.get("Avanza-universum", False))
 
     blockers: list[str] = []
+    if not avanza_catalog: blockers.append("saknas i Borsifys Avanza-katalog")
     if not np.isfinite(cap): blockers.append("börsvärde saknas")
-    elif cap < 0.5: blockers.append("för litet för robust standardurval")
+    elif cap <= 0: blockers.append("ogiltigt börsvärde")
     elif cap > 50: blockers.append("inte längre ett mindre bolag")
+    if not np.isfinite(turnover): blockers.append("handelsaktivitet saknas")
+    elif turnover < 0.10: blockers.append("för låg observerad handelsaktivitet")
     if str(row.get("Value Trap verdict") or "") == "VALUE_TRAP": blockers.append("trolig value trap")
     if str(row.get("Bolagsbedömning nivå") or "").lower() == "red": blockers.append("röd bolagsbedömning")
     if str(row.get("Ingångsläge nivå") or "").lower() == "red": blockers.append("kursen har redan gått för långt")
@@ -78,6 +83,7 @@ def assess_up_and_coming(row: pd.Series | dict[str, Any]) -> dict[str, Any]:
         "Up and coming förklaring": (
             "Observerad kandidatbedömning: " + ("; ".join(reasons) if reasons else "för lite positiv evidens") + ". "
             + (("Blockerare: " + "; ".join(blockers) + ". ") if blockers else "")
+            + "Katalogmedlemskap och marknadsdata är inte en garanti för att Avanza accepterar order just nu. "
             + "Detta är inte en prognos om att bolaget blir en framtida vinnare och påverkar inte Borsify Score."
         ),
     }

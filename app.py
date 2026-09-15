@@ -253,7 +253,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "4.38.0"
+APP_VERSION = "4.38.1"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""
@@ -4520,7 +4520,7 @@ def render_overview(
 def render_up_and_coming(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     """Render smaller evidence-backed companies without promising future winners."""
     st.markdown("## 🚀 Up and coming")
-    st.caption("Mindre bolag med observerad tillväxt och flera oberoende styrketecken. Ingen lista kan veta vilka som får en fantastisk framtid.")
+    st.caption("Mindre bolag i Borsifys Avanza-katalog med observerad tillväxt och flera oberoende styrketecken. Ingen lista kan veta vilka som får en fantastisk framtid.")
     pool = build_discovery_pool(df, max_candidates=min(24, len(df)))
     reviewed = add_full_deal_evidence(pool, "year")
     ranked = select_up_and_coming(reviewed, limit=10)
@@ -4551,7 +4551,7 @@ def render_up_and_coming(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     match = ranked[ranked["Ticker"].astype(str).eq(open_ticker)] if open_ticker else pd.DataFrame()
     if not match.empty:
         render_detail(match.iloc[0], profile, key_prefix=f"upcoming_{open_ticker}", horizon="year")
-    st.caption("Urvalet kräver verifierat börsvärde, tillväxt och minst tre evidensfamiljer. Det påverkar inte Borsify Score.")
+    st.caption("Urvalet saknar nedre storleksgräns men kräver positivt börsvärde, aktuell marknadsdata, minst 0,10 MSEK i observerad dagsomsättning och medlemskap i Borsifys Avanza-katalog. Kontrollera alltid hos Avanza att order kan läggas. Det påverkar inte Borsify Score.")
     return ranked
 
 def save_ai_usage(request_id: str, symbol: str, model: str, input_tokens: int, output_tokens: int, cost_usd: float) -> None:
@@ -7118,6 +7118,8 @@ def main() -> None:
         filtered = filtered[dy.notna() & (dy > 0) & (dy >= min_yield)]
     filtered = apply_discovery_intent(filtered, discovery_intent)
     filtered = apply_search_horizon(filtered, search_horizon, add_horizon_scores)
+    avanza_symbol_set = set(avanza_universe_df.get("Ticker", pd.Series(dtype=str)).astype(str).str.upper()) if not avanza_universe_df.empty else set()
+    filtered["Avanza-universum"] = filtered.get("Ticker", pd.Series("", index=filtered.index)).astype(str).str.upper().isin(avanza_symbol_set)
     # v3.52 Fundamental Change Radar: compare today's broad scan with the latest
     # older point-in-time universe snapshot. Same-day data cannot be its own baseline
     # and missing historical fields are never backfilled.

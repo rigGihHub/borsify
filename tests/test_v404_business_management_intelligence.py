@@ -35,7 +35,7 @@ def test_app_wires_engine_but_does_not_add_it_to_deal_conviction():
     app=open("app.py",encoding="utf-8").read()
     deal=open("deal_conviction.py",encoding="utf-8").read()
     ledger=open("recommendation_ledger.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.38.0"' in app
+    assert 'APP_VERSION = "4.38.1"' in app
     assert "add_business_management_intelligence(ranked)" in app
     assert "Verksamhet & ledning" in app
     assert "Management execution nivå" not in deal

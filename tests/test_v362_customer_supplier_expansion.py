@@ -51,7 +51,7 @@ def test_registry_health_separates_operating_coverage():
 
 def test_v362_version_and_ui_wiring():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "4.38.0"' in app
+    assert 'APP_VERSION = "4.38.1"' in app
     assert "kund→leverantör" in app
     assert "Verifierad relation operativ" in app
     engine = open("verified_relationship_engine.py", encoding="utf-8").read()
