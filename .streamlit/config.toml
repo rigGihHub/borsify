@@ -5,6 +5,10 @@ backgroundColor = "#0B1117"
 secondaryBackgroundColor = "#121B24"
 textColor = "#F2F5F7"
 font = "sans serif"
+baseRadius = "medium"
+buttonRadius = "medium"
+showWidgetBorder = true
+showSidebarBorder = true
 
 [browser]
 gatherUsageStats = false
