@@ -6,100 +6,66 @@ import pandas as pd
 
 def _num(v: Any) -> float:
     try:
-        x=float(v)
-        return x if math.isfinite(x) else np.nan
-    except Exception:
-        return np.nan
+        x=float(v); return x if math.isfinite(x) else np.nan
+    except Exception: return np.nan
 
 def _pct(v: Any) -> str:
-    x=_num(v)
-    return "—" if not np.isfinite(x) else f"{x:+.1%}".replace(".", ",")
+    x=_num(v); return "—" if not np.isfinite(x) else f"{x:+.1%}".replace(".", ",")
 
 def _first_risk(row: pd.Series | dict[str,Any]) -> str:
     flags=str(row.get("Riskflaggor","") or "").strip()
     if flags and flags not in {"—","inga","Ingen"}:
         first=flags.split(",")[0].strip()
-        if first:
-            return first[0].upper()+first[1:]
+        if first: return first[0].upper()+first[1:]
     coverage=_num(row.get("Datatäckning"))
     if np.isfinite(coverage) and coverage < .70:
-        return "Underlaget är inte komplett, så bedömningen är mer osäker än vanligt."
-    return "Ingen enskild stor risk sticker ut i den data Borsify har, men aktien kan fortfarande falla."
+        return "Borsify saknar en del information om bolaget. Därför är bedömningen mer osäker."
+    return "Borsify ser ingen enskild stor varningssignal i informationen som finns, men aktien kan fortfarande falla."
+
+def _sentence(parts: list[str], fallback: str) -> str:
+    if not parts: return fallback
+    if len(parts)==1: return parts[0][0].upper()+parts[0][1:]+"."
+    return (", ".join(parts[:-1])+" och "+parts[-1]+".")[0].upper() + (", ".join(parts[:-1])+" och "+parts[-1]+".")[1:]
 
 def build_buy_card(row: pd.Series | dict[str,Any], horizon: str) -> dict[str,str]:
-    """Create four short, beginner-friendly decision prompts from existing data only."""
-    quality=_num(row.get("Kvalitet"))
-    risk=_num(row.get("Risk"))
-    valuation=_num(row.get("Värdering"))
-    invest=_num(row.get("INVEST Score"))
-    m1=_num(row.get("1 mån"))
-    m3=_num(row.get("3 mån"))
-    vol=_num(row.get("Volymkvot"))
-    rsi=_num(row.get("RSI14"))
-    roe=_num(row.get("ROE"))
-    margin=_num(row.get("Vinstmarginal"))
-
+    """Explain a possible buy in plain language using only observed model inputs."""
+    quality=_num(row.get("Kvalitet")); risk=_num(row.get("Risk")); valuation=_num(row.get("Värdering"))
+    invest=_num(row.get("INVEST Score")); m1=_num(row.get("1 mån")); m3=_num(row.get("3 mån"))
+    vol=_num(row.get("Volymkvot")); rsi=_num(row.get("RSI14")); roe=_num(row.get("ROE")); margin=_num(row.get("Vinstmarginal"))
+    reasons=[]
     if horizon=="day":
-        reasons=[]
-        if np.isfinite(vol) and vol>=1.2: reasons.append("handeln i aktien är ovanligt aktiv")
-        if np.isfinite(m1) and m1>0: reasons.append(f"kursen har stigit {_pct(m1)} den senaste månaden")
-        if np.isfinite(rsi) and 50<=rsi<=72: reasons.append("kursstyrkan är positiv utan att vara extrem")
-        why=" och ".join(reasons[:2]) if reasons else "flera kortsiktiga signaler pekar åt samma håll"
-        why_now=(
-            f"Den senaste handelsaktiviteten är {vol:.1f} gånger normal nivå."
-            if np.isfinite(vol) and vol>=1.2 else
-            "Borsify ser en kombination av aktuell kursstyrka och trend som klarar köpkraven just nu."
-        )
-        change=(
-            "Borsify skulle ändra sig om handelsaktiviteten faller tydligt, kursstyrkan blir extrem "
-            "eller den korta trenden vänder kraftigt ned."
-        )
+        if np.isfinite(vol) and vol>=1.2: reasons.append(f"ovanligt många handlar aktien just nu ({vol:.1f} gånger normal handel)")
+        if np.isfinite(m1) and m1>0: reasons.append(f"priset har stigit {_pct(m1)} den senaste månaden")
+        if np.isfinite(rsi) and 50<=rsi<=72: reasons.append("priset visar styrka utan att uppgången ser extrem ut")
+        why=_sentence(reasons[:3],"Flera kortsiktiga tecken är positiva samtidigt.")
+        now="Det här är främst ett kortsiktigt läge. Borsify ser stöd i den senaste handeln och prisutvecklingen just nu."
+        change="Borsify blir mer försiktig om handeln tappar fart eller priset börjar falla tydligt."
     elif horizon=="medium":
-        reasons=[]
-        if np.isfinite(m3) and m3>0: reasons.append(f"kursen har utvecklats {_pct(m3)} på tre månader")
-        if np.isfinite(quality) and quality>=60: reasons.append("bolagets kvalitet är god")
-        if np.isfinite(risk) and risk>=60: reasons.append("riskbilden är relativt stabil")
-        why=" och ".join(reasons[:2]) if reasons else "både kursutveckling och bolagsdata klarar Borsifys krav"
-        why_now=(
-            "Den senaste 1–3-månadersutvecklingen är positiv samtidigt som bolaget klarar kvalitetskraven."
-            if (np.isfinite(m3) and m3>0) else
-            "Aktien klarar köpkraven nu utan att Borsify behöver fylla ut listan med svagare kandidater."
-        )
-        change=(
-            "Borsify skulle ändra sig om både den senaste månaden och tremånaderstrenden blir tydligt negativa, "
-            "eller om bolagets kvalitet eller riskbedömning försämras."
-        )
+        if np.isfinite(m3) and m3>0: reasons.append(f"priset har utvecklats {_pct(m3)} på tre månader")
+        if np.isfinite(quality) and quality>=60: reasons.append("bolagets ekonomi får ett bra kvalitetsbetyg")
+        if np.isfinite(risk) and risk>=60: reasons.append("Borsify ser färre tydliga risktecken än i många svagare kandidater")
+        why=_sentence(reasons[:3],"Både bolaget och den senaste prisutvecklingen klarar Borsifys krav.")
+        now="Borsify tycker att kombinationen av bolagets läge och de senaste månadernas utveckling är tillräckligt stark för att undersöka ett köp nu."
+        change="Borsify blir mer försiktig om priset faller under flera månader eller om bolagets ekonomi försämras."
     elif horizon=="long":
-        reasons=[]
-        if np.isfinite(invest) and invest>=65: reasons.append("den långsiktiga helhetsbedömningen är stark")
-        if np.isfinite(quality) and quality>=65: reasons.append("bolagets kvalitet är hög")
-        if np.isfinite(valuation) and valuation>=60: reasons.append("priset ser rimligt ut i förhållande till bolaget")
-        why=" och ".join(reasons[:2]) if reasons else "bolagets kvalitet, pris och riskbild fungerar tillsammans"
-        why_now=(
-            "Aktien klarar både den långsiktiga helhetsbedömningen och Borsifys skärpta köpkrav."
-        )
-        change=(
-            "Borsify skulle ändra sig om bolagets kvalitet faller tydligt, riskbilden försämras kraftigt "
-            "eller priset inte längre ser rimligt ut i förhållande till bolagets utveckling."
-        )
+        if np.isfinite(quality) and quality>=65: reasons.append("bolaget får ett högt betyg för kvalitet")
+        if np.isfinite(valuation) and valuation>=60: reasons.append("priset ser rimligt ut jämfört med bolagets ekonomi")
+        if np.isfinite(risk) and risk>=60: reasons.append("riskbilden är relativt stabil")
+        if np.isfinite(invest) and invest>=65 and not reasons: reasons.append("den samlade långsiktiga analysen är stark")
+        why=_sentence(reasons[:3],"Bolagets kvalitet, pris och risk fungerar bra tillsammans i Borsifys analys.")
+        now="Poängen är inte bara att bolaget är bra. Borsify bedömer också att dagens pris är tillräckligt rimligt för ett långsiktigt köp."
+        change="Borsify blir mer försiktig om bolaget tjänar sämre, riskerna ökar eller aktien blir för dyr jämfört med bolagets ekonomi."
     else:
-        reasons=[]
-        if np.isfinite(quality) and quality>=72: reasons.append("bolagets kvalitet är mycket hög")
-        if np.isfinite(risk) and risk>=68: reasons.append("ekonomin och riskbilden ser robusta ut")
-        if np.isfinite(roe) and roe>=.15: reasons.append("bolaget tjänar bra på det kapital ägarna satsat")
-        if np.isfinite(margin) and margin>=.10: reasons.append("lönsamheten är god")
-        why=" och ".join(reasons[:2]) if reasons else "flera tecken på uthållig kvalitet finns samtidigt"
-        why_now=(
-            "Bolaget klarar de hårdaste köpkraven i Borsify och visar flera tecken på uthållig kvalitet."
-        )
-        change=(
-            "Borsify skulle ändra sig om lönsamheten försämras tydligt, skuldrisken ökar, "
-            "bolagets kvalitet faller eller flera av de långsiktiga styrkorna försvinner."
-        )
-
+        if np.isfinite(quality) and quality>=72: reasons.append("bolaget har mycket hög kvalitet i Borsifys analys")
+        if np.isfinite(roe) and roe>=.15: reasons.append("bolaget är bra på att tjäna pengar på ägarnas kapital")
+        if np.isfinite(margin) and margin>=.10: reasons.append("bolaget behåller en bra del av försäljningen som vinst")
+        if np.isfinite(risk) and risk>=68: reasons.append("ekonomin ser relativt tålig ut")
+        why=_sentence(reasons[:3],"Flera tecken tyder på att bolaget kan vara starkt under lång tid.")
+        now="Det här är ett förslag för den som kan tänka sig att äga länge. Borsify letar efter företag som kan fortsätta vara bra, inte bara aktier som nyligen gått upp."
+        change="Borsify blir mer försiktig om lönsamheten faller, skulderna blir ett större problem eller flera av bolagets långsiktiga styrkor försvinner."
     return {
-        "Varför köpa": why[0].upper()+why[1:]+"." if why else "—",
-        "Varför nu": why_now,
-        "Största risk": _first_risk(row),
-        "Vad skulle få Borsify att ändra sig": change,
+        "Därför kan aktien vara värd att köpa": why,
+        "Varför just nu": now,
+        "Det här är den största risken": _first_risk(row),
+        "Då skulle Borsify tänka om": change,
     }
