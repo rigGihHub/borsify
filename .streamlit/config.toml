@@ -10,6 +10,10 @@ buttonRadius = "medium"
 showWidgetBorder = true
 showSidebarBorder = true
 
+[theme.sidebar]
+backgroundColor = "#0E161E"
+secondaryBackgroundColor = "#121B24"
+
 [browser]
 gatherUsageStats = false
 
@@ -19,3 +23,6 @@ showErrorDetails = "none"
 
 [server]
 headless = true
+
+[runner]
+fastReruns = true
