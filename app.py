@@ -240,6 +240,7 @@ from investment_company_engine import add_investment_company_context
 from near_buy import near_buy_candidates
 from portfolio_advisor import assess_holding
 from market_universe import load_avanza_universe, universe_symbols, coverage_table, breadth_summary, audit_catalog, catalog_integrity_summary, nordic_coverage_report
+from universe_manager import scan_result_user_text
 from universe_quality import apply_universe_quality, filter_rankable_universe, quality_summary
 from qc_history import evolve_qc_state, is_quarantined, scan_health, quarantine_summary, should_record_qc_outcome
 from case_ai import build_case_ai_input, build_case_ai_instructions, local_case_explanation
@@ -7220,7 +7221,10 @@ def main() -> None:
     with st.expander("Om dagens analys", expanded=False):
         if benchmark_explainer:
             st.caption(benchmark_explainer)
-        st.caption(f"{len(raw_df)} aktier analyserade · {len(filtered)} kvar efter dina val · kursdata {latest_price_date}{market_note}{fx_note}{country_text}{active_price_text}{horizon_text}")
+        requested_count = int(scan_metrics.get("requested", len(raw_df))) if isinstance(scan_metrics, dict) else len(raw_df)
+        rejected_count = int(scan_metrics.get("price_rejected_before_fundamentals", 0) or 0) if isinstance(scan_metrics, dict) else 0
+        st.caption(scan_result_user_text(requested_count, len(raw_df), rejected_count, int(st.session_state.get("bq_qc_skipped_quarantine", 0) or 0)))
+        st.caption(f"{len(filtered)} aktier är kvar efter dina val · prisinformation från {latest_price_date}{market_note}{country_text}{active_price_text}{horizon_text}")
         if "Fundamental förändring antal" in filtered.columns:
             _change_count = int((pd.to_numeric(filtered["Fundamental förändring antal"], errors="coerce").fillna(0) > 0).sum())
             st.caption(f"Fundamental Change Radar: {_change_count} aktier med verifierad ny förbättring mot en äldre fryst bredscan. Radarn skapar inget nytt score.")
@@ -7238,13 +7242,13 @@ def main() -> None:
             yahoo_fund = int(scan_metrics.get("fundamental_yahoo", 0) or 0)
             rejected_early = int(scan_metrics.get("price_rejected_before_fundamentals", 0) or 0)
             st.caption(
-                f"Datakontroll: {cache_hits} bolag från cache · {yahoo_fund} nya hämtningar"
-                + (f" · {rejected_early} stoppades tidigt på grund av kursdata" if rejected_early else "")
+                f"Borsify hade redan sparad bolagsinformation för {cache_hits} aktier och hämtade ny information för {yahoo_fund}."
+                + (f" {rejected_early} aktier kunde inte kontrolleras eftersom prisinformationen inte räckte." if rejected_early else "")
             )
         if st.session_state.get("bq_first_choice_gate_changed"):
-            st.caption("Förstaval-gaten ändrade dagens etta. Både den ursprungliga och den evidensgranskade kandidaten har frysts för framtida utfallskontroll.")
+            st.caption("Borsifys sista kontroll ändrade vilken aktie som hamnade först. Båda sparas så att Borsify senare kan kontrollera vilket val som blev bäst.")
         else:
-            st.caption("Förstaval-gaten behöll dagens ursprungliga etta. Jämförelsen har frysts för framtida utfallskontroll.")
+            st.caption("Borsifys sista kontroll höll med om aktien som låg först. Resultatet sparas så att Borsify senare kan kontrollera hur valet gick.")
     if errors:
         with st.expander(f"Datakällan saknade {len(errors)} ticker(s) — övriga analyserades"):
             st.caption("Detta beror oftast på tillfälliga Yahoo-problem, ändrad ticker eller otillräcklig kurshistorik. Det påverkar inte aktier som redan har lästs in.")
