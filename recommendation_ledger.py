@@ -65,7 +65,7 @@ def snapshot_columns(horizon_type: str) -> list[str]:
     historical gaps with later data.
     """
     common = [
-        "Ticker", "Namn", "Pris", "Valuta", "Prisdatum", "Sektor", "Bransch",
+        "Ticker", "Namn", "Pris", "Valuta", "Prisdatum", "Sektor", "Bransch", "Borsify slutbetyg", "Borsify grundbetyg", "Borsify Score",
         "Datatäckning", "Data Failure status", "Data Failure blockerare", "Data Failure försvagat", "Data Failure fungerande", "Data Failure penalty", "Data Failure förklaring", "Analysis Confidence", "Analysis Confidence Score", "Analysis Confidence nivå", "Analysis Confidence blockerare", "Analysis Confidence varningar", "Analysis Confidence förklaring", "Analysis Confidence datatäckning", "Analysis Confidence källhälsa", "Analysis Confidence bransch-KPI", "Analysis Confidence djup", "Analysis Confidence evidens", "Decision Support", "Decision Support quadrant", "Decision Support nivå", "Decision Support action", "Decision Support förklaring", "Decision Support conviction", "Decision Support confidence", "Deep source status", "Deep source errors", "Deep source error types", "Deep source attempts", "Deep source circuits open", "Deep source circuit open", "Deep source missing", "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
         "ROE", "Vinstmarginal", "Skuld/eget kapital", "Risk", "Värdering", "Kvalitet", "Marknadsläge",
         "Fundamental hämtad", "_Fundamental cache", "Fundamental source status", "Fundamental source errors", "Fundamental source attempts", "Fundamental circuit open",
@@ -378,6 +378,8 @@ def build_recommendation_records(
             "entry_price": price,
             "gate": gate,
             "score": None if not math.isfinite(score) else float(score),
+            "final_score": None if not math.isfinite(_num(row.get("Borsify slutbetyg"))) else float(_num(row.get("Borsify slutbetyg"))),
+            "raw_borsify_score": None if not math.isfinite(_num(row.get("Borsify grundbetyg", row.get("Borsify Score")))) else float(_num(row.get("Borsify grundbetyg", row.get("Borsify Score")))),
             "confidence": None if not math.isfinite(confidence) else float(confidence),
             "evidence_count": None if not math.isfinite(evidence_count) else int(evidence_count),
             "why_now": why_now,
