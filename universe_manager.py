@@ -63,3 +63,23 @@ def admission_ready(candidates: pd.DataFrame) -> pd.DataFrame:
     if candidates is None or candidates.empty or "Universe status" not in candidates.columns:
         return pd.DataFrame(columns=candidates.columns if isinstance(candidates, pd.DataFrame) else [])
     return candidates[candidates["Universe status"].eq("Klar för katalog efter marknads-/handelskontroll")].copy()
+
+def coverage_user_text(catalog: pd.DataFrame, selected_countries: list[str] | None = None) -> str:
+    """Plain-language coverage sentence for the selected Nordic countries."""
+    selected = selected_countries or list(TARGETS)
+    health = universe_health(catalog)
+    health = health[health["Land"].isin(selected)].copy()
+    if health.empty:
+        return "Borsify har ingen kataloginformation för de valda länderna."
+    parts = [f"{row['Land']}: {int(row['I Borsify'])}" for _, row in health.iterrows()]
+    return "Aktier i Borsifys katalog – " + " · ".join(parts) + "."
+
+def scan_result_user_text(requested: int, analyzed: int, rejected: int, quarantined: int = 0) -> str:
+    """Explain scan counts without implying full-exchange coverage."""
+    requested=max(0,int(requested)); analyzed=max(0,int(analyzed)); rejected=max(0,int(rejected)); quarantined=max(0,int(quarantined))
+    text=f"Borsify försökte kontrollera {requested} aktier från den valda katalogen. {analyzed} kunde analyseras."
+    if rejected:
+        text+=f" {rejected} stoppades eftersom prisinformationen inte var tillräckligt bra."
+    if quarantined:
+        text+=f" {quarantined} hoppades över tillfälligt eftersom de nyligen haft återkommande datafel."
+    return text
