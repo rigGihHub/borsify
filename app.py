@@ -7724,6 +7724,11 @@ def main() -> None:
                     _risk2.write(plain_finance_text(first.get("Decision Brief invalidation", "—")))
                     st.caption(f"Hur bra är informationen?  {first.get('Decision Brief confidence', '—')}")
                     st.markdown(f"**Position:** {first.get('Positionsråd', '—')} · första storlek {first.get('Första positionsstorlek', '—')}")
+                    if horizon == "medium":
+                        st.markdown("#### När bör jag sälja?")
+                        st.write(first.get("Tänkt tid att äga", "Några dagar till några veckor."))
+                        st.write(first.get("När ska jag kontrollera igen?", "Kontrollera aktien regelbundet."))
+                        st.warning(first.get("När bör jag sälja?", "Sälj när det som gjorde aktien intressant inte längre gäller."))
 
                     with st.expander("Visa hela modellunderlaget", expanded=False):
                         _evidence_rows = [
