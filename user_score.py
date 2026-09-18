@@ -47,6 +47,6 @@ def add_user_scores(frame: pd.DataFrame) -> pd.DataFrame:
     if frame is None or frame.empty:
         return frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame()
     out = frame.copy()
-    out["Borsify slutbetyg"] = [user_score(row) for _, row in out.iterrows()]
+    out["Borsify slutbetyg"] = [user_score(row) for _, row in out.iterrows()]\n    # Presentation-safe alias. User-facing cards that still read Borsify Score now\n    # receive the specialist-aware value; the untouched raw score is preserved separately.\n    if "Borsify Score" in out.columns:\n        out["Borsify grundbetyg"] = out["Borsify Score"]\n        out["Borsify Score"] = out["Borsify slutbetyg"]
     out["Borsify slutbetyg förklaring"] = [user_score_explanation(row) for _, row in out.iterrows()]
     return out
