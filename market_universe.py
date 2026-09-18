@@ -1,6 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 from typing import Any
+from universe_manager import universe_health, nordic_total
 import pandas as pd
 
 REQUIRED_COLUMNS = ("Ticker", "Land", "Nivå")
@@ -128,4 +129,21 @@ def breadth_summary(df: pd.DataFrame) -> dict[str, int]:
         "total": int(len(df)),
         "core": int(df["Nivå"].eq("Kärna").sum()),
         "extended": int(df["Nivå"].eq("Bred").sum()),
+    }
+
+def nordic_coverage_report(df: pd.DataFrame) -> dict[str, Any]:
+    """Simple app-facing report: what Borsify covers and how much catalog work remains."""
+    health = universe_health(df)
+    total = nordic_total(df)
+    return {
+        "table": health,
+        "current": total["current"],
+        "minimum": total["minimum"],
+        "goal": total["goal"],
+        "missing_to_minimum": total["missing_to_minimum"],
+        "text": (
+            f"Borsify har {total['current']} aktier i Sverige, Norge och Danmark i katalogen. "
+            f"Det interna minimimålet är {total['minimum']}. "
+            f"{total['missing_to_minimum']} katalogplatser återstår till den nivån."
+        ),
     }
