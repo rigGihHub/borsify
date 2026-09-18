@@ -769,7 +769,7 @@ def _risk_flags(row: pd.Series) -> str:
     if np.isfinite(debt) and debt > 200: flags.append("hög skuldsättning")
     if np.isfinite(draw) and draw < -.45: flags.append(">45 % från 52v-topp")
     if np.isfinite(dist) and dist < -.10 and np.isfinite(m3) and m3 < -.15: flags.append("fallande lång trend")
-    if np.isfinite(cov) and cov < .50: flags.append("begränsad fundamentaldata")
+    if np.isfinite(cov) and cov < .50: flags.append("begränsad information om bolagets ekonomi")
     return ", ".join(flags) if flags else "—"
 
 
@@ -1077,7 +1077,7 @@ def scan_universe(symbols: list[str], progress_callback=None) -> tuple[pd.DataFr
                     "Namn": sym, "Sektor": "Okänd", "Bransch": "Okänd",
                     "Valuta": "SEK", "Fundamental hämtad": "—",
                 }
-                errors.append(f"{sym}: fundamentaldata {type(exc).__name__}")
+                errors.append(f"{sym}: information om bolagets ekonomi {type(exc).__name__}")
             completed_fundamentals += 1
             if callable(progress_callback):
                 progress_callback("fundamentals", completed_fundamentals, len(usable_histories))
@@ -4444,7 +4444,7 @@ def render_overview(
 ) -> None:
     """Extremt komprimerad beslutsvy: ett förstaval först, allt annat sekundärt."""
     st.markdown("## Idag")
-    st.caption("Borsifys starkaste köpcase just nu.")
+    st.caption("Borsifys starkaste köpförslag just nu.")
     # Timestamp the recommendation itself, not only the underlying quote date.
     # Europe/Stockholm is explicit so Streamlit Cloud server timezone cannot mislead.
     recommendation_time = pd.Timestamp.now(tz="Europe/Stockholm")
@@ -7356,7 +7356,7 @@ def main() -> None:
                         st.warning(_text)
                     else:
                         st.write(_text)
-            st.caption("Minst två oberoende PIT-minnen krävs för 'Bekräftat varför nu'. Saknad historik ger aldrig stöd och motbevis visas öppet.")
+            st.caption("Borsify behöver minst två oberoende historiska kontroller innan den säger att flera saker bekräftar samma förändring. Saknad historik räknas aldrig som stöd.")
 
         underfollowed_view = st.session_state.get("bq_underfollowed_discovery", pd.DataFrame())
         if isinstance(underfollowed_view, pd.DataFrame) and not underfollowed_view.empty and "Underfollowed kandidat" in underfollowed_view.columns:
@@ -7663,7 +7663,7 @@ def main() -> None:
                 st.markdown(f"### {title}")
                 st.caption(subtitle)
                 if ranked.empty:
-                    st.info("Ingen aktie uppfyller Borsifys krav i den här kategorin just nu. Hellre tomt än ett svagt köpcase.")
+                    st.info("Ingen aktie uppfyller Borsifys krav i den här kategorin just nu. Hellre tomt än ett svagt förslag.")
                     return ranked
 
                 ranked = add_full_deal_evidence(ranked, horizon)
@@ -7867,14 +7867,14 @@ def main() -> None:
             if not _focus or _focus == "medium":
                 ranked_medium = _horizon_section(
                     "⚡ Köp nu – sälj i närtid",
-                    "För lägen där Borsify ser ett aktuellt köpcase på ungefär några veckor till tre månader. Det är inte intradagshandel.",
+                    "För lägen där Borsify ser ett aktie som ser intressant ut att köpa nu på ungefär några veckor till tre månader. Det är inte intradagshandel.",
                     "medium", "Mellan Score"
                 )
             if not _focus or _focus == "year":
                 if not _focus: st.divider()
                 ranked_year = _horizon_section(
                     "📈 Köp nu – behåll upp till ett år",
-                    "För bolag där värdering, kvalitet och utveckling kan ge ett starkt case under ungefär 3–12 månader.",
+                    "För bolag där värdering, kvalitet och utveckling kan ge ett stark möjlighet under ungefär 3–12 månader.",
                     "year", "Års Score"
                 )
             if not _focus or _focus == "lifetime":
