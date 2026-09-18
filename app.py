@@ -4444,7 +4444,7 @@ def render_overview(
 ) -> None:
     """Extremt komprimerad beslutsvy: ett förstaval först, allt annat sekundärt."""
     st.markdown("## Idag")
-    st.caption("Borsifys starkaste köpförslag just nu. Betyget är 0–100 efter Borsifys kontroller.")
+    st.caption("Borsifys starkaste köpförslag just nu. Betyget är 0–100 efter Borsifys kontroller. Ett högt betyg betyder inte att aktien säkert kommer att stiga.")
     # Timestamp the recommendation itself, not only the underlying quote date.
     # Europe/Stockholm is explicit so Streamlit Cloud server timezone cannot mislead.
     recommendation_time = pd.Timestamp.now(tz="Europe/Stockholm")
