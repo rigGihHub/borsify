@@ -4445,6 +4445,13 @@ def render_overview(
     """Extremt komprimerad beslutsvy: ett förstaval först, allt annat sekundärt."""
     st.markdown("## Idag")
     st.caption("Borsifys starkaste köpcase just nu.")
+    # Timestamp the recommendation itself, not only the underlying quote date.
+    # Europe/Stockholm is explicit so Streamlit Cloud server timezone cannot mislead.
+    recommendation_time = pd.Timestamp.now(tz="Europe/Stockholm")
+    st.caption(
+        f"Förslag skapat {recommendation_time.strftime('%Y-%m-%d kl. %H:%M')} svensk tid"
+        + (f" · Senaste prisdata {latest_price_date}" if latest_price_date and latest_price_date != "—" else "")
+    )
 
     if daily_shortlist.empty:
         st.info("Inget köp känns tillräckligt starkt idag. Det är också ett beslut.")
