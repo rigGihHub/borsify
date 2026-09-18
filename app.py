@@ -7729,6 +7729,16 @@ def main() -> None:
                         st.write(first.get("Tänkt tid att äga", "Några dagar till några veckor."))
                         st.write(first.get("När ska jag kontrollera igen?", "Kontrollera aktien regelbundet."))
                         st.warning(first.get("När bör jag sälja?", "Sälj när det som gjorde aktien intressant inte längre gäller."))
+                    elif horizon == "year":
+                        st.markdown("#### Plan för ungefär ett år")
+                        st.write("Tanken är att äga så länge skälen till köpet fortfarande gäller – högst ungefär ett år i den här listan.")
+                        st.write(f"**Kontrollera särskilt:** {plain_finance_text(first.get('Decision Brief invalidation', 'om bolaget börjar gå sämre eller priset blir för högt'))}")
+                        st.info("Borsify ska inte behålla aktien bara för att ett år inte har gått. Om köpskälet försvinner ska den omprövas tidigare.")
+                    elif horizon == "lifetime":
+                        st.markdown("#### Vad krävs för att äga länge?")
+                        st.write("Det här betyder inte att aktien ska behållas oavsett vad som händer. Bolaget måste fortsätta vara starkt.")
+                        st.write(f"**Borsify ändrar sig om:** {plain_finance_text(first.get('Decision Brief invalidation', 'bolagets kvalitet eller ekonomi försämras tydligt'))}")
+                        st.info("Kontrollera efter varje större rapport och när något viktigt förändras i bolaget.")
 
                     with st.expander("Visa hur Borsify räknade", expanded=False):
                         _evidence_rows = [
