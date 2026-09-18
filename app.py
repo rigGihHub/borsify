@@ -5206,7 +5206,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                     show["Median %"] = (show["MedianReturn"] * 100).round(1)
                     show["Snitt %"] = (show["MeanReturn"] * 100).round(1)
                     show["Träff %"] = (show["HitRate"] * 100).round(0)
-                    show["≥ +10 %"] = (show["GainRate10"] * 100).round(0)
+                    show["Steg minst 10 %"] = (show["GainRate10"] * 100).round(0)
                     show["≤ −10 %"] = (show["LossRate10"] * 100).round(0)
                     show = show.rename(columns={
                         "Threshold": "Min proxy",
@@ -5215,7 +5215,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                     })
                     st.markdown("#### Trösklar och framtida utfall")
                     st.dataframe(
-                        show[["Min proxy", "Utfall", "Signaler", "Median %", "Snitt %", "Träff %", "≥ +10 %", "≤ −10 %"]],
+                        show[["Min proxy", "Utfall", "Signaler", "Median %", "Snitt %", "Träff %", "Steg minst 10 %", "≤ −10 %"]],
                         use_container_width=True, hide_index=True,
                     )
 
@@ -5355,18 +5355,18 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         st.info("Det här äldre caset sparades före Point-in-Time Ledger 2.0. Borsify fyller inte i saknade gamla uppgifter i efterhand.")
 
             summary = outcome_summary(recs, outs)
-            st.markdown("#### Utfall hittills")
+            st.markdown("#### Har Borsifys tidigare förslag fungerat?")
             if summary.get("evaluated", 0):
                 o1, o2, o3, o4 = st.columns(4)
-                o1.metric("Mätta observationer", int(summary["evaluated"]))
-                o2.metric("Medianutfall", f"{summary['median_return']:+.1%}")
-                o3.metric("Positiva", f"{summary['hit_rate']:.0%}")
-                o4.metric("≥ +10 %", f"{summary['gain_10_rate']:.0%}")
+                o1.metric("Förslag som går att kontrollera", int(summary["evaluated"]))
+                o2.metric("Typiskt resultat", f"{summary['median_return']:+.1%}")
+                o3.metric("Gick upp", f"{summary['hit_rate']:.0%}")
+                o4.metric("Steg minst 10 %", f"{summary['gain_10_rate']:.0%}")
                 if int(summary.get("benchmark_evaluated", 0)):
                     q1, q2, q3 = st.columns(3)
-                    q1.metric("Jämförda mot index", int(summary["benchmark_evaluated"]))
-                    q2.metric("Median mot index", f"{summary['median_excess_return']:+.1%}" if np.isfinite(summary.get("median_excess_return", np.nan)) else "—")
-                    q3.metric("Slog index", f"{summary['beat_benchmark_rate']:.0%}" if np.isfinite(summary.get("beat_benchmark_rate", np.nan)) else "—")
+                    q1.metric("Förslag jämförda med index", int(summary["benchmark_evaluated"]))
+                    q2.metric("Typiskt bättre/sämre än index", f"{summary['median_excess_return']:+.1%}" if np.isfinite(summary.get("median_excess_return", np.nan)) else "—")
+                    q3.metric("Andel som slog index", f"{summary['beat_benchmark_rate']:.0%}" if np.isfinite(summary.get("beat_benchmark_rate", np.nan)) else "—")
                     if np.isfinite(summary.get("median_sessions_to_best", np.nan)):
                         st.caption(f"Medianen nådde periodens bästa nivå efter cirka {summary['median_sessions_to_best']:.0f} handelssessioner. Det beskriver vägen i efterhand – inte hur snabbt nästa case kommer att fungera.")
                 st.caption(str(summary["message"]))
@@ -5374,7 +5374,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                 horizon_options = sorted(outs["horizon"].dropna().astype(str).unique().tolist())
                 if horizon_options:
                     chosen_h = st.selectbox(
-                        "Kalibrera bedömningar mot utfall",
+                        "Välj hur långt efter förslaget du vill mäta",
                         horizon_options,
                         key="ledger_calibration_horizon",
                     )
@@ -5383,11 +5383,11 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         cal_show = cal.copy()
                         cal_show["Median %"] = (cal_show["MedianReturn"] * 100).round(1)
                         cal_show["Snitt %"] = (cal_show["MeanReturn"] * 100).round(1)
-                        cal_show["Positiva %"] = (cal_show["HitRate"] * 100).round(0)
-                        cal_show["≥ +10 %"] = (cal_show["Gain10"] * 100).round(0)
+                        cal_show["Gick upp %"] = (cal_show["HitRate"] * 100).round(0)
+                        cal_show["Steg minst 10 %"] = (cal_show["Gain10"] * 100).round(0)
                         cal_show["≤ −10 %"] = (cal_show["Loss10"] * 100).round(0)
                         st.dataframe(
-                            cal_show[["Gate","Antal","Median %","Snitt %","Positiva %","≥ +10 %","≤ −10 %"]],
+                            cal_show[["Gate","Antal","Median %","Snitt %","Gick upp %","Steg minst 10 %","≤ −10 %"]],
                             use_container_width=True, hide_index=True,
                         )
 
@@ -5471,7 +5471,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         st.caption(f"{_dc['excluded_legacy']} äldre/mogna observationer exkluderas eftersom Deal Conviction inte var fryst då.")
                     if _dc["table"] is not None and not _dc["table"].empty:
                         _dct=_dc["table"].copy()
-                        for _c in ["Medianutfall","Snittutfall","Träff %","≥ +10 %","≤ −10 %","Median över index"]:
+                        for _c in ["Typiskt resultat","Snittutfall","Träff %","Steg minst 10 %","≤ −10 %","Median över index"]:
                             if _c in _dct.columns:
                                 _dct[_c]=(_dct[_c]*100).round(1)
                         st.dataframe(_dct, use_container_width=True, hide_index=True)
@@ -5491,7 +5491,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                     _dq_cmp = compare_strong_idea_groups(_dq)
                     if not _dq.empty:
                         _dqshow=_dq.copy()
-                        for _c in ["Medianutfall","Snittutfall","Positiva","≥ +10 %","≤ −10 %","Median mot index","Sämsta observerade median"]:
+                        for _c in ["Typiskt resultat","Snittutfall","Gick upp","Steg minst 10 %","≤ −10 %","Typiskt bättre/sämre än index","Sämsta observerade median"]:
                             if _c in _dqshow.columns:
                                 _dqshow[_c]=(_dqshow[_c]*100).round(1)
                         st.dataframe(_dqshow, use_container_width=True, hide_index=True)
@@ -5522,12 +5522,12 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         st.info(str(calibration_summary.get("text", "")))
                     if not calibration.empty:
                         cal_score_show = calibration.copy()
-                        cal_score_show["Median %"] = (pd.to_numeric(cal_score_show["Medianutfall"], errors="coerce") * 100).round(1)
+                        cal_score_show["Median %"] = (pd.to_numeric(cal_score_show["Typiskt resultat"], errors="coerce") * 100).round(1)
                         cal_score_show["Snitt %"] = (pd.to_numeric(cal_score_show["Snittutfall"], errors="coerce") * 100).round(1)
-                        cal_score_show["Positiva %"] = (pd.to_numeric(cal_score_show["Positiva"], errors="coerce") * 100).round(0)
+                        cal_score_show["Gick upp %"] = (pd.to_numeric(cal_score_show["Gick upp"], errors="coerce") * 100).round(0)
                         st.dataframe(
                             cal_score_show[[
-                                "Typ", "Scoregrupp", "Oberoende case", "Median %", "Snitt %", "Positiva %", "Mätning"
+                                "Typ", "Scoregrupp", "Oberoende case", "Median %", "Snitt %", "Gick upp %", "Mätning"
                             ]],
                             use_container_width=True, hide_index=True,
                         )
@@ -5554,14 +5554,14 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                     else:
                         show = learn_table.copy()
                         show["Median %"] = (show["Median"] * 100).round(1)
-                        show["Positiva %"] = (show["Positiva"] * 100).round(0)
+                        show["Gick upp %"] = (show["Gick upp"] * 100).round(0)
                         show["Minst +10 %"] = (show["Minst +10 %"] * 100).round(0)
                         show["Högst −10 %"] = (show["Högst −10 %"] * 100).round(0)
                         show["Underlag"] = show["Tillräckligt underlag"].map(
                             {True:"Kan börja jämföras", False:"För få utfall"}
                         )
                         st.dataframe(
-                            show[["Grupp","Antal","Median %","Positiva %","Minst +10 %","Högst −10 %","Underlag"]],
+                            show[["Grupp","Antal","Median %","Gick upp %","Minst +10 %","Högst −10 %","Underlag"]],
                             use_container_width=True, hide_index=True,
                         )
                     st.caption(data_limits_note(recs))
@@ -5604,8 +5604,8 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         pattern_show["Fel med signal %"] = (pd.to_numeric(pattern_show["Misslyckandegrad med signal"], errors="coerce") * 100).round(0)
                         pattern_show["Fel utan signal %"] = (pd.to_numeric(pattern_show["Misslyckandegrad utan signal"], errors="coerce") * 100).round(0)
                         pattern_show["Skillnad pp"] = pd.to_numeric(pattern_show["Skillnad procentenheter"], errors="coerce").round(0)
-                        pattern_show["Median med signal %"] = (pd.to_numeric(pattern_show["Medianutfall med signal"], errors="coerce") * 100).round(1)
-                        pattern_show["Median utan signal %"] = (pd.to_numeric(pattern_show["Medianutfall utan signal"], errors="coerce") * 100).round(1)
+                        pattern_show["Median med signal %"] = (pd.to_numeric(pattern_show["Typiskt resultat med signal"], errors="coerce") * 100).round(1)
+                        pattern_show["Median utan signal %"] = (pd.to_numeric(pattern_show["Typiskt resultat utan signal"], errors="coerce") * 100).round(1)
                         st.dataframe(
                             pattern_show[[
                                 "Signal", "Exponerade", "Fel med signal %", "Utan signal", "Fel utan signal %",
@@ -5671,8 +5671,8 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         rule_show["Missar med orsak %"] = (pd.to_numeric(rule_show["Missfrekvens med orsaken"], errors="coerce") * 100).round(0)
                         rule_show["Missar utan orsak %"] = (pd.to_numeric(rule_show["Missfrekvens utan orsaken"], errors="coerce") * 100).round(0)
                         rule_show["Skillnad pp"] = pd.to_numeric(rule_show["Skillnad procentenheter"], errors="coerce").round(0)
-                        rule_show["Median med orsak %"] = (pd.to_numeric(rule_show["Medianutfall med orsaken"], errors="coerce") * 100).round(1)
-                        rule_show["Median utan orsak %"] = (pd.to_numeric(rule_show["Medianutfall utan orsaken"], errors="coerce") * 100).round(1)
+                        rule_show["Median med orsak %"] = (pd.to_numeric(rule_show["Typiskt resultat med orsaken"], errors="coerce") * 100).round(1)
+                        rule_show["Median utan orsak %"] = (pd.to_numeric(rule_show["Typiskt resultat utan orsaken"], errors="coerce") * 100).round(1)
                         st.dataframe(
                             rule_show[[
                                 "Stopporsak", "Med orsaken", "Missar med orsak %", "Utan orsaken",
@@ -5739,7 +5739,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                             lit_show[col + " %"] = (pd.to_numeric(lit_show[col], errors="coerce") * 100).round(1)
                         st.dataframe(
                             lit_show[[
-                                "Signal", "Modell", "Status", "Oberoende case", "Positiva signalcase", "Varningscase",
+                                "Signal", "Modell", "Status", "Oberoende case", "Gick upp signalcase", "Varningscase",
                                 "Median positiv %", "Median varning %", "Skillnad %",
                                 "Träff positiv %", "Träff varning %", "Mätning",
                             ]],
@@ -6417,10 +6417,10 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
         w1, w2, w3, w4, w5, w6 = st.columns(6)
         w1.metric("Testfönster", int(wf["folds"]))
         w2.metric("Köpsignaler i nya testperioder", int(wf["signals"]))
-        w3.metric("Positiva affärer i nya testperioder", f"{wf['win_rate']:.1%}", f"vs {wf['baseline_win_rate']:.1%}")
+        w3.metric("Gick upp affärer i nya testperioder", f"{wf['win_rate']:.1%}", f"vs {wf['baseline_win_rate']:.1%}")
         w4.metric("Median i nya testperioder", f"{wf['median_return']:.2%}", f"edge {wf['median_excess']:+.2%}")
         w5.metric("Vinst/förlust-kvot", f"{wf['profit_factor']:.2f}" if np.isfinite(wf['profit_factor']) else "—", help=beginner_term("profit factor"))
-        w6.metric("Positiva testfönster", f"{wf['positive_fold_share']:.0%}" if np.isfinite(wf['positive_fold_share']) else "—")
+        w6.metric("Gick upp testfönster", f"{wf['positive_fold_share']:.0%}" if np.isfinite(wf['positive_fold_share']) else "—")
         if wf["signals"] < 20 or int(wf.get("eligible_folds", 0)) < 3:
             st.warning("Out-of-sample-stickprovet är fortfarande tunt. Resultatet ska inte användas för att höja produktionsvikten ännu.")
         elif wf["median_excess"] > 0 and wf["win_rate"] > wf["baseline_win_rate"] and wf["positive_fold_share"] >= .60:
@@ -6435,12 +6435,12 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
         if isinstance(folds, pd.DataFrame) and not folds.empty:
             st.markdown("#### Resultat i varje senare testperiod")
             fw = folds.copy()
-            fw["Positiva affärer %"] = (fw["test_win_rate"] * 100).round(1)
+            fw["Gick upp affärer %"] = (fw["test_win_rate"] * 100).round(1)
             fw["Jämförelse %"] = (fw["test_baseline_win_rate"] * 100).round(1)
             fw["Median %"] = (fw["test_median_return"] * 100).round(2)
             fw["Skillnad mot jämförelse %"] = (fw["test_median_excess"] * 100).round(2)
             fw = fw.rename(columns={"test_start":"Test från","test_end":"Test till","threshold":"Vald tröskel","test_signals":"Signaler"})
-            st.dataframe(fw[["Test från","Test till","Vald tröskel","Signaler","Positiva affärer %","Jämförelse %","Median %","Skillnad mot jämförelse %"]], use_container_width=True, hide_index=True)
+            st.dataframe(fw[["Test från","Test till","Vald tröskel","Signaler","Gick upp affärer %","Jämförelse %","Median %","Skillnad mot jämförelse %"]], use_container_width=True, hide_index=True)
 
         st.markdown("#### Vad händer när vi räknar med köp- och säljkostnader?")
         st.caption("Här räknar Borsify bara med affärer från de senare testperioderna och drar av kostnaden för varje köp och försäljning. Det är fortfarande en förenklad simulering, inte verklig handel.")
@@ -8242,9 +8242,9 @@ Aktier med låg datatäckning får en försiktig rabatt. En hög score är en pr
                 pattern_show["Andel av missar"] = (pattern_show["miss_share"] * 100).round(0).map(lambda x: f"{x:.0f}%")
                 pattern_show["Andel av hela kohorten"] = (pattern_show["cohort_share"] * 100).round(0).map(lambda x: f"{x:.0f}%")
                 pattern_show["Överrepresentation"] = pattern_show["overrepresentation"].round(2).map(lambda x: f"{x:.2f}×" if pd.notna(x) else "–")
-                pattern_show["Medianutfall"] = (pattern_show["median_return"] * 100).round(1).map(lambda x: f"{x:+.1f}%" if pd.notna(x) else "–")
+                pattern_show["Typiskt resultat"] = (pattern_show["median_return"] * 100).round(1).map(lambda x: f"{x:+.1f}%" if pd.notna(x) else "–")
                 pattern_show = pattern_show.rename(columns={"pattern":"Mönster","misses":"Missar","status":"Bedömning"})
-                st.dataframe(pattern_show[["Mönster","Missar","Andel av missar","Andel av hela kohorten","Överrepresentation","Medianutfall","Bedömning"]], use_container_width=True, hide_index=True)
+                st.dataframe(pattern_show[["Mönster","Missar","Andel av missar","Andel av hela kohorten","Överrepresentation","Typiskt resultat","Bedömning"]], use_container_width=True, hide_index=True)
 
             st.markdown("#### Discovery Learning Loop")
             st.caption("När samma typ av vinnare missas tillräckligt ofta föreslår Borsify en liten, förregistrerad challenger i själva discovery-steget. Förslaget ändrar aldrig produktionen direkt och får bara bedömas på nya framtida case.")
@@ -8254,9 +8254,9 @@ Aktier med låg datatäckning får en försiktig rabatt. En hög score är en pr
             if learning_proposals is not None and not learning_proposals.empty:
                 proposal_show = learning_proposals.copy()
                 proposal_show["Överrepresentation"] = proposal_show["overrepresentation"].round(2).map(lambda x: f"{x:.2f}×" if pd.notna(x) else "–")
-                proposal_show["Medianutfall"] = (proposal_show["median_return"] * 100).round(1).map(lambda x: f"{x:+.1f}%" if pd.notna(x) else "–")
+                proposal_show["Typiskt resultat"] = (proposal_show["median_return"] * 100).round(1).map(lambda x: f"{x:+.1f}%" if pd.notna(x) else "–")
                 proposal_show = proposal_show.rename(columns={"pattern":"Missmönster","challenger":"Challenger","proposal":"Föreslagen teständring","misses":"Missar","status":"Status","next_step":"Nästa steg"})
-                st.dataframe(proposal_show[["Missmönster","Challenger","Föreslagen teständring","Missar","Överrepresentation","Medianutfall","Status","Nästa steg"]], use_container_width=True, hide_index=True)
+                st.dataframe(proposal_show[["Missmönster","Challenger","Föreslagen teständring","Missar","Överrepresentation","Typiskt resultat","Status","Nästa steg"]], use_container_width=True, hide_index=True)
 
             st.markdown("#### Discovery Champion vs Challenger")
             st.caption("Från v3.50 är alternativa discovery-regler låsta innan framtida utfall uppstår. Champion och challengers får samma frysta universum och samma poolstorlek. Äldre observationer räknas inte.")
