@@ -7711,16 +7711,16 @@ def main() -> None:
                     st.markdown(f"**Vad priset verkar kräva:** {first.get('Market-Implied Expectations', '❔ Kan inte bedömas')}")
                     st.caption(str(first.get("Market-Implied Expectations förklaring", "")))
                     _brief1, _brief2 = st.columns(2)
-                    _brief1.markdown("**Varför marknaden kan ha fel**")
+                    _brief1.markdown("**Varför aktien kan vara billigare än den borde**")
                     _brief1.write(plain_finance_text(first.get("Decision Brief market wrong", "—")))
-                    _brief2.markdown("**Vad kan stänga gapet**")
+                    _brief2.markdown("**Vad kan få fler att bli intresserade av aktien**")
                     _brief2.write(plain_finance_text(first.get("Decision Brief recognition", "—")))
-                    st.markdown(f"**När kan det hända?:** {first.get('Decision Brief timing', '❔ Recognition-timing okänd')}")
-                    st.caption(str(first.get("Decision Brief payoff", "— Uppsida/väntetid kan inte bedömas")))
+                    st.markdown(f"**När kan det hända?:** {first.get('Decision Brief timing', 'Borsify vet inte när det kan hända.')}")
+                    st.caption(str(first.get("Decision Brief payoff", "Borsify kan inte säga säkert hur stor uppgången kan bli eller hur lång tid den kan ta.")))
                     _risk1, _risk2 = st.columns(2)
                     _risk1.markdown("**Största risken**")
                     _risk1.write(plain_finance_text(first.get("Decision Brief risk", "—")))
-                    _risk2.markdown("**Ompröva när**")
+                    _risk2.markdown("**När ändrar Borsify sig?**")
                     _risk2.write(plain_finance_text(first.get("Decision Brief invalidation", "—")))
                     st.caption(f"Hur bra är informationen?  {first.get('Decision Brief confidence', '—')}")
                     st.markdown(f"**Position:** {first.get('Positionsråd', '—')} · första storlek {first.get('Första positionsstorlek', '—')}")
@@ -7730,7 +7730,7 @@ def main() -> None:
                         st.write(first.get("När ska jag kontrollera igen?", "Kontrollera aktien regelbundet."))
                         st.warning(first.get("När bör jag sälja?", "Sälj när det som gjorde aktien intressant inte längre gäller."))
 
-                    with st.expander("Visa hela modellunderlaget", expanded=False):
+                    with st.expander("Visa hur Borsify räknade", expanded=False):
                         _evidence_rows = [
                             ("Deal Conviction", first.get("Deal Conviction", "—"), first.get("Deal Conviction förklaring", "")),
                             ("Deal Nose", first.get("Deal Nose", "—"), first.get("Deal Nose förklaring", "")),
