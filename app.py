@@ -239,8 +239,8 @@ from finalist_selection import select_deep_finalist_pool
 from investment_company_engine import add_investment_company_context
 from near_buy import near_buy_candidates
 from portfolio_advisor import assess_holding
-from market_universe import load_avanza_universe, universe_symbols, coverage_table, breadth_summary, audit_catalog, catalog_integrity_summary, nordic_coverage_report
-from universe_manager import scan_result_user_text
+from market_universe import load_avanza_universe, universe_symbols, coverage_table, breadth_summary, audit_catalog, catalog_integrity_summary
+from universe_manager import nordic_total, universe_health, scan_result_user_text
 from universe_quality import apply_universe_quality, filter_rankable_universe, quality_summary
 from qc_history import evolve_qc_state, is_quarantined, scan_health, quarantine_summary, should_record_qc_outcome
 from case_ai import build_case_ai_input, build_case_ai_instructions, local_case_explanation
@@ -6711,7 +6711,19 @@ def main() -> None:
     universe_df = load_universe_file()
     file_universe_symbols = universe_df["Ticker"].tolist()
     avanza_universe_df = load_avanza_universe(AVANZA_UNIVERSE_PATH)
-    nordic_catalog_report = nordic_coverage_report(avanza_universe_df)
+    _nordic_total = nordic_total(avanza_universe_df)
+    nordic_catalog_report = {
+        "table": universe_health(avanza_universe_df),
+        "current": _nordic_total["current"],
+        "minimum": _nordic_total["minimum"],
+        "goal": _nordic_total["goal"],
+        "missing_to_minimum": _nordic_total["missing_to_minimum"],
+        "text": (
+            f"Borsify har {_nordic_total['current']} aktier i Sverige, Norge och Danmark i katalogen. "
+            f"Det interna minimimålet är {_nordic_total['minimum']}. "
+            f"{_nordic_total['missing_to_minimum']} katalogplatser återstår till den nivån."
+        ),
+    }
 
     # v3.82: make freshness explicit and put manual refresh in the primary UI.
     last_refresh = st.session_state.get("bq_last_manual_refresh_completed")
