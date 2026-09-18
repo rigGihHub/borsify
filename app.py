@@ -4444,7 +4444,7 @@ def render_overview(
 ) -> None:
     """Extremt komprimerad beslutsvy: ett förstaval först, allt annat sekundärt."""
     st.markdown("## Idag")
-    st.caption("Borsifys starkaste köpförslag just nu.")
+    st.caption("Borsifys starkaste köpförslag just nu. Betyget är 0–100 efter Borsifys kontroller.")
     # Timestamp the recommendation itself, not only the underlying quote date.
     # Europe/Stockholm is explicit so Streamlit Cloud server timezone cannot mislead.
     recommendation_time = pd.Timestamp.now(tz="Europe/Stockholm")
@@ -7695,7 +7695,11 @@ def main() -> None:
                     if str(first.get("Vad har förändrats", "")).strip():
                         a.markdown(f"**Vad har förändrats?** {plain_finance_text(first.get('Vad har förändrats'))}")
                     a.write(plain_finance_text(first.get("Varför köpa") or first.get("Horisontförklaring") or "—"))
-                    score = _num(first.get(score_col))
+                    score = _num(first.get("Borsify slutbetyg"))
+                    if not np.isfinite(score):
+                        score = _num(first.get("Borsify Score"))
+                    if not np.isfinite(score):
+                        score = _num(first.get(score_col))
                     b.metric("Borsify", f"{score:.0f}/100" if np.isfinite(score) else "—")
                     st.caption(plain_finance_text(first.get("Signal förklaring") or ""))
                     _axis1, _axis2 = st.columns(2)
@@ -7740,7 +7744,7 @@ def main() -> None:
                         st.write(f"**Borsify ändrar sig om:** {plain_finance_text(first.get('Decision Brief invalidation', 'bolagets kvalitet eller ekonomi försämras tydligt'))}")
                         st.info("Kontrollera efter varje större rapport och när något viktigt förändras i bolaget.")
 
-                    with st.expander("Visa hur Borsify räknade", expanded=False):
+                    with st.expander("Visa hur Borsify räknade (tekniska detaljer)", expanded=False):
                         _evidence_rows = [
                             ("Deal Conviction", first.get("Deal Conviction", "—"), first.get("Deal Conviction förklaring", "")),
                             ("Deal Nose", first.get("Deal Nose", "—"), first.get("Deal Nose förklaring", "")),
