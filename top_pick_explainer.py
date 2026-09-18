@@ -33,7 +33,10 @@ def _pair_edges(winner,other,score_col):
 def explain_top_pick(ranked:pd.DataFrame,score_col:str,horizon:str)->dict[str,Any]:
     if ranked is None or ranked.empty:
         return {"Varför #1":"Borsify hittade ingen aktie som klarade alla krav.","Förstavalets fördelar":"","Utmanarnas fördelar":"","Jämförelseunderlag":pd.DataFrame()}
-    top=ranked.head(3).copy(); winner=top.iloc[0]; comparisons=[]; challenger=[]
+    top=ranked.head(3).copy()
+    # The visible comparison must use the same specialist-aware score as the ranking.
+    score_col = "Borsify slutbetyg" if "Borsify slutbetyg" in top.columns else score_col
+    winner=top.iloc[0]; comparisons=[]; challenger=[]
     for pos in range(1,len(top)):
         other=top.iloc[pos]; wins,losses=_pair_edges(winner,other,score_col); label=_label(other)
         if wins: comparisons.append(f"Jämfört med {label} " + " och ".join(wins[:2]))
