@@ -1501,11 +1501,11 @@ def build_short_term_longlist(df: pd.DataFrame, benchmark: dict[str, Any] | None
                     str(row.get("Sektor") or ""), str(row.get("Bransch") or ""),
                     raw.get("quarterly_income"), raw.get("quarterly_cashflow"), raw.get("quarterly_balance")
                 )
-                assessment.update(sector_kpis)
-                _kpi_context = {**row.to_dict(), **assessment}
-                _kpi_context.update(assess_business_management_intelligence(_kpi_context))
-                assessment.update(assess_kpi_inflection(_kpi_context))
                 inflection = assess_inflection(inflection_metrics)
+                inflection.update(sector_kpis)
+                _kpi_context = {**row.to_dict(), **inflection}
+                _kpi_context.update(assess_business_management_intelligence(_kpi_context))
+                inflection.update(assess_kpi_inflection(_kpi_context))
                 post_report = build_post_report_drift(
                     raw.get("earnings_history"), raw.get("price_history"), inflection_metrics
                 )
