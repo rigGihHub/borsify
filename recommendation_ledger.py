@@ -689,3 +689,29 @@ def calibration_by_deal_conviction(recommendations: pd.DataFrame, outcomes: pd.D
         "monotonic":monotonic,
         "message":"Endast frysta point-in-time Deal Conviction-värden används. Tabellen är deskriptiv; Borsify ändrar inte vikter automatiskt från små kohorter.",
     }
+
+def outcome_summary_by_type(recommendations: pd.DataFrame, outcomes: pd.DataFrame) -> pd.DataFrame:
+    """Keep short and long recommendation families separate in validation."""
+    cols=["Typ","Förslag","Typiskt resultat","Snittresultat","Jämförda med index","Typiskt mot index","Snitt mot index","Slog index"]
+    if recommendations is None or recommendations.empty or outcomes is None or outcomes.empty:
+        return pd.DataFrame(columns=cols)
+    if "record_id" not in recommendations.columns or "horizon_type" not in recommendations.columns:
+        return pd.DataFrame(columns=cols)
+    merged=outcomes.merge(recommendations[["record_id","horizon_type"]],on="record_id",how="left")
+    rows=[]
+    labels={"short":"Sälj snart","long":"Längre sikt"}
+    for typ,g in merged.groupby("horizon_type",dropna=False):
+        ret=pd.to_numeric(g.get("return_pct"),errors="coerce").dropna()
+        excess=pd.to_numeric(g.get("excess_return_pct"),errors="coerce").dropna()
+        if ret.empty: continue
+        rows.append({
+            "Typ":labels.get(str(typ),str(typ)),
+            "Förslag":int(len(ret)),
+            "Typiskt resultat":float(ret.median()),
+            "Snittresultat":float(ret.mean()),
+            "Jämförda med index":int(len(excess)),
+            "Typiskt mot index":float(excess.median()) if len(excess) else np.nan,
+            "Snitt mot index":float(excess.mean()) if len(excess) else np.nan,
+            "Slog index":float((excess>0).mean()) if len(excess) else np.nan,
+        })
+    return pd.DataFrame(rows,columns=cols)
