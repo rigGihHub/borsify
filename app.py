@@ -3896,7 +3896,7 @@ def render_quick_change_target(scored: pd.DataFrame, signal_history: pd.DataFram
                     "coverage": _num(wr.get("Datatäckning")),
                 }
                 journal = assess_case_change(hist, current_case)
-                st.markdown("**Case Journal · vad har förändrats?**")
+                st.markdown("**Vad har förändrats sedan jag började följa aktien?**")
                 delta = _num(journal.get("score_delta"))
                 delta_text = f"{delta:+.1f} poäng sedan start" if np.isfinite(delta) else "historiken byggs upp"
                 st.write(f"**{journal.get('status', 'Historiken byggs upp')}** · {delta_text}")
@@ -8040,8 +8040,8 @@ def main() -> None:
                 watch_df["_watch_order"] = watch_df["Ticker"].map(order).fillna(9999)
                 watch_df = watch_df.sort_values("_watch_order").drop(columns=["_watch_order"])
                 watch_display = dataframe_for_display(watch_df)
-                watch_display.insert(4, "Score Δ", [score_change(str(r["Ticker"]), profile, float(r["Borsify Score"])) for _, r in watch_df.iterrows()])
-                st.dataframe(watch_display, use_container_width=True, hide_index=True, column_config={"Score Δ": st.column_config.NumberColumn("Score Δ", format="%+.1f")})
+                watch_display.insert(4, "Betyg ändring", [score_change(str(r["Ticker"]), profile, float(r["Borsify Score"])) for _, r in watch_df.iterrows()])
+                st.dataframe(watch_display, use_container_width=True, hide_index=True, column_config={"Betyg ändring": st.column_config.NumberColumn("Betyg ändring", format="%+.1f")})
                 st.download_button("Exportera bevakningslista", data="Ticker\n" + "\n".join(watched), file_name="borsify_bevakning.csv", mime="text/csv")
 
             st.markdown("#### Varför bevakar jag den? · intressepris och signaler")
@@ -8078,7 +8078,7 @@ def main() -> None:
                         st.write(f"**{journal.get('status', 'Historiken byggs upp')}** · {delta_text}")
                         days = journal.get("days_followed")
                         if days is not None:
-                            st.caption(f"Följd i cirka {int(days)} dagar. Det här beskriver förändringar i Borsifys mätbild – inte ett automatiskt köp- eller säljbeslut.")
+                            st.caption(f"Följd i cirka {int(days)} dagar. Det här visar vad som har förändrats i Borsifys analys – det är inte automatiskt ett köp- eller säljbeslut.")
                         for change in journal.get("changes", []):
                             st.write(f"• {change}")
                         jt = journal_table(hist)
