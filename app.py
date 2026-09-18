@@ -5363,10 +5363,11 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                 o3.metric("Gick upp", f"{summary['hit_rate']:.0%}")
                 o4.metric("Steg minst 10 %", f"{summary['gain_10_rate']:.0%}")
                 if int(summary.get("benchmark_evaluated", 0)):
-                    q1, q2, q3 = st.columns(3)
+                    q1, q2, q3, q4 = st.columns(4)
                     q1.metric("Förslag jämförda med index", int(summary["benchmark_evaluated"]))
                     q2.metric("Typiskt bättre/sämre än index", f"{summary['median_excess_return']:+.1%}" if np.isfinite(summary.get("median_excess_return", np.nan)) else "—")
-                    q3.metric("Andel som slog index", f"{summary['beat_benchmark_rate']:.0%}" if np.isfinite(summary.get("beat_benchmark_rate", np.nan)) else "—")
+                    q3.metric("I snitt bättre/sämre än index", f"{summary['mean_excess_return']:+.1%}" if np.isfinite(summary.get("mean_excess_return", np.nan)) else "—")
+                    q4.metric("Andel som slog index", f"{summary['beat_benchmark_rate']:.0%}" if np.isfinite(summary.get("beat_benchmark_rate", np.nan)) else "—")
                     if np.isfinite(summary.get("median_sessions_to_best", np.nan)):
                         st.caption(f"Medianen nådde periodens bästa nivå efter cirka {summary['median_sessions_to_best']:.0f} handelssessioner. Det beskriver vägen i efterhand – inte hur snabbt nästa case kommer att fungera.")
                 st.caption(str(summary["message"]))
