@@ -7123,12 +7123,13 @@ def main() -> None:
     except Exception:
         st.session_state["bq_prefilter_validation"] = {}
 
+    # Keep compatibility during Streamlit rolling deploys where app.py can reload
+    # before the updated search_filters module. Apply dividend filtering below too.
     filtered = apply_country_price_filters(
         scored,
         countries=selected_countries,
         min_price_sek=min_price_sek,
         max_price_sek=max_price_sek,
-        dividend_only=dividend_only,
     )
     if min_market_cap > 0:
         cap_ok = filtered["Börsvärde BSEK"] >= min_market_cap
@@ -7139,10 +7140,10 @@ def main() -> None:
         if allow_missing_filter_data: turnover_ok = turnover_ok | filtered["Omsättning MSEK/dag"].isna()
         filtered = filtered[turnover_ok]
     if require_positive: filtered = filtered[filtered["P/E"].notna() & (filtered["P/E"] > 0)]
-    if dividend_only and float(min_dividend_yield) > 0:
-        dy = pd.to_numeric(filtered["Direktavkastning"], errors="coerce")
+    if dividend_only:
+        dy = pd.to_numeric(filtered.get("Direktavkastning"), errors="coerce")
         min_yield = float(min_dividend_yield) / 100.0
-        filtered = filtered[dy.notna() & (dy >= min_yield)]
+        filtered = filtered[dy.notna() & (dy > 0) & (dy >= min_yield)]
     filtered = apply_discovery_intent(filtered, discovery_intent)
     filtered = apply_search_horizon(filtered, search_horizon, add_horizon_scores)
     avanza_symbol_set = set(avanza_universe_df.get("Ticker", pd.Series(dtype=str)).astype(str).str.upper()) if not avanza_universe_df.empty else set()
