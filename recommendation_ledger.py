@@ -588,6 +588,7 @@ def outcome_summary(recommendations: pd.DataFrame, outcomes: pd.DataFrame) -> di
         "benchmark_evaluated": int(pd.to_numeric(valid.get("excess_return_pct"), errors="coerce").notna().sum()) if "excess_return_pct" in valid.columns else 0,
         "median_excess_return": float(pd.to_numeric(valid["excess_return_pct"], errors="coerce").dropna().median()) if "excess_return_pct" in valid.columns and pd.to_numeric(valid["excess_return_pct"], errors="coerce").notna().any() else np.nan,
         "beat_benchmark_rate": float((pd.to_numeric(valid["excess_return_pct"], errors="coerce").dropna() > 0).mean()) if "excess_return_pct" in valid.columns and pd.to_numeric(valid["excess_return_pct"], errors="coerce").notna().any() else np.nan,
+        "mean_excess_return": float(pd.to_numeric(valid["excess_return_pct"], errors="coerce").dropna().mean()) if "excess_return_pct" in valid.columns and pd.to_numeric(valid["excess_return_pct"], errors="coerce").notna().any() else np.nan,
         "median_sessions_to_best": float(pd.to_numeric(valid["sessions_to_best"], errors="coerce").dropna().median()) if "sessions_to_best" in valid.columns and pd.to_numeric(valid["sessions_to_best"], errors="coerce").notna().any() else np.nan,
         "message": "Deskriptiv uppföljning av frysta point-in-time-rekommendationer. Jämförelsen mot index är ungefärlig och resultatet är inte ett bevis på framtida överavkastning.",
     }
