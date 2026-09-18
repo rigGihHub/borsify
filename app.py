@@ -6966,9 +6966,9 @@ def main() -> None:
     qc_states_before = get_universe_qc_states()
     quarantine_symbols = active_quarantine_symbols(qc_states_before)
     retry_quarantine = st.sidebar.checkbox(
-        "Omtesta karantän denna körning",
+        "Testa problemaktier igen",
         value=False,
-        help="Normalt hoppas återkommande problemtickers över i 7 dagar. Slå på detta om du vill tvinga fram ett nytt test nu.",
+        help="Aktier med återkommande datafel hoppas normalt över i 7 dagar. Slå på detta för att prova dem igen nu.",
     )
     requested_symbols = list(dict.fromkeys(symbols))
     if retry_quarantine:
@@ -6979,7 +6979,7 @@ def main() -> None:
     st.session_state["bq_qc_skipped_quarantine"] = int(len(skipped_quarantine))
 
     if not scan_symbols:
-        st.warning("Alla valda tickers ligger just nu i QC-karantän. Aktivera 'Omtesta karantän denna körning' för att prova dem igen.")
+        st.warning("Alla valda tickers ligger just nu i tillfällig paus efter datafel. Aktivera 'Testa problemaktier igen' för att prova dem igen.")
         st.stop()
 
     start = time.perf_counter()
@@ -7175,7 +7175,7 @@ def main() -> None:
     filtered = apply_search_horizon(filtered, search_horizon, add_horizon_scores)
     avanza_symbol_set = set(avanza_universe_df.get("Ticker", pd.Series(dtype=str)).astype(str).str.upper()) if not avanza_universe_df.empty else set()
     filtered["Avanza-universum"] = filtered.get("Ticker", pd.Series("", index=filtered.index)).astype(str).str.upper().isin(avanza_symbol_set)
-    # v3.52 Fundamental Change Radar: compare today's broad scan with the latest
+    # v3.52 Nya förbättringar i bolagen: compare today's broad scan with the latest
     # older point-in-time universe snapshot. Same-day data cannot be its own baseline
     # and missing historical fields are never backfilled.
     try:
@@ -7246,15 +7246,15 @@ def main() -> None:
         st.caption(f"{len(filtered)} aktier är kvar efter dina val · prisinformation från {latest_price_date}{market_note}{country_text}{active_price_text}{horizon_text}")
         if "Fundamental förändring antal" in filtered.columns:
             _change_count = int((pd.to_numeric(filtered["Fundamental förändring antal"], errors="coerce").fillna(0) > 0).sum())
-            st.caption(f"Fundamental Change Radar: {_change_count} aktier med verifierad ny förbättring mot en äldre fryst bredscan. Radarn skapar inget nytt score.")
+            st.caption(f"Nya förbättringar i bolagen: {_change_count} aktier med verifierad ny förbättring mot en äldre fryst bredscan. Radarn skapar inget nytt score.")
         discovery_diag = st.session_state.get("bq_discovery_coverage", {})
         if isinstance(discovery_diag, dict) and discovery_diag.get("pool"):
             lens_counts = discovery_diag.get("lens_counts", {}) or {}
             represented = ", ".join(f"{k} {v}" for k, v in lens_counts.items() if v)
             st.caption(
-                f"Discovery 2.0: {int(discovery_diag.get('pool', 0))} kandidater reserveras för bredare djupurval"
+                f"Fler sätt att hitta intressanta aktier: {int(discovery_diag.get('pool', 0))} aktier väljs ut för en extra noggrann kontroll"
                 + (f" · {represented}" if represented else "")
-                + ". Det är inget nytt score."
+                + ". Det ändrar inte aktiens betyg i sig."
             )
         if isinstance(scan_metrics, dict) and scan_metrics:
             cache_hits = int(scan_metrics.get("fundamental_persistent_cache", 0) or 0)
@@ -7281,7 +7281,7 @@ def main() -> None:
     watch_df_global = scored[scored["Ticker"].isin(watched_global)].copy() if watched_global else pd.DataFrame()
     missing_global = [sym for sym in watched_global if sym not in set(scored["Ticker"])]
     if missing_global:
-        with st.spinner(f"Hämtar {len(missing_global)} bevakade aktier utanför aktuellt universum…"):
+        with st.spinner(f"Hämtar {len(missing_global)} bevakade aktier utanför den valda aktielistan…"):
             extra_raw_global, _ = scan_universe(missing_global)
         if not extra_raw_global.empty:
             extra_scored_global = add_scores(extra_raw_global, profile)
