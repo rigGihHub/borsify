@@ -47,5 +47,8 @@ def explain_top_pick(ranked:pd.DataFrame,score_col:str,horizon:str)->dict[str,An
     headline=(f"Borsify väljer {name} först. " + ". ".join(comparisons) + ".") if comparisons else f"Borsify väljer {name} först eftersom aktien klarar kraven och ingen annan godkänd aktie tydligt är bättre i jämförelsen."
     if challenger: headline += " Den är ändå inte bäst på allt."
     cols=[c for c in ["Ticker","Namn",score_col,"Ingångsläge","Bolagsbedömning"] if c in top.columns]
-    view=top[cols].copy(); view.insert(0,"#",range(1,len(view)+1))
+    view=top[cols].copy()
+    if score_col in view.columns:
+        view=view.rename(columns={score_col:"Borsify slutbetyg"})
+    view.insert(0,"#",range(1,len(view)+1))
     return {"Varför #1":headline,"Förstavalets fördelar":". ".join(comparisons),"Utmanarnas fördelar":". ".join(challenger) if challenger else "Ingen annan godkänd aktie har en tydlig fördel i den här jämförelsen.","Jämförelseunderlag":view}
