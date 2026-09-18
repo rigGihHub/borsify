@@ -40,3 +40,26 @@ def candidate_status(ticker: str, country: str, price_usable: bool, duplicate: b
     if not price_usable:
         return "Karantän – kursdata fungerar inte"
     return "Klar för katalog efter marknads-/handelskontroll"
+
+def validate_candidate_batch(candidates: pd.DataFrame, existing: pd.DataFrame, price_status: dict[str, bool]) -> pd.DataFrame:
+    """Prepare discovered listings for catalog admission without trusting discovery alone."""
+    if candidates is None or candidates.empty:
+        return pd.DataFrame(columns=["Ticker","Land","Nivå","Universe status"])
+    known = set(existing.get("Ticker", pd.Series(dtype=str)).astype(str).str.upper()) if existing is not None else set()
+    rows = []
+    for _, row in candidates.iterrows():
+        ticker = str(row.get("Ticker") or "").upper().strip()
+        country = str(row.get("Land") or "").strip()
+        status = candidate_status(ticker, country, bool(price_status.get(ticker)), ticker in known)
+        rec = row.to_dict()
+        rec["Ticker"] = ticker
+        rec["Universe status"] = status
+        rec["Kursdata fungerar"] = bool(price_status.get(ticker))
+        rows.append(rec)
+    return pd.DataFrame(rows)
+
+def admission_ready(candidates: pd.DataFrame) -> pd.DataFrame:
+    """Only candidates with usable quote history move forward; tradability is checked separately."""
+    if candidates is None or candidates.empty or "Universe status" not in candidates.columns:
+        return pd.DataFrame(columns=candidates.columns if isinstance(candidates, pd.DataFrame) else [])
+    return candidates[candidates["Universe status"].eq("Klar för katalog efter marknads-/handelskontroll")].copy()
