@@ -239,7 +239,7 @@ from finalist_selection import select_deep_finalist_pool
 from investment_company_engine import add_investment_company_context
 from near_buy import near_buy_candidates
 from portfolio_advisor import assess_holding
-from market_universe import load_avanza_universe, universe_symbols, coverage_table, breadth_summary, audit_catalog, catalog_integrity_summary
+from market_universe import load_avanza_universe, universe_symbols, coverage_table, breadth_summary, audit_catalog, catalog_integrity_summary, nordic_coverage_report
 from universe_quality import apply_universe_quality, filter_rankable_universe, quality_summary
 from qc_history import evolve_qc_state, is_quarantined, scan_health, quarantine_summary, should_record_qc_outcome
 from case_ai import build_case_ai_input, build_case_ai_instructions, local_case_explanation
@@ -6710,6 +6710,7 @@ def main() -> None:
     universe_df = load_universe_file()
     file_universe_symbols = universe_df["Ticker"].tolist()
     avanza_universe_df = load_avanza_universe(AVANZA_UNIVERSE_PATH)
+    nordic_catalog_report = nordic_coverage_report(avanza_universe_df)
 
     # v3.82: make freshness explicit and put manual refresh in the primary UI.
     last_refresh = st.session_state.get("bq_last_manual_refresh_completed")
@@ -6905,6 +6906,12 @@ def main() -> None:
                     st.caption("Bevakning och historik sparas i molnet.")
             else:
                 st.caption("Lokalt läge · konfigurera Supabase för konto och molnsynk.")
+
+    if market == "Sverige + Norge + Danmark":
+        with st.expander("Hur många aktier söker Borsify igenom?", expanded=False):
+            st.write(nordic_catalog_report["text"])
+            st.caption("Det här är Borsifys katalog, inte ett påstående om hur många aktier som totalt finns noterade på börserna.")
+            st.dataframe(nordic_catalog_report["table"], hide_index=True, use_container_width=True)
 
     market_config = MARKET_CONFIGS.get(market, {})
     benchmark_symbol = market_config.get("benchmark")
