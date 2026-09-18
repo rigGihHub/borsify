@@ -594,6 +594,27 @@ def outcome_summary(recommendations: pd.DataFrame, outcomes: pd.DataFrame) -> di
     }
 
 
+def outcome_summary_by_horizon(recommendations: pd.DataFrame, outcomes: pd.DataFrame) -> pd.DataFrame:
+    """Compare matured results separately so unlike holding periods are never mixed."""
+    cols=["Tid efter förslaget","Antal","Typiskt resultat","Snittresultat","Typiskt mot index","Snitt mot index","Slog index"]
+    if recommendations is None or recommendations.empty or outcomes is None or outcomes.empty:
+        return pd.DataFrame(columns=cols)
+    rows=[]
+    for horizon, group in outcomes.groupby("horizon", dropna=False):
+        summary=outcome_summary(recommendations, group)
+        if not summary.get("evaluated",0):
+            continue
+        rows.append({
+            "Tid efter förslaget":str(horizon),
+            "Antal":int(summary["evaluated"]),
+            "Typiskt resultat":summary.get("median_return",np.nan),
+            "Snittresultat":summary.get("mean_return",np.nan),
+            "Typiskt mot index":summary.get("median_excess_return",np.nan),
+            "Snitt mot index":summary.get("mean_excess_return",np.nan),
+            "Slog index":summary.get("beat_benchmark_rate",np.nan),
+        })
+    return pd.DataFrame(rows,columns=cols)
+
 def calibration_by_gate(recommendations: pd.DataFrame, outcomes: pd.DataFrame, horizon: str) -> pd.DataFrame:
     if recommendations is None or recommendations.empty or outcomes is None or outcomes.empty:
         return pd.DataFrame()
