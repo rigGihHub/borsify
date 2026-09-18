@@ -6871,7 +6871,7 @@ def main() -> None:
             min_market_cap = st.number_input("Min börsvärde (mdr SEK)", 0.0, value=default_cap, step=1.0)
             min_turnover = st.number_input("Min handel/dag (MSEK)", 0.0, value=default_turnover, step=1.0)
             require_positive = st.checkbox("Kräv positiv P/E", value=True)
-            dividend_only = st.checkbox("Bara utdelningsaktier", value=False)
+            dividend_only = st.checkbox("Bara utdelningsaktier", value=False, key="filter_dividend_only")
             min_dividend_yield = st.number_input(
                 "Min direktavkastning (%)", 0.0, 20.0, value=0.0, step=0.5,
                 disabled=not dividend_only,
@@ -7128,6 +7128,7 @@ def main() -> None:
         countries=selected_countries,
         min_price_sek=min_price_sek,
         max_price_sek=max_price_sek,
+        dividend_only=dividend_only,
     )
     if min_market_cap > 0:
         cap_ok = filtered["Börsvärde BSEK"] >= min_market_cap
@@ -7138,10 +7139,10 @@ def main() -> None:
         if allow_missing_filter_data: turnover_ok = turnover_ok | filtered["Omsättning MSEK/dag"].isna()
         filtered = filtered[turnover_ok]
     if require_positive: filtered = filtered[filtered["P/E"].notna() & (filtered["P/E"] > 0)]
-    if dividend_only:
+    if dividend_only and float(min_dividend_yield) > 0:
         dy = pd.to_numeric(filtered["Direktavkastning"], errors="coerce")
         min_yield = float(min_dividend_yield) / 100.0
-        filtered = filtered[dy.notna() & (dy > 0) & (dy >= min_yield)]
+        filtered = filtered[dy.notna() & (dy >= min_yield)]
     filtered = apply_discovery_intent(filtered, discovery_intent)
     filtered = apply_search_horizon(filtered, search_horizon, add_horizon_scores)
     avanza_symbol_set = set(avanza_universe_df.get("Ticker", pd.Series(dtype=str)).astype(str).str.upper()) if not avanza_universe_df.empty else set()
