@@ -6,7 +6,7 @@ from typing import Any, MutableMapping
 # and refreshes until the user explicitly changes it. Do not reset these keys when
 # starting a new scan or refreshing market data.
 FILTER_DEFAULTS: dict[str, Any] = {
-    "filter_dividend_only": False,
+    "filter_dividend_only": False,\n    "filter_country": "Alla",\n    "filter_max_price": None,\n    "filter_intent": "Bästa möjligheter just nu",
 }
 
 
@@ -32,3 +32,6 @@ def reset_transient_scan_state(state: MutableMapping[str, Any], keys: list[str])
     for key in keys:
         if key not in sticky:
             state.pop(key, None)
+
+
+def sticky_widget_key(name: str) -> str:\n    """Stable Streamlit key: reruns keep the user choice until they change it."""\n    return f"borsify_sticky_{name}"\n\ndef copy_widget_choice(state: MutableMapping[str, Any], widget_key: str, filter_key: str) -> None:\n    """Copy an explicit UI change into persistent filter state; never reset implicitly."""\n    if widget_key in state:\n        state[filter_key] = state[widget_key]\n
