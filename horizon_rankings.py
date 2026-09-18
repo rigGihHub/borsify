@@ -25,6 +25,7 @@ from margin_recovery_before_consensus import add_margin_recovery_before_consensu
 from revision_breadth import add_revision_breadth
 from deal_conviction import add_deal_conviction
 from user_score import add_user_scores
+from exit_plan import build_near_term_exit_plan
 
 def _num(v: Any) -> float:
     try:
@@ -111,6 +112,11 @@ def top_ranked(df: pd.DataFrame,horizon: str,limit: int=3)->pd.DataFrame:
     out["Vad ändrar Borsifys syn"]=[c["Då skulle Borsify tänka om"] for c in cards]
     out["Relativ styrka text"]=[relative_strength_label(r) for _,r in out.iterrows()]
     out["Marknadsläge text"]=[market_regime_user_text(r) for _,r in out.iterrows()]
+    if horizon == "medium":
+        plans=[build_near_term_exit_plan(r) for _,r in out.iterrows()]
+        out["Tänkt tid att äga"]=[p["Tänkt tid att äga"] for p in plans]
+        out["När ska jag kontrollera igen?"]=[p["När ska jag kontrollera igen?"] for p in plans]
+        out["När bör jag sälja?"]=[p["När bör jag sälja?"] for p in plans]
     return out
 
 def top_three(df: pd.DataFrame,horizon: str)->pd.DataFrame:return top_ranked(df,horizon,limit=3)
