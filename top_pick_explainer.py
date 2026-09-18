@@ -36,6 +36,8 @@ def explain_top_pick(ranked:pd.DataFrame,score_col:str,horizon:str)->dict[str,An
     top=ranked.head(3).copy()
     # The visible comparison must use the same specialist-aware score as the ranking.
     score_col = "Borsify slutbetyg" if "Borsify slutbetyg" in top.columns else score_col
+    # Do not say a lower-ranked challenger has a better overall score. If the
+    # specialist-aware score is equal/close, explain only genuine component edges.
     winner=top.iloc[0]; comparisons=[]; challenger=[]
     for pos in range(1,len(top)):
         other=top.iloc[pos]; wins,losses=_pair_edges(winner,other,score_col); label=_label(other)
