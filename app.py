@@ -113,7 +113,7 @@ from daytrade_universe_validation import (
 )
 from recommendation_ledger import (
     build_recommendation_records, evaluate_record_from_history,
-    outcome_summary, outcome_summary_by_horizon, calibration_by_gate, calibration_by_deal_conviction,
+    outcome_summary, outcome_summary_by_horizon, calibration_by_final_score, calibration_by_gate, calibration_by_deal_conviction,
 )
 from recommendation_relevance import apply_recommendation_relevance
 from recommendation_failure_analysis import (
@@ -5389,6 +5389,22 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         horizon_options,
                         key="ledger_calibration_horizon",
                     )
+                    score_cal = calibration_by_final_score(recs, outs, chosen_h)
+                    if score_cal.get("eligible", 0):
+                        st.markdown("#### Fungerar ett högre Borsify-betyg bättre?")
+                        st.caption("Här kontrollerar Borsify om aktier med högre betyg faktiskt har gått bättre efter förslaget. Små grupper ska inte övertolkas.")
+                        score_show = score_cal.get("table", pd.DataFrame()).copy()
+                        if not score_show.empty:
+                            for col in ["Typiskt resultat","Snittresultat","Slog index","Typiskt mot index"]:
+                                score_show[col] = pd.to_numeric(score_show[col], errors="coerce").map(lambda x: f"{x:+.1%}" if np.isfinite(x) else "—")
+                            st.dataframe(score_show, use_container_width=True, hide_index=True)
+                        if score_cal.get("monotonic") is True:
+                            st.success("Hittills går högre betyg åt rätt håll i de grupper som har tillräckligt med data.")
+                        elif score_cal.get("monotonic") is False:
+                            st.warning("Högre betyg har hittills inte gett bättre resultat på ett tydligt sätt. Betygsskalan behöver mer kontroll innan den kan tolkas som exakt.")
+                        else:
+                            st.info("Det finns ännu för lite data för att avgöra om högre betyg verkligen betyder bättre framtida resultat.")
+
                     cal = calibration_by_gate(recs, outs, chosen_h)
                     if not cal.empty:
                         cal_show = cal.copy()
