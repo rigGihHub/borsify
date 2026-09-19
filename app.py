@@ -5394,6 +5394,8 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         st.markdown("#### Fungerar ett högre Borsify-betyg bättre?")
                         st.caption("Här kontrollerar Borsify om aktier med högre betyg faktiskt har gått bättre efter förslaget. Små grupper ska inte övertolkas.")
                         st.caption(score_calibration_warning(score_cal))
+                        if score_cal.get("status"):
+                            st.caption("Kontrollen gäller bara rekommendationer där dagens slutbetyg faktiskt sparades när förslaget skapades.")
                         score_show = score_cal.get("table", pd.DataFrame()).copy()
                         if not score_show.empty:
                             for col in ["Typiskt resultat","Snittresultat","Slog index","Typiskt mot index"]:
