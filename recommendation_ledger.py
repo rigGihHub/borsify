@@ -615,6 +615,39 @@ def outcome_summary_by_horizon(recommendations: pd.DataFrame, outcomes: pd.DataF
         })
     return pd.DataFrame(rows,columns=cols)
 
+def calibration_by_final_score(recommendations: pd.DataFrame, outcomes: pd.DataFrame, horizon: str) -> dict[str, Any]:
+    """Test whether higher frozen final scores actually correspond to better later outcomes."""
+    empty={"status":"För lite data","eligible":0,"table":pd.DataFrame(),"monotonic":None}
+    if recommendations is None or recommendations.empty or outcomes is None or outcomes.empty:
+        return empty
+    if "final_score" not in recommendations.columns:
+        return empty
+    o=outcomes[outcomes["horizon"].astype(str).eq(str(horizon))].copy()
+    if o.empty:return empty
+    merged=o.merge(recommendations[["record_id","final_score"]],on="record_id",how="left")
+    merged["final_score"]=pd.to_numeric(merged["final_score"],errors="coerce")
+    merged["return_pct"]=pd.to_numeric(merged["return_pct"],errors="coerce")
+    merged=merged.dropna(subset=["final_score","return_pct"])
+    if merged.empty:return empty
+    bins=[-0.001,59.999,69.999,79.999,89.999,100.001]
+    labels=["0–59","60–69","70–79","80–89","90–100"]
+    merged["Betyg"]=pd.cut(merged["final_score"],bins=bins,labels=labels,include_lowest=True)
+    rows=[]
+    for label,g in merged.groupby("Betyg",observed=False):
+        if g.empty:continue
+        excess=pd.to_numeric(g.get("excess_return_pct"),errors="coerce") if "excess_return_pct" in g.columns else pd.Series(dtype=float)
+        rows.append({"Borsify-betyg":str(label),"Antal":int(len(g)),"Typiskt resultat":float(g["return_pct"].median()),"Snittresultat":float(g["return_pct"].mean()),"Slog index":float((excess.dropna()>0).mean()) if excess.notna().any() else np.nan,"Typiskt mot index":float(excess.dropna().median()) if excess.notna().any() else np.nan})
+    table=pd.DataFrame(rows)
+    mature=table[table["Antal"]>=5].copy() if not table.empty else table
+    monotonic=None
+    if len(mature)>=3:
+        order={v:i for i,v in enumerate(labels)}
+        mature["_o"]=mature["Borsify-betyg"].map(order)
+        vals=mature.sort_values("_o")["Typiskt mot index"].dropna().tolist()
+        if len(vals)>=3:monotonic=all(b>=a for a,b in zip(vals,vals[1:]))
+    return {"status":"Data finns – ännu inte statistiskt bevis" if len(merged)>=20 else "För lite data för säker slutsats","eligible":int(len(merged)),"table":table,"monotonic":monotonic}
+
+
 def calibration_by_gate(recommendations: pd.DataFrame, outcomes: pd.DataFrame, horizon: str) -> pd.DataFrame:
     if recommendations is None or recommendations.empty or outcomes is None or outcomes.empty:
         return pd.DataFrame()
