@@ -648,6 +648,19 @@ def calibration_by_final_score(recommendations: pd.DataFrame, outcomes: pd.DataF
     return {"status":"Data finns – ännu inte statistiskt bevis" if len(merged)>=20 else "För lite data för säker slutsats","eligible":int(len(merged)),"table":table,"monotonic":monotonic}
 
 
+def score_calibration_warning(calibration: dict[str, Any]) -> str:
+    """Conservative user-facing interpretation; never promote from tiny samples."""
+    n=int(calibration.get("eligible",0) or 0)
+    monotonic=calibration.get("monotonic")
+    if n < 20:
+        return f"För få kontrollerade förslag ({n}) för att bedöma betygsskalan säkert."
+    if monotonic is False:
+        return "Varning: högre Borsify-betyg har ännu inte gett tydligt bättre framtida resultat. Tolka små poängskillnader försiktigt."
+    if monotonic is True:
+        return "Högre Borsify-betyg har hittills hängt ihop med bättre resultat i de grupper som har tillräckligt med data. Det är fortfarande ingen garanti."
+    return "Det finns ännu inte tillräckligt många jämförbara betygsgrupper för en säker slutsats."
+
+
 def calibration_by_gate(recommendations: pd.DataFrame, outcomes: pd.DataFrame, horizon: str) -> pd.DataFrame:
     if recommendations is None or recommendations.empty or outcomes is None or outcomes.empty:
         return pd.DataFrame()
