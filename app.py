@@ -113,7 +113,7 @@ from daytrade_universe_validation import (
 )
 from recommendation_ledger import (
     build_recommendation_records, evaluate_record_from_history,
-    outcome_summary, calibration_by_gate, calibration_by_deal_conviction,
+    outcome_summary, outcome_summary_by_horizon, calibration_by_gate, calibration_by_deal_conviction,
 )
 from recommendation_relevance import apply_recommendation_relevance
 from recommendation_failure_analysis import (
@@ -5371,6 +5371,16 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                     if np.isfinite(summary.get("median_sessions_to_best", np.nan)):
                         st.caption(f"Medianen nådde periodens bästa nivå efter cirka {summary['median_sessions_to_best']:.0f} handelssessioner. Det beskriver vägen i efterhand – inte hur snabbt nästa case kommer att fungera.")
                 st.caption(str(summary["message"]))
+
+                by_horizon = outcome_summary_by_horizon(recs, outs)
+                if not by_horizon.empty:
+                    st.markdown("#### Resultat efter olika lång tid")
+                    horizon_names = {"1w":"1 vecka","1m":"1 månad","3m":"3 månader","6m":"6 månader","1y":"1 år","2y":"2 år","12m":"1 år"}
+                    show = by_horizon.copy()
+                    show["Tid efter förslaget"] = show["Tid efter förslaget"].map(lambda x: horizon_names.get(str(x), str(x)))
+                    for col in ["Typiskt resultat","Snittresultat","Typiskt mot index","Snitt mot index","Slog index"]:
+                        show[col] = pd.to_numeric(show[col], errors="coerce").map(lambda x: f"{x:+.1%}" if np.isfinite(x) else "—")
+                    st.dataframe(show, use_container_width=True, hide_index=True)
 
                 horizon_options = sorted(outs["horizon"].dropna().astype(str).unique().tolist())
                 if horizon_options:
