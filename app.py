@@ -113,7 +113,7 @@ from daytrade_universe_validation import (
 )
 from recommendation_ledger import (
     build_recommendation_records, evaluate_record_from_history,
-    outcome_summary, outcome_summary_by_horizon, calibration_by_final_score, calibration_by_gate, calibration_by_deal_conviction,
+    outcome_summary, outcome_summary_by_horizon, calibration_by_final_score, score_calibration_warning, calibration_by_gate, calibration_by_deal_conviction,
 )
 from recommendation_relevance import apply_recommendation_relevance
 from recommendation_failure_analysis import (
@@ -5393,6 +5393,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                     if score_cal.get("eligible", 0):
                         st.markdown("#### Fungerar ett högre Borsify-betyg bättre?")
                         st.caption("Här kontrollerar Borsify om aktier med högre betyg faktiskt har gått bättre efter förslaget. Små grupper ska inte övertolkas.")
+                        st.caption(score_calibration_warning(score_cal))
                         score_show = score_cal.get("table", pd.DataFrame()).copy()
                         if not score_show.empty:
                             for col in ["Typiskt resultat","Snittresultat","Slog index","Typiskt mot index"]:
