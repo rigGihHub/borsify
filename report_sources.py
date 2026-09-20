@@ -74,3 +74,29 @@ def accept_report_candidate(candidate: dict[str, Any], country: str) -> tuple[bo
     if priority>2:
         return False,"Källan är inte börsens offentliggörande eller bolagets egen IR-sida."
     return True,"Godkänd primär rapportkälla."
+
+def report_freshness(published_at: str, now: Any = None) -> dict[str, Any]:
+    """Tell the UI whether a discovered report is current enough to influence a fresh recommendation."""
+    import pandas as pd
+    try:
+        published=pd.Timestamp(published_at)
+        if published.tzinfo is None: published=published.tz_localize("Europe/Stockholm")
+        current=pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="Europe/Stockholm")
+        if current.tzinfo is None: current=current.tz_localize("Europe/Stockholm")
+        days=max(0,int((current-published).total_seconds()//86400))
+    except Exception:
+        return {"known":False,"days":None,"label":"Rapportens datum är okänt"}
+    if days<=120: label=f"Senaste rapporten är {days} dagar gammal"
+    elif days<=220: label=f"Rapporten är {days} dagar gammal – kontrollera om en nyare rapport finns"
+    else: label=f"Rapporten är {days} dagar gammal – för gammal för att ensam stödja ett färskt köpförslag"
+    return {"known":True,"days":days,"label":label}
+
+def report_identity(candidate: dict[str, Any]) -> dict[str, str]:
+    """Stable provenance fields stored beside any extracted report facts."""
+    return {
+        "Rapport titel":str(candidate.get("title") or ""),
+        "Rapport typ":str(candidate.get("report_type") or ""),
+        "Rapport publicerad":str(candidate.get("published_at") or ""),
+        "Rapport källa":str(candidate.get("source") or ""),
+        "Rapport URL":str(candidate.get("attachment_url") or candidate.get("url") or ""),
+    }
