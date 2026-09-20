@@ -36,3 +36,41 @@ def report_source_status(country: str) -> str:
     src=source_for_country(country)
     if not src:return "Ingen primär rapportkälla konfigurerad för marknaden."
     return f"Primär rapportkälla: {src.source_name}. Borsify ska använda bolagets offentliggjorda rapport före sekundära sammanfattningar."
+
+def discovery_queries(company_name: str, ticker: str, country: str) -> list[str]:
+    """Free/public discovery plan. Results still require issuer/source verification."""
+    company=str(company_name or "").strip()
+    ticker=str(ticker or "").strip()
+    if country in {"Sverige","Danmark"}:
+        return [
+            f'site:nasdaq.com/european-market-activity/news/company-news "{company}" report',
+            f'"{company}" investor relations quarterly report',
+            f'"{company}" investor relations annual report',
+        ]
+    if country=="Norge":
+        return [
+            f'site:live.euronext.com "{company}" financial report',
+            f'"{company}" investor relations quarterly report',
+            f'"{company}" investor relations annual report',
+        ]
+    return [f'"{company}" investor relations financial report']
+
+def source_priority(url: str, country: str) -> int:
+    """Lower is better: exchange disclosure, issuer IR, then everything else."""
+    u=str(url or "").lower()
+    if country in {"Sverige","Danmark"} and ("nasdaq.com" in u or "news.eu.nasdaq.com" in u):
+        return 1
+    if country=="Norge" and ("euronext.com" in u or "newsweb.no" in u):
+        return 1
+    if any(x in u for x in ["/investor","/ir/","investor-relations","investors"]):
+        return 2
+    return 9
+
+def accept_report_candidate(candidate: dict[str, Any], country: str) -> tuple[bool,str]:
+    if not candidate.get("is_financial_report"):
+        return False,"Inte identifierad som finansiell rapport."
+    url=str(candidate.get("attachment_url") or candidate.get("url") or "")
+    priority=source_priority(url,country)
+    if priority>2:
+        return False,"Källan är inte börsens offentliggörande eller bolagets egen IR-sida."
+    return True,"Godkänd primär rapportkälla."
