@@ -12,7 +12,9 @@ def _num(value: Any) -> float:
         return float("nan")
 
 def user_score(row: Any) -> float:
-    raw = _num(row.get("Borsify Score"))
+    raw = _num(row.get("Borsify grundbetyg"))
+    if not math.isfinite(raw):
+        raw = _num(row.get("Borsify Score"))
     if not math.isfinite(raw):
         return float("nan")
     final = raw
@@ -23,7 +25,9 @@ def user_score(row: Any) -> float:
     return max(0.0, min(100.0, final))
 
 def user_score_explanation(row: Any) -> str:
-    raw = _num(row.get("Borsify Score"))
+    raw = _num(row.get("Borsify grundbetyg"))
+    if not math.isfinite(raw):
+        raw = _num(row.get("Borsify Score"))
     final = user_score(row)
     if bool(row.get("Investmentbolag")) and math.isfinite(raw) and math.isfinite(final) and final < raw:
         return "Grundanalysen gav ett högre betyg, men Borsify sänker betyget efter kontrollen av investmentbolagets pris jämfört med värdet på innehaven."
@@ -35,7 +39,13 @@ def add_user_scores(frame: pd.DataFrame) -> pd.DataFrame:
     out = frame.copy()
     out["Borsify slutbetyg"] = [user_score(row) for _, row in out.iterrows()]
     if "Borsify Score" in out.columns:
-        out["Borsify grundbetyg"] = out["Borsify Score"]
+        if "Borsify grundbetyg" not in out.columns:
+            out["Borsify grundbetyg"] = out["Borsify Score"]
+        else:
+            out["Borsify grundbetyg"] = out["Borsify grundbetyg"].where(
+                pd.to_numeric(out["Borsify grundbetyg"], errors="coerce").notna(),
+                out["Borsify Score"],
+            )
         out["Borsify Score"] = out["Borsify slutbetyg"]
     out["Borsify slutbetyg förklaring"] = [user_score_explanation(row) for _, row in out.iterrows()]
     return out
