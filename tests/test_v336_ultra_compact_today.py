@@ -3,7 +3,7 @@ from pathlib import Path
 APP = (Path(__file__).resolve().parents[1] / "app.py").read_text(encoding="utf-8")
 
 def test_v336_version_and_compact_today_shell():
-    assert 'APP_VERSION = "4.39.1"' in APP
+    assert 'APP_VERSION = "4.39.2"' in APP
     assert 'st.markdown("## Idag")' in APP
     assert 'Förstaval' in APP
     assert '**Vad kan få aktien att bli mer intressant:**' in APP

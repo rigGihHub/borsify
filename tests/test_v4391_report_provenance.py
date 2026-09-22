@@ -33,7 +33,7 @@ def test_report_delta_calculation_remains_separate_from_report_provenance():
 
 def test_app_wires_report_provenance_into_all_report_delta_paths():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.39.1"' in app
+    assert 'APP_VERSION = "4.39.2"' in app
     assert "from report_verification import report_data_provenance" in app
     assert app.count("build_report_delta_with_provenance(") == 4
     assert "Originalrapporten markeras bara som verifierad" in app
@@ -44,3 +44,6 @@ def test_point_in_time_ledger_freezes_report_provenance():
     assert "Report Delta datagrund" in cols
     assert "Rapport text verifierad" in cols
     assert "Rapport kontroll" in cols
+    assert "Rapport URL" in cols
+    assert "Rapport titel" in cols
+    assert "Guidance nämns" in cols

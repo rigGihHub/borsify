@@ -1,4 +1,11 @@
-# Borsify v4.39.1
+# Borsify v4.39.2
+
+## v4.39.2 – Primary report fetch groundwork
+
+- Lägger till en smal primärkälle-fetcher för redan upptäckta rapportlänkar från börs/bolags-IR.
+- Hämtar HTML/text och PDF-text konservativt och markerar rapporten som läst först efter käll- och textverifiering.
+- Kopplar fetchern till Report Delta-proveniens utan att påverka ranking eller score.
+- Sekundärkällor hämtas inte som rapporter.
 
 ## v4.39.1 – Report Delta provenance
 

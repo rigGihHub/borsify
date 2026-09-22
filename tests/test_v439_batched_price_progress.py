@@ -47,4 +47,4 @@ def test_scan_updates_price_progress_per_completed_batch():
 
 
 def test_release_version_is_4390():
-    assert 'APP_VERSION = "4.39.1"' in APP
+    assert 'APP_VERSION = "4.39.2"' in APP

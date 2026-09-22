@@ -88,7 +88,7 @@ def test_release_wiring():
     app=open("app.py",encoding="utf-8").read()
     rank=open("horizon_rankings.py",encoding="utf-8").read()
     ledger=open("recommendation_ledger.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.39.1"' in app
+    assert 'APP_VERSION = "4.39.2"' in app
     assert "Balance-sheet optionality" in app
     assert "add_balance_sheet_optionality(ranked, horizon)" in app
     assert "add_balance_sheet_optionality(out,horizon)" in rank.replace(" ", "")

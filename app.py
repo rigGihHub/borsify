@@ -82,6 +82,7 @@ from expectation_acceleration_engine import build_expectation_acceleration
 from expectation_change import build_expectation_change
 from post_report_drift import build_post_report_drift
 from report_delta_engine import build_report_delta
+from report_fetcher import verify_primary_report_from_events
 from report_verification import report_data_provenance
 from capital_allocation_insider_radar import build_capital_allocation_insider_radar
 from management_signal_layer import build_management_signal
@@ -264,7 +265,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "4.39.1"
+APP_VERSION = "4.39.2"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""
@@ -1108,11 +1109,21 @@ def build_report_delta_with_provenance(
     inflection_metrics: dict[str, Any],
     post_report: dict[str, Any],
     raw: dict[str, Any] | None,
+    row: pd.Series | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Keep Report Delta useful without overstating original-report coverage."""
     source = raw if isinstance(raw, dict) else {}
     result = build_report_delta(inflection_metrics, post_report, source.get("catalyst_events"))
-    result.update(report_data_provenance(source))
+    context = row if row is not None else {}
+    verified_report = None
+    try:
+        verified_report = verify_primary_report_from_events(
+            source.get("catalyst_events"),
+            str(context.get("Land") or context.get("Landkod") or ""),
+        )
+    except Exception:
+        verified_report = None
+    result.update(report_data_provenance(source, verified_report))
     return result
 
 def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) -> pd.DataFrame:
@@ -1157,7 +1168,7 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
                     post_report = build_post_report_drift(
                         raw.get("earnings_history"), raw.get("price_history"), metrics
                     )
-                    report_delta = build_report_delta_with_provenance(metrics, post_report, raw)
+                    report_delta = build_report_delta_with_provenance(metrics, post_report, raw, estimate_probe.loc[idx])
                     _symbol = str(estimate_probe.loc[idx].get("Ticker", ""))
                     _report_snap = snapshot_from_report_delta(_symbol, metrics, post_report, report_delta, _borsify_today())
                     try:
@@ -1232,7 +1243,8 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
             "Report Delta evidens", "Report Delta positiva", "Report Delta negativa",
             "Report Delta guidance", "Report Delta kursreaktion", "Report Delta fortsatt rörelse",
             "Report Delta förklaring", "Report Delta datagrund", "Rapport läst",
-            "Rapport text verifierad", "Rapport kontroll", "Rapport användartext",
+            "Rapport text verifierad", "Rapport titel", "Rapport typ", "Rapport publicerad",
+            "Rapport URL", "Rapport kontroll", "Rapport användartext",
             "Rapportminne status", "Rapportminne historik", "Rapportminne förbättring",
             "Rapportminne försämring", "Rapportminne rapportdatum",
             "Rapportminne jämförelserapport", "Rapportminne förklaring",
@@ -1365,7 +1377,7 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
                     raw.get("earnings_history"), raw.get("price_history"), inflection_metrics
                 )
                 assessment.update(post_report)
-                assessment.update(build_report_delta_with_provenance(inflection_metrics, post_report, raw))
+                assessment.update(build_report_delta_with_provenance(inflection_metrics, post_report, raw, row))
                 owner_snapshot = {**row.to_dict(), **(raw.get("fast_info") or {})}
                 assessment.update(build_capital_allocation_insider_radar(
                     raw.get("cashflow"), raw.get("balance"), raw.get("insider_transactions"), owner_snapshot
@@ -1524,7 +1536,7 @@ def build_short_term_longlist(df: pd.DataFrame, benchmark: dict[str, Any] | None
                     raw.get("earnings_history"), raw.get("price_history"), inflection_metrics
                 )
                 inflection.update(post_report)
-                inflection.update(build_report_delta_with_provenance(inflection_metrics, post_report, raw))
+                inflection.update(build_report_delta_with_provenance(inflection_metrics, post_report, raw, row))
                 inflection.update(build_expectation_change({**row.to_dict(), **inflection}))
                 inflection.update(build_fresh_change({**row.to_dict(), **inflection}))
                 catalyst = build_catalyst_assessment({**row.to_dict(), **inflection}, raw.get("catalyst_events"))
@@ -7507,7 +7519,8 @@ def main() -> None:
                     _cols = [c for c in [
                         "Ticker", "Namn", "Report Delta status", "Report Delta positiva", "Report Delta negativa",
                         "Report Delta kursreaktion", "Report Delta fortsatt rörelse", "Report Delta guidance",
-                        "Report Delta datagrund", "Rapport text verifierad", "Rapport kontroll",
+                        "Report Delta datagrund", "Rapport text verifierad", "Rapport titel",
+                        "Rapport publicerad", "Rapport URL", "Rapport kontroll",
                         "Report Delta förklaring"
                     ] if c in _interesting.columns]
                     st.dataframe(_interesting[_cols], use_container_width=True, hide_index=True)
