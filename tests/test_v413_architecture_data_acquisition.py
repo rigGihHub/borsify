@@ -4,7 +4,7 @@ import data_acquisition as da
 
 def test_app_wrappers_delegate_to_data_acquisition():
     app=Path("app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.39.0"' in app
+    assert 'APP_VERSION = "4.39.1"' in app
     assert "_deep_statements_source(symbol)" in app
     assert "_bulk_price_history_source(symbols)" in app
     assert "_fx_rates_to_sek_source(currencies, FX_TO_SEK_SYMBOLS, major_currency)" in app

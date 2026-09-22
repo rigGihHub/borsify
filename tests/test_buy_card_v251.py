@@ -20,10 +20,10 @@ def test_every_horizon_answers_four_decision_questions():
     for horizon in ("day","medium","long","lifetime"):
         card=build_buy_card(base_row(),horizon)
         assert set(card)=={
-            "Varför köpa",
-            "Varför nu",
-            "Största risk",
-            "Vad skulle få Borsify att ändra sig",
+            "Därför kan aktien vara värd att köpa",
+            "Varför just nu",
+            "Det här är den största risken",
+            "Då skulle Borsify tänka om",
         }
         assert all(str(v).strip() for v in card.values())
 
@@ -31,14 +31,14 @@ def test_risk_flags_are_not_hidden():
     row=base_row()
     row["Riskflaggor"]="hög skuldsättning, fallande lång trend"
     card=build_buy_card(row,"long")
-    assert "skuldsättning" in card["Största risk"].lower()
+    assert "skuldsättning" in card["Det här är den största risken"].lower()
 
 def test_missing_data_is_described_cautiously():
     row=base_row()
     row["Riskflaggor"]="—"
     row["Datatäckning"]=.55
     card=build_buy_card(row,"long")
-    assert "inte komplett" in card["Största risk"].lower()
+    assert "saknar en del information" in card["Det här är den största risken"].lower()
 
 def test_lifetime_card_uses_plain_language():
     card=build_buy_card(base_row(),"lifetime")

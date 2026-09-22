@@ -17,21 +17,21 @@ def test_brief_uses_existing_evidence_without_new_score():
         "Analysis Confidence": "🟢 Gott",
     })
     assert result["Decision Brief beslut"] == "KÖP NU"
-    assert result["Decision Brief market wrong"] == "Låg börda och flera förbättringar."
-    assert result["Decision Brief expectations"] == "💎 Låga förväntningar börjar överträffas"
+    assert result["Decision Brief market wrong"] == "låg verifierad bevakning"
+    assert result["Decision Brief expectations"] == "Priset verkar inte kräva att allt går perfekt för bolaget."
     assert not any("Score" in key for key in result)
 
 
 def test_missing_evidence_is_exposed_not_invented():
     result = build_decision_brief({})
-    assert "kan inte verifiera" in result["Decision Brief market wrong"]
-    assert "Ingen konkret" in result["Decision Brief recognition"]
-    assert "okänd" in result["Decision Brief timing"]
+    assert "kan inte säkert förklara" in result["Decision Brief market wrong"]
+    assert "ingen tydlig händelse" in result["Decision Brief recognition"]
+    assert "vet inte när" in result["Decision Brief timing"]
 
 
 def test_app_wires_brief_after_recognition_without_ranking_effect():
     app = open("app.py", encoding="utf-8").read()
     rankings = open("horizon_rankings.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "4.39.0"' in app
+    assert 'APP_VERSION = "4.39.1"' in app
     assert "add_decision_briefs(ranked)" in app
     assert "Decision Brief" not in rankings

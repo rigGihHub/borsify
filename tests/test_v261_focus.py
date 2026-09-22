@@ -6,7 +6,7 @@ def test_version_is_261_or_newer():
 
 def test_homepage_starts_with_three_focus_cases():
     assert 'st.markdown("## Idag")' in APP
-    assert "Borsifys starkaste köpcase just nu." in APP
+    assert "Borsifys starkaste köpförslag just nu." in APP
     assert 'daily_shortlist.head(3)' in APP
 
 def test_secondary_horizon_lists_are_collapsed():

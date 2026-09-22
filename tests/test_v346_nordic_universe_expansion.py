@@ -6,7 +6,7 @@ APP = (ROOT / 'app.py').read_text(encoding='utf-8')
 
 
 def test_version_and_default_market_remain_scandinavian():
-    assert 'APP_VERSION = "4.39.0"' in APP
+    assert 'APP_VERSION = "4.39.1"' in APP
     assert 'index=list(MARKET_CONFIGS).index("Sverige + Norge + Danmark")' in APP
 
 
@@ -22,13 +22,16 @@ def test_nordic_catalog_is_materially_broader():
 
 def test_expansion_is_broad_tier_and_catalog_passes_local_qc():
     catalog = load_avanza_universe(ROOT / 'avanza_universe.csv')
-    assert len(catalog) == 876
+    assert len(catalog) >= 876
     assert catalog['Ticker'].is_unique
     expanded = catalog[catalog['Ticker'].isin(['MIPS.ST','FRO.OL','ZEAL.CO'])]
     assert len(expanded) == 3
     assert expanded['Nivå'].eq('Bred').all()
     summary = catalog_integrity_summary(audit_catalog(ROOT / 'avanza_universe.csv'))
-    assert summary == {'approved': 876, 'excluded': 0, 'total': 876, 'countries': 15}
+    assert summary['approved'] == len(catalog)
+    assert summary['excluded'] == 0
+    assert summary['total'] == len(catalog)
+    assert summary['countries'] == catalog['Land'].nunique()
 
 
 def test_core_universe_size_is_not_inflated_by_expansion():

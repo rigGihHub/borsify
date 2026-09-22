@@ -60,6 +60,6 @@ def test_partial_quality_keeps_blocker():
 
 def test_app_wires_data_quality_and_release_version():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.39.0"' in app
+    assert 'APP_VERSION = "4.39.1"' in app
     assert "apply_data_quality(apply_cost_turnover(" in app
     assert "datakvalitet mäts nu direkt" in app

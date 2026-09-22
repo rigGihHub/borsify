@@ -5,8 +5,8 @@ def test_version_is_263_or_newer():
     assert 'APP_VERSION = "2.62.0"' not in APP
 
 def test_scan_performance_diagnostics_are_visible():
-    assert "Datakontroll:" in APP
-    assert "bolag från cache" in APP
+    assert "Teknisk datastatus:" in APP
+    assert "fundamental cacheträff" in APP
     assert "kursdel" in APP
     assert "nya Yahoo-anrop" in APP
 

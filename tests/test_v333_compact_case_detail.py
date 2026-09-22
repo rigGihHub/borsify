@@ -2,10 +2,10 @@ from pathlib import Path
 APP=(Path(__file__).resolve().parents[1]/"app.py").read_text(encoding="utf-8")
 
 def test_v341_keeps_compact_primary_case():
-    assert 'APP_VERSION = "4.39.0"' in APP
+    assert 'APP_VERSION = "4.39.1"' in APP
     assert 'Förstaval' in APP
-    assert 'Vad kan stänga gapet' in APP
-    assert 'Största risken' in APP
+    assert 'Vad kan få aktien att bli mer intressant' in APP
+    assert 'Största risk' in APP
 
 def test_engine_details_are_secondary():
     assert APP.index('Fler analysverktyg') > APP.index('Vad rekommenderar Borsify idag?')

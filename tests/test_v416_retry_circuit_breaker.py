@@ -88,6 +88,6 @@ def test_failure_transparency_marks_open_circuit():
 def test_app_version_and_frozen_resilience_provenance():
     app=open("app.py",encoding="utf-8").read()
     ledger=open("recommendation_ledger.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.39.0"' in app
+    assert 'APP_VERSION = "4.39.1"' in app
     assert "Fundamental circuit open" in app
     assert '"Deep source circuits open"' in ledger

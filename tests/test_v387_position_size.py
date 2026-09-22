@@ -28,7 +28,7 @@ def test_yellow_company_never_gets_full_initial_size():
 
 def test_app_exposes_size_and_version():
     app=open('app.py',encoding='utf-8').read()
-    assert 'APP_VERSION = "4.39.0"' in app
+    assert 'APP_VERSION = "4.39.1"' in app
     assert '"Första positionsstorlek"' in app
     assert 'Första storlek' in app
     assert 'andel av din egen tänkta maxposition' in app

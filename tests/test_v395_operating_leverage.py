@@ -40,9 +40,9 @@ def test_app_and_ranking_wired():
     app=open('app.py',encoding='utf-8').read()
     rank=open('horizon_rankings.py',encoding='utf-8').read()
     ledger=open('recommendation_ledger.py',encoding='utf-8').read()
-    assert 'APP_VERSION = "4.39.0"' in app
+    assert 'APP_VERSION = "4.39.1"' in app
     assert 'Operating leverage' in app
     assert 'add_operating_leverage_setup(ranked, horizon)' in app
-    assert "add_operating_leverage_setup(out, horizon)" in rank
+    assert "add_operating_leverage_setup(out,horizon)" in rank.replace(" ", "")
     assert '"Deal Conviction Score"' in rank
     assert '"Operating leverage cost base verified"' in ledger

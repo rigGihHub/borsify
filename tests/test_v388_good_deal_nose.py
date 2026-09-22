@@ -38,7 +38,7 @@ def test_plain_good_company_without_underpricing_is_not_a_fynd():
 def test_app_exposes_deal_nose_and_release():
     app=open('app.py',encoding='utf-8').read()
     ranks=open('horizon_rankings.py',encoding='utf-8').read()
-    assert 'APP_VERSION = "4.39.0"' in app
+    assert 'APP_VERSION = "4.39.1"' in app
     assert '"God affär"' in app
     assert '"Affärsläge"' in app
     assert 'Affärsläge rangvärde' in ranks

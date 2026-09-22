@@ -19,10 +19,24 @@ def test_empty_multi_symbol_batch_does_not_fan_out_to_single_requests():
     assert partial_fallback_symbols(("A",), {}, max_fallbacks=8) == ["A"]
 
 
-def test_partial_batch_fallback_is_bounded_and_only_targets_missing_symbols():
+def test_partial_batch_fallback_skips_heavily_degraded_multi_symbol_batches():
     batch = tuple(f"S{i}" for i in range(20))
     selected = partial_fallback_symbols(batch, {"S0": object(), "S2": object()}, max_fallbacks=4)
-    assert selected == ["S1", "S3", "S4", "S5"]
+    assert selected == []
+
+
+def test_partial_batch_fallback_is_bounded_when_bulk_mostly_succeeded():
+    batch = tuple(f"S{i}" for i in range(20))
+    price_map = {f"S{i}": object() for i in range(16)}
+    selected = partial_fallback_symbols(batch, price_map, max_fallbacks=3)
+    assert selected == ["S16", "S17", "S18"]
+
+
+def test_partial_batch_fallback_only_targets_missing_symbols():
+    batch = tuple(f"S{i}" for i in range(8))
+    price_map = {"S0": object(), "S2": object(), "S3": object(), "S4": object(), "S5": object(), "S6": object()}
+    selected = partial_fallback_symbols(batch, price_map, max_fallbacks=4)
+    assert selected == ["S1", "S7"]
 
 
 def test_scan_updates_price_progress_per_completed_batch():
@@ -33,4 +47,4 @@ def test_scan_updates_price_progress_per_completed_batch():
 
 
 def test_release_version_is_4390():
-    assert 'APP_VERSION = "4.39.0"' in APP
+    assert 'APP_VERSION = "4.39.1"' in APP

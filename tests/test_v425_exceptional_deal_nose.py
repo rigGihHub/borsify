@@ -27,6 +27,6 @@ def test_deal_nose_is_advisory_not_ranking_input():
 
 def test_app_exposes_deal_nose():
     app=open('app.py',encoding='utf-8').read()
-    assert 'APP_VERSION = "4.39.0"' in app
+    assert 'APP_VERSION = "4.39.1"' in app
     assert 'add_exceptional_deal_nose(ranked, horizon)' in app
     assert '"Deal Nose"' in app

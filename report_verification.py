@@ -47,3 +47,35 @@ def can_support_fresh_recommendation(report: dict[str, Any]) -> bool:
         return False
     freshness = str(report.get("Rapport färskhet") or "").lower()
     return "för gammal" not in freshness and "okänt" not in freshness
+
+def report_data_provenance(raw: dict[str, Any] | None, verified_report: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Expose what report evidence the current analysis actually has.
+
+    Until a primary-source report fetcher supplies verified report text, Report
+    Delta is based on structured market/fundamental fields. That can be useful,
+    but it must not be presented as if Borsify read the original report.
+    """
+    if verified_report and bool(verified_report.get("Rapport läst")):
+        return {
+            **verified_report,
+            "Rapport text verifierad": True,
+            "Rapport primärkälla verifierad": True,
+            "Report Delta datagrund": "Verifierad primär rapporttext + strukturerade bolags- och kursdata.",
+        }
+
+    source = ""
+    if isinstance(raw, dict):
+        health = raw.get("source_health")
+        if isinstance(health, dict):
+            source = str(health.get("source") or "")
+    return {
+        "Rapport läst": False,
+        "Rapport text verifierad": False,
+        "Rapport primärkälla verifierad": False,
+        "Rapport textlängd": 0,
+        "Rapport källa": source or "Ej verifierad primär rapportkälla",
+        "Rapport URL": "",
+        "Rapport kontroll": "Ingen verifierad primär rapporttext hämtades för den här analysen.",
+        "Rapport användartext": "Borsify har inte läst originalrapporten. Report Delta bygger på strukturerade bolagsdata, estimatfält och kursreaktion, inte på verifierad rapporttext.",
+        "Report Delta datagrund": "Strukturerade yfinance/Yahoo-fält och kursdata; ingen verifierad primär rapporttext.",
+    }

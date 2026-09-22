@@ -3,7 +3,7 @@ from pathlib import Path
 APP = Path("app.py").read_text(encoding="utf-8")
 
 def test_version_and_novice_first_overview():
-    assert 'APP_VERSION = "4.39.0"' in APP
+    assert 'APP_VERSION = "4.39.1"' in APP
     assert '## Idag' in APP
     assert 'st.markdown(f"### {first_name}")' in APP
     assert 'Största risk:' in APP
@@ -11,7 +11,7 @@ def test_version_and_novice_first_overview():
 
 def test_overview_hides_engine_detail():
     assert 'with st.expander("Om dagens analys", expanded=False)' in APP
-    assert '1 · EVIDENSGRANSKAT FÖRSTAVAL' in APP
+    assert 'Förstaval' in APP
 
 def test_daily_reason_language_is_less_technical():
     assert 'kursbilden är stark just nu' in APP

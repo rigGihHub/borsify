@@ -82,6 +82,7 @@ from expectation_acceleration_engine import build_expectation_acceleration
 from expectation_change import build_expectation_change
 from post_report_drift import build_post_report_drift
 from report_delta_engine import build_report_delta
+from report_verification import report_data_provenance
 from capital_allocation_insider_radar import build_capital_allocation_insider_radar
 from management_signal_layer import build_management_signal
 from management_signal_memory import snapshot_from_management_signal, previous_management_snapshot, save_management_snapshot, compare_management_signal_memory, ensure_management_signal_memory_table
@@ -263,7 +264,7 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "4.39.0"
+APP_VERSION = "4.39.1"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""
@@ -1103,6 +1104,17 @@ def fetch_deep_statements(symbol: str) -> dict[str, Any]:
     """Fetch deep statements via the dedicated acquisition layer."""
     return _deep_statements_source(symbol)
 
+def build_report_delta_with_provenance(
+    inflection_metrics: dict[str, Any],
+    post_report: dict[str, Any],
+    raw: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Keep Report Delta useful without overstating original-report coverage."""
+    source = raw if isinstance(raw, dict) else {}
+    result = build_report_delta(inflection_metrics, post_report, source.get("catalyst_events"))
+    result.update(report_data_provenance(source))
+    return result
+
 def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) -> pd.DataFrame:
     """Deep-check a small multi-lens finalist pool using multi-year statements.
 
@@ -1145,7 +1157,7 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
                     post_report = build_post_report_drift(
                         raw.get("earnings_history"), raw.get("price_history"), metrics
                     )
-                    report_delta = build_report_delta(metrics, post_report, raw.get("catalyst_events"))
+                    report_delta = build_report_delta_with_provenance(metrics, post_report, raw)
                     _symbol = str(estimate_probe.loc[idx].get("Ticker", ""))
                     _report_snap = snapshot_from_report_delta(_symbol, metrics, post_report, report_delta, _borsify_today())
                     try:
@@ -1219,7 +1231,8 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
             "Report Delta status", "Report Delta kandidat", "Report Delta underreaktion",
             "Report Delta evidens", "Report Delta positiva", "Report Delta negativa",
             "Report Delta guidance", "Report Delta kursreaktion", "Report Delta fortsatt rörelse",
-            "Report Delta förklaring",
+            "Report Delta förklaring", "Report Delta datagrund", "Rapport läst",
+            "Rapport text verifierad", "Rapport kontroll", "Rapport användartext",
             "Rapportminne status", "Rapportminne historik", "Rapportminne förbättring",
             "Rapportminne försämring", "Rapportminne rapportdatum",
             "Rapportminne jämförelserapport", "Rapportminne förklaring",
@@ -1352,7 +1365,7 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
                     raw.get("earnings_history"), raw.get("price_history"), inflection_metrics
                 )
                 assessment.update(post_report)
-                assessment.update(build_report_delta(inflection_metrics, post_report, raw.get("catalyst_events")))
+                assessment.update(build_report_delta_with_provenance(inflection_metrics, post_report, raw))
                 owner_snapshot = {**row.to_dict(), **(raw.get("fast_info") or {})}
                 assessment.update(build_capital_allocation_insider_radar(
                     raw.get("cashflow"), raw.get("balance"), raw.get("insider_transactions"), owner_snapshot
@@ -1511,7 +1524,7 @@ def build_short_term_longlist(df: pd.DataFrame, benchmark: dict[str, Any] | None
                     raw.get("earnings_history"), raw.get("price_history"), inflection_metrics
                 )
                 inflection.update(post_report)
-                inflection.update(build_report_delta(inflection_metrics, post_report, raw.get("catalyst_events")))
+                inflection.update(build_report_delta_with_provenance(inflection_metrics, post_report, raw))
                 inflection.update(build_expectation_change({**row.to_dict(), **inflection}))
                 inflection.update(build_fresh_change({**row.to_dict(), **inflection}))
                 catalyst = build_catalyst_assessment({**row.to_dict(), **inflection}, raw.get("catalyst_events"))
@@ -7494,10 +7507,11 @@ def main() -> None:
                     _cols = [c for c in [
                         "Ticker", "Namn", "Report Delta status", "Report Delta positiva", "Report Delta negativa",
                         "Report Delta kursreaktion", "Report Delta fortsatt rörelse", "Report Delta guidance",
+                        "Report Delta datagrund", "Rapport text verifierad", "Rapport kontroll",
                         "Report Delta förklaring"
                     ] if c in _interesting.columns]
                     st.dataframe(_interesting[_cols], use_container_width=True, hide_index=True)
-                    st.caption("Report Delta skapar inget nytt score. Den skiljer på vad bolagets siffror faktiskt ändrade, vad analytikerna gjorde efter rapporten och hur kursen reagerade. Saknad konsensus för omsättning/marginal fylls aldrig i med gissningar.")
+                    st.caption("Report Delta skapar inget nytt score. Den skiljer på vad bolagets siffror faktiskt ändrade, vad analytikerna gjorde efter rapporten och hur kursen reagerade. Originalrapporten markeras bara som verifierad när Borsify faktiskt har primär rapporttext; saknad konsensus för omsättning/marginal fylls aldrig i med gissningar.")
 
         owner_signal_view = st.session_state.get("bq_owner_signal_radar", pd.DataFrame())
         if isinstance(owner_signal_view, pd.DataFrame) and not owner_signal_view.empty and "Ägarsignal status" in owner_signal_view.columns:

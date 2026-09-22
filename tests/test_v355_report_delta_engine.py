@@ -85,6 +85,6 @@ def test_report_delta_fields_are_frozen_in_point_in_time_ledger_schema():
 
 def test_v355_is_wired_into_app():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "4.39.0"' in app
+    assert 'APP_VERSION = "4.39.1"' in app
     assert "build_report_delta" in app
     assert "Vad förändrades i senaste rapporten?" in app

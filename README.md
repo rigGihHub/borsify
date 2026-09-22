@@ -1,4 +1,11 @@
-# Borsify v4.38.2
+# Borsify v4.39.1
+
+## v4.39.1 – Report Delta provenance
+
+- Kopplar rapportproveniens till alla Report Delta-vägar i huvudflödet.
+- Markerar uttryckligen när Borsify inte har verifierad primär rapporttext och när Report Delta bara bygger på strukturerade yfinance/Yahoo-fält, estimatfält och kursreaktion.
+- Fryser rapportproveniens i Recommendation Ledger så framtida validering inte kan missta gamla beslut för full rapportläsning.
+- Själva Report Delta-signalen och rankingen ändras inte.
 
 ## v4.38.2 – Streamlit Import Hotfix
 

@@ -38,7 +38,7 @@ def test_decision_support_does_not_modify_deal_conviction():
 
 def test_app_imports_all_restored_health_layers_and_version():
     app=open("app.py",encoding="utf-8").read()
-    assert 'APP_VERSION = "4.39.0"' in app
+    assert 'APP_VERSION = "4.39.1"' in app
     assert "from data_failure_transparency import" in app
     assert "from source_health_dashboard import" in app
     assert "from analysis_confidence import" in app
