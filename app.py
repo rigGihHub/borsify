@@ -7090,6 +7090,29 @@ def main() -> None:
         if errors: st.code("\n".join(errors[:12]))
         st.stop()
 
+    # Keep the core recommendation paths on the first screen, especially on
+    # mobile. The same session-state targets are used by the detailed view.
+    st.markdown("### Rekommendationer")
+    st.caption("Välj tidshorisont för att öppna Borsifys rekommendationer.")
+    _top_q1, _top_q2 = st.columns(2)
+    if _top_q1.button("Köp nu · sälj snart", use_container_width=True, key="top_quick_horizon_medium"):
+        st.session_state["bq_horizon_focus"] = "medium"
+        st.session_state["main_page"] = "Fler aktier"
+        st.rerun()
+    if _top_q2.button("Köp nu · behåll 1 år", use_container_width=True, key="top_quick_horizon_year"):
+        st.session_state["bq_horizon_focus"] = "year"
+        st.session_state["main_page"] = "Fler aktier"
+        st.rerun()
+    _top_q3, _top_q4 = st.columns(2)
+    if _top_q3.button("Köp för lång sikt", use_container_width=True, key="top_quick_horizon_lifetime"):
+        st.session_state["bq_horizon_focus"] = "lifetime"
+        st.session_state["main_page"] = "Fler aktier"
+        st.rerun()
+    if _top_q4.button("Up & Coming", use_container_width=True, key="top_quick_up_and_coming"):
+        st.session_state["bq_horizon_focus"] = "upcoming"
+        st.session_state["main_page"] = "Fler aktier"
+        st.rerun()
+
     if refresh:
         st.session_state["bq_last_manual_refresh_completed"] = pd.Timestamp.now(tz="UTC").isoformat()
         st.session_state["bq_manual_refresh_in_progress"] = False
@@ -7346,25 +7369,6 @@ def main() -> None:
     signal_history_global = get_signal_history()
     unread_signals = int((~signal_history_global["is_read"].astype(bool)).sum()) if not signal_history_global.empty else 0
     save_radar_history(filtered.head(max(20, top_n)), profile)
-
-    st.markdown("### Gå direkt till")
-    _q1, _q2, _q3 = st.columns(3)
-    if _q1.button("⚡ Köp nu · sälj snart", use_container_width=True, key="quick_horizon_medium"):
-        st.session_state["bq_horizon_focus"] = "medium"
-        st.session_state["main_page"] = "Fler aktier"
-        st.rerun()
-    if _q2.button("📈 Köp nu · behåll 1 år", use_container_width=True, key="quick_horizon_year"):
-        st.session_state["bq_horizon_focus"] = "year"
-        st.session_state["main_page"] = "Fler aktier"
-        st.rerun()
-    if _q3.button("♾️ Köp för resten av livet", use_container_width=True, key="quick_horizon_lifetime"):
-        st.session_state["bq_horizon_focus"] = "lifetime"
-        st.session_state["main_page"] = "Fler aktier"
-        st.rerun()
-    if st.button("🚀 Visa bästa up and coming-aktierna", use_container_width=True, key="quick_up_and_coming"):
-        st.session_state["bq_horizon_focus"] = "upcoming"
-        st.session_state["main_page"] = "Fler aktier"
-        st.rerun()
 
     page = st.radio(
         "Välj vy",
