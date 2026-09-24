@@ -7234,28 +7234,36 @@ def main() -> None:
 
     # Keep compatibility during Streamlit rolling deploys where app.py can reload
     # before the updated search_filters module. Apply dividend filtering below too.
+    filter_counts: dict[str, int] = {"Analyserade": int(len(scored))}
     filtered = apply_country_price_filters(
         scored,
         countries=selected_countries,
         min_price_sek=min_price_sek,
         max_price_sek=max_price_sek,
     )
+    filter_counts["Efter land/pris"] = int(len(filtered))
     if min_market_cap > 0:
         cap_ok = filtered["Börsvärde BSEK"] >= min_market_cap
         if allow_missing_filter_data: cap_ok = cap_ok | filtered["Börsvärde BSEK"].isna()
         filtered = filtered[cap_ok]
+    filter_counts["Efter börsvärde"] = int(len(filtered))
     if min_turnover > 0:
         turnover_ok = filtered["Omsättning MSEK/dag"] >= min_turnover
         if allow_missing_filter_data: turnover_ok = turnover_ok | filtered["Omsättning MSEK/dag"].isna()
         filtered = filtered[turnover_ok]
+    filter_counts["Efter handel"] = int(len(filtered))
     if require_positive:
         filtered = filtered[filtered["P/E"].notna() & (filtered["P/E"] > 0)]
+    filter_counts["Efter positiv P/E"] = int(len(filtered))
     if dividend_only:
         dy = pd.to_numeric(filtered.get("Direktavkastning"), errors="coerce")
         min_yield = float(min_dividend_yield) / 100.0
         filtered = filtered[dy.notna() & (dy > 0) & (dy >= min_yield)]
+    filter_counts["Efter utdelning"] = int(len(filtered))
     filtered = apply_discovery_intent(filtered, discovery_intent)
+    filter_counts["Efter sökmål"] = int(len(filtered))
     filtered = apply_search_horizon(filtered, search_horizon, add_horizon_scores)
+    filter_counts["Slutligt urval"] = int(len(filtered))
     avanza_symbol_set = set(avanza_universe_df.get("Ticker", pd.Series(dtype=str)).astype(str).str.upper()) if not avanza_universe_df.empty else set()
     filtered["Avanza-universum"] = filtered.get("Ticker", pd.Series("", index=filtered.index)).astype(str).str.upper().isin(avanza_symbol_set)
     # v3.52 Nya förbättringar i bolagen: compare today's broad scan with the latest
@@ -7320,13 +7328,14 @@ def main() -> None:
         country_text = " · land " + ", ".join(f"{_country_flag(c)} {c}" for c in selected_countries)
     horizon_text = "" if search_horizon == "Alla tidshorisonter" else f" · tid {search_horizon}"
     scan_metrics = st.session_state.get("bq_scan_metrics", {})
-    with st.expander("Om dagens analys", expanded=False):
+    with st.expander("Om dagens analys", expanded=filtered.empty):
         if benchmark_explainer:
             st.caption(benchmark_explainer)
         requested_count = int(scan_metrics.get("requested", len(raw_df))) if isinstance(scan_metrics, dict) else len(raw_df)
         rejected_count = int(scan_metrics.get("price_rejected_before_fundamentals", 0) or 0) if isinstance(scan_metrics, dict) else 0
         st.caption(scan_result_user_text(requested_count, len(raw_df), rejected_count, int(st.session_state.get("bq_qc_skipped_quarantine", 0) or 0)))
         st.caption(f"{len(filtered)} aktier är kvar efter dina val · prisinformation från {latest_price_date}{market_note}{country_text}{active_price_text}{horizon_text}")
+        st.caption("Filterkedja: " + " → ".join(f"{label} {count}" for label, count in filter_counts.items()))
         if "Fundamental förändring antal" in filtered.columns:
             _change_count = int((pd.to_numeric(filtered["Fundamental förändring antal"], errors="coerce").fillna(0) > 0).sum())
             st.caption(f"Nya förbättringar i bolagen: {_change_count} aktier med verifierad ny förbättring mot en äldre fryst bredscan. Radarn skapar inget nytt score.")
