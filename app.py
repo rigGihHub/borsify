@@ -7103,20 +7103,20 @@ def main() -> None:
     st.markdown("### Rekommendationer")
     st.caption("Välj tidshorisont för att öppna Borsifys rekommendationer.")
     _top_q1, _top_q2 = st.columns(2)
-    if _top_q1.button("Köp nu · sälj snart", use_container_width=True, key="top_quick_horizon_medium"):
+    if _top_q1.button("⚡ Köp nu · sälj snart", use_container_width=True, key="top_quick_horizon_medium"):
         st.session_state["bq_horizon_focus"] = "medium"
         st.session_state["main_page"] = "Fler aktier"
         st.rerun()
-    if _top_q2.button("Köp nu · behåll 1 år", use_container_width=True, key="top_quick_horizon_year"):
+    if _top_q2.button("📈 Köp nu · behåll 1 år", use_container_width=True, key="top_quick_horizon_year"):
         st.session_state["bq_horizon_focus"] = "year"
         st.session_state["main_page"] = "Fler aktier"
         st.rerun()
     _top_q3, _top_q4 = st.columns(2)
-    if _top_q3.button("Köp för lång sikt", use_container_width=True, key="top_quick_horizon_lifetime"):
+    if _top_q3.button("♾️ Köp för resten av livet", use_container_width=True, key="top_quick_horizon_lifetime"):
         st.session_state["bq_horizon_focus"] = "lifetime"
         st.session_state["main_page"] = "Fler aktier"
         st.rerun()
-    if _top_q4.button("Up & Coming", use_container_width=True, key="top_quick_up_and_coming"):
+    if _top_q4.button("🚀 Visa bästa up and coming-aktierna", use_container_width=True, key="top_quick_up_and_coming"):
         st.session_state["bq_horizon_focus"] = "upcoming"
         st.session_state["main_page"] = "Fler aktier"
         st.rerun()
