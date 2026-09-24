@@ -43,6 +43,9 @@ def test_app_uses_diverse_finalists_and_full_evidence_before_first_choice():
     assert "finalists = add_user_scores(finalists)" in app
     assert app.index("finalists = add_user_scores(finalists)") < app.index("finalists = add_full_deal_evidence(finalists, \"year\")")
     assert "finalists = add_full_deal_evidence(finalists, \"year\")" in app
+    assert "finalists = select_buy_now(finalists, \"medium\")" in app
+    assert app.index("finalists = select_buy_now(finalists, \"medium\")") < app.index("finalists = add_first_choice_gate(finalists)")
+    assert "finalists = add_action_signals(finalists, \"medium\")" in app
     assert "finalists = add_first_choice_gate(finalists)" in app
     assert "Förstaval" in app
     assert "daily_shortlist, evidence_finalists = build_evidence_gated_shortlist" in app
