@@ -247,6 +247,7 @@ from universe_quality import apply_universe_quality, filter_rankable_universe, q
 from qc_history import evolve_qc_state, is_quarantined, scan_health, quarantine_summary, should_record_qc_outcome
 from case_ai import build_case_ai_input, build_case_ai_instructions, local_case_explanation
 from ai_cost import token_usage, estimate_usage_cost, format_cost_usd
+from user_score import add_user_scores
 
 from edge_lab import (
     build_technical_history, summarize_backtest, summarize_universe_backtest,
@@ -978,6 +979,9 @@ def build_evidence_gated_shortlist(df: pd.DataFrame, profile: str, limit: int = 
         empty = df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
         return empty, empty
     finalists = build_discovery_pool(df, max_candidates=min(12, len(df)))
+    # The first-choice path must use the same specialist-adjusted headline score
+    # as horizon lists, history and the recommendation ledger.
+    finalists = add_user_scores(finalists)
     finalists = add_full_deal_evidence(finalists, "year")
     finalists = add_case_readiness(finalists, "long")
     cases = pd.DataFrame([_daily_case(row, profile) for _, row in finalists.iterrows()], index=finalists.index)
