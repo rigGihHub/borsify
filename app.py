@@ -6946,7 +6946,11 @@ def main() -> None:
             default_turnover = 5.0 if market == "Sverige" else 0.0
             min_market_cap = st.number_input("Min börsvärde (mdr SEK)", 0.0, value=default_cap, step=1.0)
             min_turnover = st.number_input("Min handel/dag (MSEK)", 0.0, value=default_turnover, step=1.0)
-            require_positive = st.checkbox("Kräv positiv P/E", value=True)
+            require_positive = st.checkbox(
+                "Kräv positiv P/E",
+                value=False,
+                help="Avstängt som standard eftersom P/E ofta saknas för tillväxtbolag och bolag med tillfällig förlust. Borsifys köpgrindar gör fortfarande den slutliga kvalitetskontrollen.",
+            )
             dividend_only = st.checkbox("Bara utdelningsaktier", value=False, key="filter_dividend_only")
             min_dividend_yield = st.number_input(
                 "Min direktavkastning (%)", 0.0, 20.0, value=0.0, step=0.5,
@@ -7244,26 +7248,8 @@ def main() -> None:
         turnover_ok = filtered["Omsättning MSEK/dag"] >= min_turnover
         if allow_missing_filter_data: turnover_ok = turnover_ok | filtered["Omsättning MSEK/dag"].isna()
         filtered = filtered[turnover_ok]
-    # A missing P/E is common for growth, cyclical and recently loss-making
-    # companies. Keep the strict filter for deliberate searches, but do not
-    # leave the default recommendation view empty when the data simply lacks it.
-    before_profitability_filter = filtered.copy()
     if require_positive:
         filtered = filtered[filtered["P/E"].notna() & (filtered["P/E"] > 0)]
-        default_search = (
-            discovery_intent == "Bästa möjligheter just nu"
-            and not dividend_only
-            and float(min_price_sek or 0) == 0
-            and float(max_price_sek or 0) == 0
-            and float(min_market_cap or 0) == (5.0 if market == "Sverige" else 0.0)
-            and float(min_turnover or 0) == (5.0 if market == "Sverige" else 0.0)
-        )
-        if filtered.empty and default_search and not before_profitability_filter.empty:
-            filtered = before_profitability_filter
-            st.warning(
-                "Ingen aktie hade verifierad positiv P/E i den aktuella datan. "
-                "Borsify visar därför den breda rankingen och markerar P/E som saknat där det behövs."
-            )
     if dividend_only:
         dy = pd.to_numeric(filtered.get("Direktavkastning"), errors="coerce")
         min_yield = float(min_dividend_yield) / 100.0
