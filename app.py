@@ -988,6 +988,9 @@ def build_evidence_gated_shortlist(df: pd.DataFrame, profile: str, limit: int = 
     # Current first-choice cards must pass the shared purchase and anti-chase gate.
     finalists = select_buy_now(finalists, "medium")
     finalists = add_action_signals(finalists, "medium")
+    # Keep the visible final score and the purchase decision aligned. A horizon
+    # score may pass while specialist controls have lowered the headline score.
+    finalists = finalists[pd.to_numeric(finalists["Borsify Score"], errors="coerce").ge(66)].copy()
     cases = pd.DataFrame([_daily_case(row, profile) for _, row in finalists.iterrows()], index=finalists.index)
     finalists = finalists.drop(columns=[c for c in cases.columns if c in finalists.columns], errors="ignore").join(cases)
 
