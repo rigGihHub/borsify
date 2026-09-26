@@ -25,6 +25,7 @@ from margin_recovery_before_consensus import add_margin_recovery_before_consensu
 from revision_breadth import add_revision_breadth
 from deal_conviction import add_deal_conviction
 from user_score import add_user_scores
+from buy_quality_gate import BUY_THRESHOLDS
 from exit_plan import build_near_term_exit_plan
 
 def _num(v: Any) -> float:
@@ -82,6 +83,13 @@ def top_ranked(df: pd.DataFrame,horizon: str,limit: int=3)->pd.DataFrame:
     col={"day":"Daytrade Score","medium":"Mellan Score","year":"Års Score","long":"Lång Score","lifetime":"Livstid Score"}[horizon]
     gate_horizon="long" if horizon=="year" else horizon
     out=add_horizon_scores(df); out=add_relative_strength(out); out=add_market_regime(out,gate_horizon)
+    # Apply specialist controls before the purchase gate. Otherwise a horizon
+    # score can pass while the visible Borsify final score has already been capped.
+    out=add_user_scores(out)
+    if "Borsify Score" in out.columns:
+        final_floor=BUY_THRESHOLDS[gate_horizon]
+        out=out[pd.to_numeric(out["Borsify Score"],errors="coerce").ge(final_floor)].copy()
+    if out.empty:return out
     # Critical: user-facing Köp nu lists must pass both the normal quality gate and
     # the anti-chase gate. For horizon=year, select_buy_now maps long -> strict year policy.
     out=select_buy_now(out,gate_horizon)
