@@ -49,6 +49,7 @@ from search_explanation import (
 from fundamental_cache import clear_fundamentals_cache, CACHE_MAX_AGE_HOURS
 from scan_snapshot_cache import get_scan_snapshot, put_scan_snapshot, clear_scan_snapshots
 from first_choice_gate import add_first_choice_gate
+from buy_now_selection import select_buy_now
 from price_batching import partial_fallback_symbols, symbol_batches
 from first_choice_audit import build_first_choice_record, save_first_choice_records
 try:
@@ -984,6 +985,9 @@ def build_evidence_gated_shortlist(df: pd.DataFrame, profile: str, limit: int = 
     finalists = add_user_scores(finalists)
     finalists = add_full_deal_evidence(finalists, "year")
     finalists = add_case_readiness(finalists, "long")
+    # Current first-choice cards must pass the shared purchase and anti-chase gate.
+    finalists = select_buy_now(finalists, "medium")
+    finalists = add_action_signals(finalists, "medium")
     cases = pd.DataFrame([_daily_case(row, profile) for _, row in finalists.iterrows()], index=finalists.index)
     finalists = finalists.drop(columns=[c for c in cases.columns if c in finalists.columns], errors="ignore").join(cases)
 
