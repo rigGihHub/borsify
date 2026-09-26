@@ -7765,6 +7765,13 @@ def main() -> None:
                     ranked.loc[_orange & ranked["Signal"].eq("KÖP / ÄG"), ["Signal", "Signal kort"]] = ["BYGG POSITION", "Köp stegvis"]
                 elif horizon == "lifetime":
                     ranked.loc[_red, ["Signal", "Signal kort"]] = ["BEVAKA PRISET", "Bra bolag – jaga inte"]
+                # Entry-timing explanations can downgrade a previously approved
+                # case after the shared buy selector has run. User-facing buy
+                # lists must not show BEVAKA/AVVAKTA as recommendations.
+                ranked = ranked[ranked["Signal"].isin({"KÖP NU", "KÖP", "KÖP / ÄG", "BYGG POSITION"})].copy()
+                if ranked.empty:
+                    st.info("Ingen aktie uppfyller Borsifys köpkrav efter den slutliga pris- och riskkontrollen.")
+                    return ranked
                 history_profile = f"{profile}::horizon::{horizon}"
                 previous_horizon = previous_radar_snapshot(history_profile, limit=10)
                 ranked = add_change_signals(ranked, previous_horizon, score_col, horizon)
