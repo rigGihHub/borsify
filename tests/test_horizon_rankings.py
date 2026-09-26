@@ -44,3 +44,12 @@ def test_lifetime_rewards_quality_and_robustness():
 def test_top_three_has_at_most_three_rows():
     result = top_three(sample(),"medium")
     assert 0 <= len(result) <= 3
+
+def test_specialist_cap_blocks_horizon_buy_when_final_score_is_below_floor():
+    df = sample().copy()
+    df["Borsify Score"] = 90.0
+    df["Investmentbolag"] = False
+    df.loc[0, "Investmentbolag"] = True
+    df.loc[0, "Investmentbolag rankningstak"] = 60.0
+    result = top_three(df, "medium")
+    assert "A" not in set(result.get("Ticker", pd.Series(dtype=str)))
