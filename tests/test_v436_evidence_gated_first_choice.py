@@ -46,6 +46,7 @@ def test_app_uses_diverse_finalists_and_full_evidence_before_first_choice():
     assert "finalists = select_buy_now(finalists, \"medium\")" in app
     assert "finalists = add_action_signals(finalists, \"medium\")" in app
     assert 'finalists = finalists[pd.to_numeric(finalists["Borsify Score"], errors="coerce").ge(66)].copy()' in app
+    assert 'ranked = ranked[ranked["Signal"].isin({"KÖP NU", "KÖP", "KÖP / ÄG", "BYGG POSITION"})].copy()' in app
     assert "finalists = add_first_choice_gate(finalists)" in app
     assert "Förstaval" in app
     assert "daily_shortlist, evidence_finalists = build_evidence_gated_shortlist" in app
