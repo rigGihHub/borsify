@@ -67,3 +67,11 @@ def test_v295_ui_exposes_calibration_without_auto_reweighting():
     assert 'APP_VERSION = "4.39.2"' in app
     assert "Betyder högre Borsify-betyg faktiskt bättre utfall?" in app
     assert "leder aldrig till automatisk viktändring" in app
+
+
+def test_calibration_uses_frozen_final_score_not_horizon_score():
+    recs, outs = _rows(n_per_band=8)
+    recs.loc[recs["score"] == 55, "final_score"] = 95
+    table = score_calibration_table(recs, outs, "1m")
+    assert "Under 60" not in set(table["Scoregrupp"])
+    assert "80+" in set(table["Scoregrupp"])
