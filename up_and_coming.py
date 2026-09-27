@@ -107,7 +107,11 @@ def select_up_and_coming(frame: pd.DataFrame, limit: int = 10) -> pd.DataFrame:
     revenue = pd.to_numeric(selected.get("Omsättningstillväxt", pd.Series(np.nan, index=selected.index)), errors="coerce")
     earnings = pd.to_numeric(selected.get("Vinsttillväxt", pd.Series(np.nan, index=selected.index)), errors="coerce")
     selected["__growth"] = pd.concat([revenue, earnings], axis=1).max(axis=1).fillna(-1)
-    selected["__score"] = pd.to_numeric(selected.get("Års Score", selected.get("Borsify Score")), errors="coerce").fillna(-1)
+    # Prefer the shared final Borsify score when it is available. Up & Coming
+    # remains a discovery ranking, but must not silently use a raw/pre-cap score.
+    selected["__score"] = pd.to_numeric(
+        selected.get("Borsify Score", selected.get("Års Score")), errors="coerce"
+    ).fillna(-1)
     return selected.sort_values(
         ["Up and coming evidensfamiljer", "__growth", "__score", "Ticker"],
         ascending=[False, False, False, True],
