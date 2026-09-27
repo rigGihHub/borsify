@@ -64,9 +64,9 @@ def prepare_score_calibration_data(
     if rec.empty or out.empty:
         return pd.DataFrame()
 
-    keep = [c for c in ["record_id", "symbol", "captured_date", "horizon_type", "score", "gate", "model_version"] if c in rec.columns]
+    keep = [c for c in ["record_id", "symbol", "captured_date", "horizon_type", "final_score", "gate", "model_version"] if c in rec.columns]
     merged = rec[keep].merge(out, on="record_id", how="inner", suffixes=("", "_out"))
-    merged["score"] = pd.to_numeric(merged["score"], errors="coerce")
+    merged["score"] = pd.to_numeric(merged["final_score"], errors="coerce")
     merged["return_pct"] = pd.to_numeric(merged["return_pct"], errors="coerce")
     if "excess_return_pct" in merged.columns:
         merged["excess_return_pct"] = pd.to_numeric(merged["excess_return_pct"], errors="coerce")
