@@ -4593,6 +4593,9 @@ def render_up_and_coming(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     st.caption("Mindre bolag i Borsifys Avanza-katalog med observerad tillväxt och flera oberoende styrketecken. Ingen lista kan veta vilka som får en fantastisk framtid.")
     pool = build_discovery_pool(df, max_candidates=min(24, len(df)))
     reviewed = add_full_deal_evidence(pool, "year")
+    # Keep discovery context aligned with the shared headline score. This does
+    # not turn Up & Coming into a buy list.
+    reviewed = add_user_scores(reviewed)
     ranked = select_up_and_coming(reviewed, limit=10)
     if ranked.empty:
         st.info("Inget mindre bolag klarar kraven just nu. Borsify fyller inte listan med svaga eller dåligt verifierade case.")
