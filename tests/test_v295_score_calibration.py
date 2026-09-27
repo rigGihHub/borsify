@@ -55,7 +55,7 @@ def test_shared_6m_horizon_never_mixes_short_and_long_scores():
     for kind in ["short","long"]:
         for i in range(8):
             rid=f"{kind}-{i}"
-            rs.append({"record_id":rid,"symbol":f"{kind}{i}","captured_date":f"2026-01-{i+1:02d}","horizon_type":kind,"score":65 if kind=="short" else 85})
+            rs.append({"record_id":rid,"symbol":f"{kind}{i}","captured_date":f"2026-01-{i+1:02d}","horizon_type":kind,"score":65 if kind=="short" else 85,"final_score":65 if kind=="short" else 85})
             os.append({"record_id":rid,"horizon":"6m","return_pct":0.1 if kind=="short" else 0.2})
     t=score_calibration_table(pd.DataFrame(rs),pd.DataFrame(os),"6m")
     assert set(t["Typ"])=={"Kortsiktig","Långsiktig"}
