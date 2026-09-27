@@ -71,6 +71,15 @@ def test_ranking_uses_evidence_then_growth_without_new_mega_score():
     assert "Up and coming Score" not in selected.columns
 
 
+def test_ranking_prefers_shared_final_score_over_raw_year_score():
+    frame = pd.DataFrame([
+        _case(Ticker="RAW_HIGH", **{"Års Score": 95, "Borsify Score": 66}),
+        _case(Ticker="FINAL_HIGH", **{"Års Score": 70, "Borsify Score": 82}),
+    ])
+    selected = select_up_and_coming(frame)
+    assert selected.iloc[0]["Ticker"] == "FINAL_HIGH"
+
+
 def test_app_has_direct_button_clickable_list_and_honest_copy():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     assert 'APP_VERSION = "4.39.2"' in app
