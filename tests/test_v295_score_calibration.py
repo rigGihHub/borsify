@@ -17,7 +17,7 @@ def _rows(kind="short", n_per_band=8, worsening=False):
             # Space same-symbol repeats far enough apart only by using unique symbols.
             recs.append({
                 "record_id":rid,"symbol":f"S{bi}{i}.ST","captured_date":f"2026-01-{(i%20)+1:02d}",
-                "horizon_type":kind,"score":score,"gate":"x","model_version":"2.95.0"
+                "horizon_type":kind,"score":score,"final_score":score,"gate":"x","model_version":"2.95.0"
             })
             base=(3-bi if worsening else bi)*0.05
             outs.append({"record_id":rid,"horizon":"1m" if kind=="short" else "1y","return_pct":base + i*0.0001})
