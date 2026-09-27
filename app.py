@@ -7707,6 +7707,10 @@ def main() -> None:
 
         # Freeze only analyses that were actually run. This preserves point-in-time
         # history without forcing every homepage visit to perform deep Yahoo requests.
+        # Freeze the current specialist-adjusted score; older records are never
+        # recomputed because their snapshot contains the captured model state.
+        short_longlist = add_user_scores(short_longlist)
+        deep_longlist = add_user_scores(deep_longlist)
         ledger_records = build_recommendation_records(
             short_longlist, "short", APP_VERSION, profile, market, max_records=5
         ) + build_recommendation_records(
