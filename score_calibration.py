@@ -51,7 +51,10 @@ def prepare_score_calibration_data(
     """Return independent, point-in-time score/outcome observations for one model type."""
     if recommendations is None or recommendations.empty or outcomes is None or outcomes.empty:
         return pd.DataFrame()
-    need_r = {"record_id", "horizon_type", "score"}
+    # Calibrate the frozen user-facing score after specialist controls.
+    # Legacy records without final_score are intentionally excluded rather than
+    # silently falling back to a different horizon score.
+    need_r = {"record_id", "horizon_type", "final_score"}
     need_o = {"record_id", "horizon", "return_pct"}
     if not need_r.issubset(recommendations.columns) or not need_o.issubset(outcomes.columns):
         return pd.DataFrame()
