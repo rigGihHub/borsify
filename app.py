@@ -5581,8 +5581,10 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         "Borsify jämför frysta scoregrupper mot senare utfall. Kortsiktig och långsiktig modell blandas aldrig, "
                         "och samma aktie räknas inte flera gånger när framtidsperioderna överlappar."
                     )
-                    calibration = score_calibration_table(recs, outs, chosen_h)
-                    calibration_summary = score_calibration_summary(recs, outs, chosen_h)
+                    # Current-model calibration must not mix older model versions.
+                    current_recs = recs[recs["model_version"].astype(str).eq(str(APP_VERSION))].copy()
+                    calibration = score_calibration_table(current_recs, outs, chosen_h)
+                    calibration_summary = score_calibration_summary(current_recs, outs, chosen_h)
                     if calibration_summary.get("status") == "Kalibreringen bör granskas":
                         st.warning(str(calibration_summary.get("text", "")))
                     elif calibration_summary.get("status") == "Bra ordning":
