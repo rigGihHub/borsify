@@ -69,3 +69,19 @@ def test_short_deep_stage_keeps_full_provenance_for_ledger():
     assert "result.update(inflection)" in app
     assert "result.update(catalyst)" in app
     assert '"Catalyst Source"' in open("recommendation_ledger.py", encoding="utf-8").read()
+
+
+def test_ledger_freezes_final_and_raw_borsify_scores_separately():
+    frame = pd.DataFrame([{
+        "Ticker": "INDU-C.ST", "Namn": "Industrivärden C", "Pris": 100.0,
+        "Borsify Score": 68.0, "Borsify grundbetyg": 92.0,
+        "Borsify slutbetyg": 68.0,
+        "Case Gate": "Toppcase", "Case Confidence": 80,
+        "Case Evidence Count": 4,
+    }])
+    rows = build_recommendation_records(
+        frame, "long", "4.40.0", "Balanserad", "Sverige",
+        captured_at=pd.Timestamp("2026-09-02T08:00:00Z"),
+    )
+    assert rows[0]["final_score"] == 68.0
+    assert rows[0]["raw_borsify_score"] == 92.0
