@@ -5604,7 +5604,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         )
                     st.caption(
                         f"Borsify drar ingen slutsats förrän minst {MIN_CALIBRATION_CASES} oberoende case finns per modelltyp och minst två scoregrupper har {MIN_BAND_CASES} case vardera. "
-                        "Det här är kalibreringsdiagnostik, inte en sannolikhet och leder aldrig till automatisk viktändring."
+                        "Endast aktuell modellversion visas här; äldre versioner följs separat i historiken. Det här är kalibreringsdiagnostik, inte en sannolikhet och leder aldrig till automatisk viktändring."
                     )
 
                     tables = learning_tables(recs, outs, chosen_h)
