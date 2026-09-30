@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 @dataclass(frozen=True)
 class ReportSource:
@@ -56,14 +57,26 @@ def discovery_queries(company_name: str, ticker: str, country: str) -> list[str]
     return [f'"{company}" investor relations financial report']
 
 def source_priority(url: str, country: str) -> int:
-    """Lower is better: exchange disclosure, issuer IR, then everything else."""
-    u=str(url or "").lower()
-    if country in {"Sverige","Danmark"} and ("nasdaq.com" in u or "news.eu.nasdaq.com" in u):
+    """Trust exchange hostnames, never host-like strings in paths or queries.
+
+    An arbitrary /investor path does not establish issuer ownership. Issuer IR
+    needs an independently verified company/domain mapping before it can qualify.
+    """
+    try:
+        parsed = urlsplit(str(url or "").strip())
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if parsed.scheme.lower() not in {"https", "http"} or parsed.username or parsed.password:
+            return 9
+    except ValueError:
+        return 9
+    if country in {"Sverige","Danmark"} and (
+        host == "news.eu.nasdaq.com"
+        or (host in {"nasdaq.com", "www.nasdaq.com"}
+            and parsed.path.startswith("/european-market-activity/news/company-news"))
+    ):
         return 1
-    if country=="Norge" and ("euronext.com" in u or "newsweb.no" in u):
+    if country=="Norge" and host in {"euronext.com", "www.euronext.com", "live.euronext.com", "newsweb.no", "www.newsweb.no"}:
         return 1
-    if any(x in u for x in ["/investor","/ir/","investor-relations","investors"]):
-        return 2
     return 9
 
 def accept_report_candidate(candidate: dict[str, Any], country: str) -> tuple[bool,str]:
@@ -83,7 +96,12 @@ def report_freshness(published_at: str, now: Any = None) -> dict[str, Any]:
         if published.tzinfo is None: published=published.tz_localize("Europe/Stockholm")
         current=pd.Timestamp(now) if now is not None else pd.Timestamp.now(tz="Europe/Stockholm")
         if current.tzinfo is None: current=current.tz_localize("Europe/Stockholm")
-        days=max(0,int((current-published).total_seconds()//86400))
+        if pd.isna(published) or pd.isna(current):
+            raise ValueError("Missing timestamp")
+        elapsed = (current-published).total_seconds()
+        if elapsed < 0:
+            return {"known":False,"days":None,"label":"Rapportens datum ligger i framtiden – ej verifierad publicering"}
+        days=int(elapsed//86400)
     except Exception:
         return {"known":False,"days":None,"label":"Rapportens datum är okänt"}
     if days<=120: label=f"Senaste rapporten är {days} dagar gammal"

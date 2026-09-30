@@ -11,8 +11,11 @@ class _Response:
         return False
 
     def read(self, _limit):
-        body = "<html><body>" + ("Quarterly report guidance margin cash flow risk. " * 80) + "</body></html>"
+        body = "<html><body>Q3 2026 Quarterly report guidance. Revenue SEK 100 million. Cash flow SEK 20 million. " + ("The company discusses its operations, margin and risk. " * 40) + "</body></html>"
         return body.encode("utf-8")
+
+    def geturl(self):
+        return "https://www.nasdaq.com/european-market-activity/news/company-news/example-q3"
 
 
 def test_fetch_report_text_extracts_html(monkeypatch):

@@ -127,6 +127,8 @@ def snapshot_columns(horizon_type: str) -> list[str]:
         "Rapport primärkälla verifierad", "Rapport textlängd", "Rapport källa",
         "Rapport URL", "Rapport titel", "Rapport typ", "Rapport publicerad",
         "Rapport färskhet", "Rapport kontroll", "Rapport användartext",
+        "Rapport datum verifierat", "Rapport verifieringsversion", "Rapport kontrollerad",
+        "Rapport text SHA256", "Rapport periodtext", "Rapport finansiella ämnen", "Rapport textutdrag", "Rapport begärd URL",
         "Rapporttext tillgänglig", "Guidance nämns", "Orderläge nämns",
         "Marginaler nämns", "Kassaflöde nämns", "Engångsposter nämns", "Risker nämns",
         "Kapitalallokering nettoåterköp", "Kapitalallokering återköpsyield",

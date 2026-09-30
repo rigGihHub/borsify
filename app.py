@@ -1256,6 +1256,9 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
             "Report Delta förklaring", "Report Delta datagrund", "Rapport läst",
             "Rapport text verifierad", "Rapport titel", "Rapport typ", "Rapport publicerad",
             "Rapport URL", "Rapport kontroll", "Rapport användartext",
+            "Rapport primärkälla verifierad", "Rapport textlängd", "Rapport källa", "Rapport färskhet",
+            "Rapport datum verifierat", "Rapport verifieringsversion", "Rapport kontrollerad",
+            "Rapport text SHA256", "Rapport periodtext", "Rapport finansiella ämnen", "Rapport textutdrag", "Rapport begärd URL",
             "Rapportminne status", "Rapportminne historik", "Rapportminne förbättring",
             "Rapportminne försämring", "Rapportminne rapportdatum",
             "Rapportminne jämförelserapport", "Rapportminne förklaring",
@@ -4585,6 +4588,7 @@ def render_overview(
             if idx:
                 st.write(f"{benchmark_name}: {idx['index']:.2f} ({fmt_pct(idx.get('daily'))})")
             st.caption(f"Borsify v{APP_VERSION}. Data kan ibland vara fördröjd eller saknas.")
+            st.caption("Rapportkontroll: källadress, rapportperiod och finansiellt innehåll. Report Delta beräknas från strukturerade data.")
 
 
 def render_up_and_coming(df: pd.DataFrame, profile: str) -> pd.DataFrame:

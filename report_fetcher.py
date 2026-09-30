@@ -40,6 +40,7 @@ def fetch_report_text(url: str, timeout: float = 8.0, max_bytes: int = MAX_REPOR
     try:
         req = Request(target, headers={"User-Agent": "Borsify/4 report provenance checker"})
         with urlopen(req, timeout=timeout) as response:
+            resolved_url = response.geturl()
             content_type = str(response.headers.get("content-type") or "").lower()
             data = response.read(max_bytes + 1)
     except Exception as exc:
@@ -51,13 +52,13 @@ def fetch_report_text(url: str, timeout: float = 8.0, max_bytes: int = MAX_REPOR
         text = _pdf_text(data)
         if not text:
             return {"ok": False, "text": "", "error": "PDF kunde hämtas men text kunde inte extraheras."}
-        return {"ok": True, "text": text, "error": ""}
+        return {"ok": True, "text": text, "error": "", "resolved_url": resolved_url}
     try:
         raw = data.decode("utf-8", errors="replace")
     except Exception:
         raw = ""
     text = _clean_html(raw) if "<" in raw and ">" in raw else re.sub(r"\s+", " ", raw).strip()
-    return {"ok": bool(text), "text": text, "error": "" if text else "Ingen läsbar text hittades."}
+    return {"ok": bool(text), "text": text, "error": "" if text else "Ingen läsbar text hittades.", "resolved_url": resolved_url}
 
 
 def verify_primary_report_from_events(
@@ -81,7 +82,11 @@ def verify_primary_report_from_events(
         if not accepted:
             continue
         fetched = fetch_report_text(url, timeout=timeout)
+        # Validate the source of the downloaded body, not only the original link.
+        if fetched.get("resolved_url"):
+            cand["attachment_url"] = fetched["resolved_url"]
         report = verify_report_text(cand, country, str(fetched.get("text") or ""))
+        report["Rapport begärd URL"] = url
         if not fetched.get("ok") and not report.get("Rapport läst"):
             report["Rapport kontroll"] = str(fetched.get("error") or report.get("Rapport kontroll") or "")
         return report
