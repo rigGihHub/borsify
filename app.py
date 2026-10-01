@@ -995,6 +995,8 @@ def build_evidence_gated_shortlist(df: pd.DataFrame, profile: str, limit: int = 
     finalists = finalists.drop(columns=[c for c in cases.columns if c in finalists.columns], errors="ignore").join(cases)
 
     finalists = add_first_choice_gate(finalists)
+    if finalists.empty:
+        return finalists.copy(), finalists
     approved = rank_close_daily_candidates(finalists[finalists["Förstaval godkänd"]].copy())
     return approved.head(limit).copy(), finalists
 

@@ -85,6 +85,16 @@ def test_all_first_choice_blockers_leave_shortlist_empty(shortlist):
     assert "röd bolagsbedömning" in finalists.iloc[0]["Förstaval blockerare"]
 
 
+def test_empty_shortlist_does_not_index_gate_columns(shortlist, monkeypatch):
+    # Empty selections need no approval mask, including when a cached/legacy
+    # gate returns an empty frame without the new gate schema.
+    monkeypatch.setitem(shortlist.__globals__, "add_first_choice_gate", lambda frame: frame.copy())
+    approved, finalists = shortlist(pd.DataFrame([case(**{"Borsify Score": 65})]), "Balanserad")
+    assert approved.empty
+    assert finalists.empty
+    assert "Ticker" in approved.columns
+
+
 def test_qualified_candidate_survives_and_rejected_candidates_do_not(shortlist):
     frame = pd.DataFrame([
         case(Ticker="PASS.ST"),
