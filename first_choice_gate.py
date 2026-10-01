@@ -53,10 +53,10 @@ def first_choice_blockers(row: pd.Series | dict[str, Any]) -> list[str]:
 
 
 def add_first_choice_gate(frame: pd.DataFrame) -> pd.DataFrame:
-    if frame is None or frame.empty:
-        return frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame()
-    out = frame.copy()
+    # The shortlist can legitimately be empty after purchase/specialist filters.
+    # Keep the gate schema, including a boolean mask, even when there are no rows.
+    out = frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame()
     reasons = [first_choice_blockers(row) for _, row in out.iterrows()]
-    out["Förstaval blockerare"] = ["; ".join(items) for items in reasons]
-    out["Förstaval godkänd"] = [not items for items in reasons]
+    out["Förstaval blockerare"] = pd.Series(["; ".join(items) for items in reasons], index=out.index, dtype=object)
+    out["Förstaval godkänd"] = pd.Series([not items for items in reasons], index=out.index, dtype=bool)
     return out
