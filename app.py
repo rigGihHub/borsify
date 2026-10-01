@@ -50,6 +50,7 @@ from fundamental_cache import clear_fundamentals_cache, CACHE_MAX_AGE_HOURS
 from scan_snapshot_cache import get_scan_snapshot, put_scan_snapshot, clear_scan_snapshots
 from first_choice_gate import add_first_choice_gate
 from buy_now_selection import select_buy_now
+from horizon_alternatives import rank_horizon_alternatives
 from price_batching import partial_fallback_symbols, symbol_batches
 from first_choice_audit import build_first_choice_record, save_first_choice_records
 try:
@@ -3996,6 +3997,33 @@ def _stock_identity(row: pd.Series | dict[str, Any], include_name: bool = True) 
     return f"{flag} {ticker} · {country}"
 
 
+def render_horizon_alternatives(source: pd.DataFrame, horizon: str) -> None:
+    alternatives = rank_horizon_alternatives(source, horizon, limit=3)
+    if alternatives.empty:
+        st.info("Det finns inga aktier med ett tillgängligt slutbetyg i ditt urval. Ändra sökningen eller uppdatera data.")
+        return
+    st.info("Inget godkänt köp i den här vyn just nu. Här är de bäst rankade alternativen att bevaka.")
+    st.markdown("#### Bäst rankade alternativ att bevaka")
+    st.caption("Rangordningen använder Borsifys slutbetyg efter specialistkontroller. Ett alternativ kan vara bäst i urvalet och ändå ha ett svagt köpläge.")
+    for rank, (_, row) in enumerate(alternatives.iterrows(), 1):
+        with st.container(border=True):
+            st.markdown(f"**{rank}. {_stock_identity(row)}**")
+            st.metric("BORSIFY SLUTBETYG", f"{row['Borsify slutbetyg']:.0f}/100")
+            st.markdown(f"**Beslut: {row['Signal']} · inget köpbeslut**")
+            st.write(plain_finance_text(row["Alternativ varför"]))
+            st.markdown("**Vad stoppar köp just nu?**")
+            st.write(plain_finance_text("; ".join(row["Alternativ hinder"][:2])))
+            with st.expander("Underlag och kvarvarande hinder", expanded=False):
+                for reason in row["Alternativ hinder"]:
+                    st.write(plain_finance_text(reason))
+                st.caption(row["Borsify slutbetyg förklaring"])
+                if str(row.get("Riskflaggor", "")).strip() not in {"", "—", "nan"}:
+                    st.write(f"Riskflaggor: {row['Riskflaggor']}")
+                price = _num(row.get("Pris"))
+                if np.isfinite(price):
+                    st.caption(f"Senaste tillgängliga kurs: {price:.2f} {row.get('Valuta', '')} · prisdatum {row.get('Prisdatum', 'okänt')}")
+
+
 def render_horizon_toplists(scored: pd.DataFrame, market: str) -> None:
     st.markdown("## Borsifys bästa köp")
     st.caption("Bara köp som klarar Borsifys krav. Är inget tillräckligt bra lämnas listan tom.")
@@ -4495,7 +4523,7 @@ def render_overview(
     )
 
     if daily_shortlist.empty:
-        st.info("Inget köp känns tillräckligt starkt idag. Det är också ett beslut.")
+        render_horizon_alternatives(filtered, "year")
     else:
         focus_cases = daily_shortlist.head(3).reset_index(drop=True)
         first = focus_cases.iloc[0]
@@ -7764,7 +7792,7 @@ def main() -> None:
                 st.markdown(f"### {title}")
                 st.caption(subtitle)
                 if ranked.empty:
-                    st.info("Ingen aktie uppfyller Borsifys krav i den här kategorin just nu. Hellre tomt än ett svagt förslag.")
+                    render_horizon_alternatives(filtered, horizon)
                     return ranked
 
                 ranked = add_full_deal_evidence(ranked, horizon)
@@ -7783,9 +7811,12 @@ def main() -> None:
                 # Entry-timing explanations can downgrade a previously approved
                 # case after the shared buy selector has run. User-facing buy
                 # lists must not show BEVAKA/AVVAKTA as recommendations.
-                ranked = ranked[ranked["Signal"].isin({"KÖP NU", "KÖP", "KÖP / ÄG", "BYGG POSITION"})].copy()
+                if horizon == "lifetime":
+                    ranked = ranked[ranked["Signal"].isin({"KÖP / ÄG LÅNGSIKTIGT", "BYGG LÅNGSIKTIGT"})].copy()
+                else:
+                    ranked = ranked[ranked["Signal"].isin({"KÖP NU", "KÖP", "KÖP / ÄG", "BYGG POSITION"})].copy()
                 if ranked.empty:
-                    st.info("Ingen aktie uppfyller Borsifys köpkrav efter den slutliga pris- och riskkontrollen.")
+                    render_horizon_alternatives(filtered, horizon)
                     return ranked
                 history_profile = f"{profile}::horizon::{horizon}"
                 previous_horizon = previous_radar_snapshot(history_profile, limit=10)

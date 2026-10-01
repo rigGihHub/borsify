@@ -7,7 +7,7 @@ def test_version_and_novice_first_overview():
     assert '## Idag' in APP
     assert 'st.markdown(f"### {first_name}")' in APP
     assert 'Största risk:' in APP
-    assert 'Inget köp känns tillräckligt starkt idag' in APP
+    assert 'render_horizon_alternatives(filtered, "year")' in APP
 
 def test_overview_hides_engine_detail():
     assert 'with st.expander("Om dagens analys", expanded=False)' in APP
