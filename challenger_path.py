@@ -7,6 +7,9 @@ import numpy as np
 import pandas as pd
 
 
+FINAL_SCORE_RANKING = True
+
+
 def _num(v: Any) -> float:
     try:
         x = float(v)
@@ -21,11 +24,11 @@ def _label(row: pd.Series | dict[str, Any]) -> str:
     return f"{name} ({ticker})" if ticker and ticker not in name else name
 
 
-def _rank_dimensions(score_col: str, horizon: str) -> list[tuple[str, str, float]]:
+def _rank_dimensions(score_col: str, horizon: str, use_final: bool = False) -> list[tuple[str, str, float]]:
     # Mirrors horizon_rankings.py exactly. Epsilon is the smallest meaningful change
     # we present to the user; it is not a forecast of how the underlying inputs move.
     dims = [
-        (score_col, "Borsify-score", 0.5),
+        (score_col, "stöd för tidshorisonten" if use_final else "Borsify-score", 0.5),
         ("Deal Conviction Score", "Deal Conviction", 1.0),
         ("Affärsläge rangvärde", "affärsläge", 1.0),
         ("Case Readiness", "Case Readiness", 1.0),
@@ -36,6 +39,8 @@ def _rank_dimensions(score_col: str, horizon: str) -> list[tuple[str, str, float
             ("RR rangvärde", "risk/reward", 1.0),
         ]
     dims.append(("Datatäckning", "datatäckning", 0.01))
+    if use_final:
+        dims.insert(0, ("Borsify slutbetyg", "Borsify slutbetyg", 0.0))
     return dims
 
 
@@ -69,13 +74,15 @@ def path_to_number_one(winner: pd.Series | dict[str, Any], challenger: pd.Series
     implied by Borsify's current sorting order and present practical watch conditions
     separately from the formal ranking condition.
     """
-    dims = _rank_dimensions(score_col, horizon)
+    use_final = "Borsify slutbetyg" in winner or "Borsify slutbetyg" in challenger
+    dims = _rank_dimensions(score_col, horizon, use_final=use_final)
     decisive = None
-    path_parts: list[str] = []
 
     for col, label, eps in dims:
         w, c = _num(winner.get(col)), _num(challenger.get(col))
         if not (np.isfinite(w) and np.isfinite(c)):
+            if use_final:
+                return {"Utmanare": _label(challenger), "Formell väg till #1": "Jämförelsen kan inte avgöras eftersom ett aktuellt rankmått saknas.", "Första avgörande dimension": "—", "Tröskel": "—", "Nuvarande gap": np.nan, "Bevaka också": "; ".join(_practical_watch(challenger))}
             continue
         if abs(w - c) <= 1e-12:
             continue
@@ -89,7 +96,23 @@ def path_to_number_one(winner: pd.Series | dict[str, Any], challenger: pd.Series
     else:
         col, label, w, c, eps = decisive
         gap = w - c
-        if c < w:
+        if use_final and col == "Borsify slutbetyg" and c < w:
+            cap = _num(challenger.get("Investmentbolag rankningstak")) if bool(challenger.get("Investmentbolag")) else np.nan
+            limit = min(100.0, cap) if np.isfinite(cap) else 100.0
+            if limit <= w:
+                formal = "Med nuvarande specialisttak eller skalans maxvärde kan utmanaren inte få ett högre slutbetyg än #1. Ett högre grundbetyg räcker inte."
+                if limit == w:
+                    formal += " Vid lika slutbetyg kan stödet för tidshorisonten och övriga rankmått avgöra placeringen."
+                else:
+                    formal += " Specialistunderlaget måste stödja en annan bedömning för att utmanaren ska kunna gå om, om #1 står still."
+                threshold = "—"
+            else:
+                formal = "Utmanaren behöver ett Borsify slutbetyg högre än #1 efter specialistkontroller, om #1 står still. Vid lika slutbetyg avgör stödet för tidshorisonten och därefter övriga rankmått."
+                threshold = "Högre slutbetyg än #1"
+        elif use_final and col == score_col:
+            formal = "Aktierna har samma Borsify slutbetyg. Stödet för den valda tidshorisonten avgör placeringen före övriga rankmått. Utmanaren behöver starkare stöd än #1 för att gå om vid oförändrat slutbetyg."
+            threshold = "—"
+        elif c < w:
             # Because sorting is descending and this is the first differing dimension,
             # equality merely moves the decision to the next key. A small epsilon above
             # winner is the clean condition for an outright pass.

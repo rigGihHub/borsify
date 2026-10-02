@@ -235,6 +235,11 @@ from signal_evidence_lab import build_signal_evidence, redundancy_matrix, redund
 from signal_governance import nominate_signal_actions, governance_summary
 from management_promise_delivery import parse_explicit_guidance, save_management_promises, promises_for_symbol, assess_promise_delivery, ensure_management_promise_table
 from top_pick_explainer import explain_top_pick
+# Streamlit may retain the old imported ranking helper during hot deployment.
+import importlib
+import challenger_path as _challenger_path_module
+if not getattr(_challenger_path_module, "FINAL_SCORE_RANKING", False):
+    importlib.reload(_challenger_path_module)
 from challenger_path import challenger_paths
 from horizon_signal_changes import add_change_signals, dropped_from_top10
 from horizon_change_reasons import add_change_reasons, snapshot_details
@@ -7931,7 +7936,8 @@ def main() -> None:
                 table = ranked.head(10).copy()
                 table.insert(0, "#", range(1, len(table) + 1))
                 table["Aktie"] = table.apply(_stock_identity, axis=1)
-                table["Score"] = pd.to_numeric(table.get(score_col), errors="coerce").round(0)
+                table["Score"] = pd.to_numeric(table.get("Borsify slutbetyg", pd.Series(np.nan, index=table.index)), errors="coerce").round(0)
+                table["Borsify slutbetyg"] = table["Score"]
                 previous = table["Score"].shift(1)
                 table["Till platsen ovan"] = (table["Score"] - previous).where(previous.notna())
                 table["Till platsen ovan"] = table["Till platsen ovan"].apply(
@@ -7956,7 +7962,7 @@ def main() -> None:
                     z if z == "—" else f"{z} {cur}".strip()
                     for z, cur in zip(_zones, currencies)
                 ]
-                show_cols = ["#", "Aktie", "Signal", "Förväntningar", "Köpläge", "Varför nu", "Recognition Window", "Risk", "Datatillit", "Score"]
+                show_cols = ["#", "Aktie", "Signal", "Förväntningar", "Köpläge", "Varför nu", "Recognition Window", "Risk", "Datatillit", "Borsify slutbetyg"]
                 st.markdown("**Topp 10 i kategorin**")
                 st.dataframe(table[show_cols], use_container_width=True, hide_index=True)
                 st.caption("Listan visar beslutet först. Klicka på en aktie nedan för full Borsify-analys och AI-frågor.")
