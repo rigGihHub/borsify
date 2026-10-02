@@ -53,6 +53,6 @@ def test_app_wires_fast_resume_without_prefiltering():
     assert 'APP_VERSION = "4.39.2"' in app
     assert "get_scan_snapshot(DB_PATH, scan_symbols, max_age_minutes=120)" in app
     assert "put_scan_snapshot(DB_PATH, scan_symbols, raw_df)" in app
-    assert "clear_scan_snapshots(DB_PATH)" in app
+    assert "clear_scan_snapshots(DB_PATH)" not in app
     assert "Bolagsdata {completed}/{denominator}" in app
     assert "head(80)" not in app[app.index("raw_df, scan_snapshot"):app.index("if raw_df.empty", app.index("raw_df, scan_snapshot"))]

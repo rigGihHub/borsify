@@ -46,8 +46,8 @@ from search_explanation import (
     intent_match_reason, horizon_match_reason, requirement_statuses,
     main_risk_text, data_status_text, near_miss_reason,
 )
-from fundamental_cache import clear_fundamentals_cache, CACHE_MAX_AGE_HOURS
-from scan_snapshot_cache import get_scan_snapshot, put_scan_snapshot, clear_scan_snapshots
+from fundamental_cache import CACHE_MAX_AGE_HOURS
+from scan_snapshot_cache import get_scan_snapshot, put_scan_snapshot, fundamental_coverage
 from first_choice_gate import add_first_choice_gate
 from buy_now_selection import select_buy_now
 from horizon_alternatives import rank_horizon_alternatives
@@ -509,9 +509,12 @@ def _rsi(close: pd.Series, period: int = 14) -> float:
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_fundamentals(symbol: str) -> dict[str, Any]:
+def fetch_fundamentals(symbol: str, force_refresh: bool = False) -> dict[str, Any]:
     """Cached-compatible wrapper around the dedicated fundamental acquisition layer."""
-    payload, health = _fetch_fundamentals_source(symbol, DB_PATH, major_currency, CACHE_MAX_AGE_HOURS)
+    if force_refresh:
+        payload, health = _fetch_fundamentals_source(symbol, DB_PATH, major_currency, CACHE_MAX_AGE_HOURS, force_refresh=True)
+    else:
+        payload, health = _fetch_fundamentals_source(symbol, DB_PATH, major_currency, CACHE_MAX_AGE_HOURS)
     st.session_state.setdefault("bq_source_health_fundamentals", {})[symbol] = health
     payload["Fundamental source status"] = str(health.get("status") or "")
     payload["Fundamental source errors"] = "; ".join(map(str, health.get("errors") or []))
@@ -1002,7 +1005,7 @@ def build_evidence_gated_shortlist(df: pd.DataFrame, profile: str, limit: int = 
     return approved.head(limit).copy(), finalists
 
 
-def scan_universe(symbols: list[str], progress_callback=None) -> tuple[pd.DataFrame, list[str]]:
+def scan_universe(symbols: list[str], progress_callback=None, force_refresh: bool = False) -> tuple[pd.DataFrame, list[str]]:
     """Price-first scan with persistent fundamentals caching.
 
     Stage 1 validates quote/history data before any expensive Yahoo get_info call.
@@ -1077,12 +1080,14 @@ def scan_universe(symbols: list[str], progress_callback=None) -> tuple[pd.DataFr
     fundamental_started = time.perf_counter()
     completed_fundamentals = 0
     with ThreadPoolExecutor(max_workers=min(8, max(1, len(usable_histories)))) as executor:
-        futures = {executor.submit(fetch_fundamentals, sym): sym for sym in usable_histories}
+        futures = {executor.submit(fetch_fundamentals, sym, force_refresh): sym for sym in usable_histories}
         for future in as_completed(futures):
             sym = futures[future]
             try:
                 data = future.result()
                 fundamentals[sym] = data
+                if str(data.get("Fundamental source status")) in {"ERROR", "CIRCUIT_OPEN"}:
+                    errors.append(f"{sym}: bolagsdata kunde inte hämtas · {data.get('Fundamental source errors', '')}")
                 source = str(data.get("_Fundamental cache") or "")
                 if source == "Yahoo":
                     metrics["fundamental_yahoo"] += 1
@@ -6908,15 +6913,8 @@ def main() -> None:
         st.session_state["bq_manual_refresh_requested_at"] = pd.Timestamp.now(tz="UTC").isoformat()
         st.session_state["bq_manual_refresh_in_progress"] = True
         st.session_state.pop("bq_manual_refresh_error", None)
-        # Clear both Streamlit caches and the persistent 24 h fundamental cache.
-        # Ordinary reruns still use caching; only an explicit user refresh bypasses it.
+        # Bypass persistent caches during refresh; retain previous data until success.
         st.cache_data.clear()
-        try:
-            cleared_fundamentals = clear_fundamentals_cache(DB_PATH)
-            st.session_state["bq_manual_refresh_cleared_fundamentals"] = int(cleared_fundamentals)
-            st.session_state["bq_manual_refresh_cleared_scans"] = int(clear_scan_snapshots(DB_PATH))
-        except Exception as exc:
-            st.session_state["bq_manual_refresh_error"] = f"Beständig fundamentalcache kunde inte rensas: {exc}"
         st.info("Hämtar färsk kurs-, bolags-, analytiker- och rapportdata och räknar om analysen …")
 
     with st.sidebar:
@@ -7096,7 +7094,7 @@ def main() -> None:
     errors: list[str] = []
     if bool(scan_snapshot.get("hit")):
         age_minutes = float(scan_snapshot.get("age_minutes", 0) or 0)
-        st.success(f"Visar senast kompletta analys direkt · {len(raw_df)} aktier · sparad för {age_minutes:.0f} min sedan.")
+        st.success(f"Visar senast sparade analys direkt · {len(raw_df)} aktier · sparad för {age_minutes:.0f} min sedan.")
         st.session_state["bq_scan_metrics"] = {
             "requested": len(scan_symbols), "price_usable": len(raw_df),
             "snapshot_hit": True, "snapshot_age_minutes": age_minutes,
@@ -7134,15 +7132,22 @@ def main() -> None:
                 label = f"Bolagsdata {completed}/{denominator}"
             _scan_progress.progress(min(95, int(round(share * 100))), text=label)
 
-        raw_df, errors = scan_universe(scan_symbols, progress_callback=_show_scan_progress)
+        raw_df, errors = scan_universe(scan_symbols, progress_callback=_show_scan_progress, force_refresh=refresh)
         if not raw_df.empty:
-            put_scan_snapshot(DB_PATH, scan_symbols, raw_df)
+            saved_scan = put_scan_snapshot(DB_PATH, scan_symbols, raw_df)
+            if not saved_scan.get("saved"):
+                st.warning("Den nya körningen har mindre underlag. Tidigare sparad analys behålls; nedan visas den nya körningens aktuella, ofullständiga underlag.")
         _scan_progress.progress(100, text=f"Grundanalys klar · {len(raw_df)} aktier")
         _scan_status.update(label="Grundanalys klar", state="complete", expanded=False)
     if raw_df.empty:
         st.error("Ingen marknadsdata kunde hämtas. Yahoo Finance kan tillfälligt begränsa anrop.")
         if errors: st.code("\n".join(errors[:12]))
         st.stop()
+
+    coverage = fundamental_coverage(raw_df)
+    st.caption(f"Bolagsunderlag: {coverage['with_data']}/{coverage['rows']} aktier har minst en av 8 kärnuppgifter · {coverage['complete']} har alla 8.")
+    if coverage["with_data"] < coverage["rows"]:
+        st.warning(f"{coverage['rows'] - coverage['with_data']} aktier saknar samtliga 8 kärnuppgifter om ekonomi och värdering. Kursdata räcker inte för en fullständig bolagsbedömning.")
 
     # Keep the core recommendation paths on the first screen, especially on
     # mobile. The same session-state targets are used by the detailed view.
@@ -7184,11 +7189,10 @@ def main() -> None:
     if refresh:
         fetched_count = int(st.session_state.get("bq_manual_refresh_fetched_count", len(raw_df)) or 0)
         error_count = int(st.session_state.get("bq_manual_refresh_error_count", len(errors)) or 0)
-        cleared_count = int(st.session_state.get("bq_manual_refresh_cleared_fundamentals", 0) or 0)
         if error_count:
-            st.warning(f"Uppdateringen hämtade {fetched_count} aktier med {error_count} datavarning(ar). {cleared_count} gamla fundamentalposter rensades före hämtningen.")
+            st.warning(f"Uppdateringen hämtade {fetched_count} aktier med {error_count} datavarning(ar).")
         else:
-            st.success(f"Data uppdaterad: {fetched_count} aktier hämtades på nytt. {cleared_count} gamla fundamentalposter rensades före hämtningen.")
+            st.success(f"Data uppdaterad: {fetched_count} aktier hämtades på nytt.")
         persistent_error = st.session_state.get("bq_manual_refresh_error")
         if persistent_error:
             st.warning(str(persistent_error))

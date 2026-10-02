@@ -68,7 +68,7 @@ def test_fundamental_get_info_timeout_retries_before_info_fallback(monkeypatch,t
         def get_info(self):
             calls.append(1)
             if len(calls)==1: raise TimeoutError("slow")
-            return {"shortName":"A","currency":"SEK"}
+            return {"shortName":"A","currency":"SEK","marketCap":1000}
         info={"shortName":"B","currency":"SEK"}
     class YF:
         Ticker=staticmethod(lambda s:T())

@@ -17,7 +17,8 @@ def test_manual_refresh_is_primary_and_clears_both_caches():
     assert 'APP_VERSION = "4.39.2"' in app
     assert 'st.button("↻ Uppdatera data", type="primary"' in app
     assert "st.cache_data.clear()" in app
-    assert "clear_fundamentals_cache(DB_PATH)" in app
+    assert "clear_fundamentals_cache(DB_PATH)" not in app
+    assert "force_refresh=refresh" in app
     assert 'bq_last_manual_refresh_completed' in app
     assert 'Färsk data' in app and 'Delvis färsk' in app and 'Gammal data' in app
 

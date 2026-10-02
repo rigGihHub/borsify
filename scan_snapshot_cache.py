@@ -16,6 +16,18 @@ import pandas as pd
 DEFAULT_MAX_AGE_MINUTES = 120
 
 
+CORE_FUNDAMENTAL_FIELDS = ("P/E", "Forward P/E", "EV/EBITDA", "FCF-yield", "ROE", "Vinstmarginal", "Omsättningstillväxt", "Skuld/eget kapital")
+
+
+def fundamental_coverage(frame: pd.DataFrame) -> dict[str, int]:
+    """Observed finite core facts, independent of scores or purchase policy."""
+    values = frame.reindex(columns=CORE_FUNDAMENTAL_FIELDS).apply(pd.to_numeric, errors="coerce")
+    counts = np.isfinite(values).sum(axis=1)
+    return {"rows": len(frame), "with_data": int((counts > 0).sum()),
+            "complete": int((counts == len(CORE_FUNDAMENTAL_FIELDS)).sum()),
+            "facts": int(counts.sum())}
+
+
 def symbol_set_key(symbols: list[str] | tuple[str, ...]) -> str:
     normalized = sorted({str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()})
     return hashlib.sha256("\n".join(normalized).encode("utf-8")).hexdigest()
@@ -100,6 +112,12 @@ def put_scan_snapshot(db_path: str | Path, symbols: list[str], frame: pd.DataFra
     payload = _encode_frame(frame)
     with sqlite3.connect(str(db_path)) as connection:
         _ensure_table(connection)
+        previous = connection.execute("SELECT payload_json FROM scan_snapshot_cache WHERE cache_key=?", (key,)).fetchone()
+        if previous:
+            old = fundamental_coverage(_decode_frame(previous[0]))
+            new = fundamental_coverage(frame)
+            if new["rows"] < old["rows"] or new["with_data"] < old["with_data"] or new["facts"] < old["facts"]:
+                return {"saved": False, "reason": "reduced_data_coverage", "previous": old, "current": new}
         connection.execute(
             """
             INSERT INTO scan_snapshot_cache(cache_key,captured_at_utc,symbol_count,row_count,payload_json)

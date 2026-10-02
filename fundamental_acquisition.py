@@ -31,6 +31,14 @@ def _num(v: Any) -> float:
         return np.nan
 
 
+_VENDOR_FINANCIAL_FIELDS = ("marketCap", "trailingPE", "forwardPE", "priceToBook", "enterpriseToEbitda", "freeCashflow", "returnOnEquity", "profitMargins", "debtToEquity", "revenueGrowth", "earningsGrowth", "totalRevenue", "totalDebt", "netIncomeToCommon")
+_CACHE_FINANCIAL_FIELDS = ("Börsvärde lokal mdr", "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF-yield", "ROE", "Vinstmarginal", "Skuld/eget kapital", "Omsättningstillväxt", "Vinsttillväxt", "_Raw totalRevenue", "_Raw totalDebt", "_Raw netIncome")
+
+
+def _has_financial_data(value, fields):
+    return isinstance(value, dict) and any(np.isfinite(_num(value.get(key))) for key in fields)
+
+
 def _safe_info(ticker: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     health={"source":"Yahoo Finance via yfinance","status":"OK","method":"","errors":[],"attempts":{},"circuits_open":[]}
 
@@ -39,7 +47,7 @@ def _safe_info(ticker: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         provider_key="yahoo:fundamental_get_info", context="fundamental:get_info",
     )
     health["attempts"]["get_info"]=res["attempts"]
-    if res["ok"] and isinstance(value,dict):
+    if res["ok"] and _has_financial_data(value, _VENDOR_FINANCIAL_FIELDS):
         health["method"]="get_info"
         return value,health
     if not res["ok"]:
@@ -48,14 +56,14 @@ def _safe_info(ticker: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         if res["circuit_open"]:
             health["circuits_open"].append("get_info")
     else:
-        health["errors"].append("get_info:non_dict")
+        health["errors"].append("get_info:no_financial_data")
 
     value,res=call_with_resilience(
         lambda: ticker.info,
         provider_key="yahoo:fundamental_info", context="fundamental:info",
     )
     health["attempts"]["info"]=res["attempts"]
-    if res["ok"] and isinstance(value,dict):
+    if res["ok"] and _has_financial_data(value, _VENDOR_FINANCIAL_FIELDS):
         health["method"]="info"
         health["status"]="PARTIAL" if health["errors"] else "OK"
         return value,health
@@ -65,7 +73,7 @@ def _safe_info(ticker: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         if res["circuit_open"]:
             health["circuits_open"].append("info")
     else:
-        health["errors"].append("info:non_dict")
+        health["errors"].append("info:no_financial_data")
 
     health["status"]="ERROR"
     return {},health
@@ -76,10 +84,11 @@ def fetch_fundamentals(
     db_path: str | Path,
     major_currency_fn,
     max_age_hours: int = CACHE_MAX_AGE_HOURS,
+    force_refresh: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return frozen fundamental payload plus structured source/cache health."""
-    cached=get_cached_fundamentals(db_path,symbol,max_age_hours)
-    if cached is not None:
+    cached=None if force_refresh else get_cached_fundamentals(db_path,symbol,max_age_hours)
+    if _has_financial_data(cached, _CACHE_FINANCIAL_FIELDS):
         payload=dict(cached)
         payload["_Fundamental cache"]="beständig cache"
         return payload,{
@@ -155,14 +164,21 @@ def fetch_fundamentals(
         "_Raw totalRevenue":_num(info.get("totalRevenue")),
         "_Raw netIncome":_num(info.get("netIncomeToCommon")),
         "Fundamental hämtad":datetime.now().isoformat(timespec="seconds"),
-        "_Fundamental cache":"Yahoo",
+        "_Fundamental cache":"fel" if health["status"] == "ERROR" else "Yahoo",
     }
     # Persist only successful/partial vendor responses; never cache a total acquisition error.
     if health["status"]!="ERROR":
         try:
             to_cache=dict(payload)
             to_cache.pop("_Fundamental cache",None)
-            put_cached_fundamentals(db_path,symbol,to_cache)
+            previous = get_cached_fundamentals(db_path, symbol, max_age_hours=24 * 365 * 100)
+            old_count = sum(np.isfinite(_num((previous or {}).get(key))) for key in _CACHE_FINANCIAL_FIELDS)
+            new_count = sum(np.isfinite(_num(to_cache.get(key))) for key in _CACHE_FINANCIAL_FIELDS)
+            if new_count >= old_count:
+                put_cached_fundamentals(db_path,symbol,to_cache)
+            else:
+                health["status"] = "PARTIAL"
+                health["errors"].append("cache:previous_richer_payload_retained")
         except Exception as exc:
             health["status"]="PARTIAL"
             _err=classify_data_error(exc,context="fundamental:cache_write")
