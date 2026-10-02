@@ -44,7 +44,7 @@ def test_rank_dimensions_match_actual_horizon_sort_order():
 def test_toplist_visible_scores_use_final_score_and_no_raw_fallback():
     source = Path('app.py').read_text()
     assert 'table["Score"] = pd.to_numeric(table.get("Borsify slutbetyg", pd.Series(np.nan, index=table.index))' in source
-    assert '"Recognition Window", "Risk", "Datatillit", "Borsify slutbetyg"]' in source
+    assert '"#", "Aktie", "Signal", "Borsify slutbetyg", "Förväntningar"' in source
     assert 'table["Score"] = pd.to_numeric(table.get(score_col)' not in source
 
 

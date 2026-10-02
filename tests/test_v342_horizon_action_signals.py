@@ -54,7 +54,7 @@ def test_legends_exist_for_all_three_homepage_horizons():
 
 
 def test_homepage_table_has_more_decision_context():
-    assert '"#", "Aktie", "Signal", "Förväntningar", "Köpläge", "Varför nu", "Recognition Window", "Risk", "Datatillit", "Borsify slutbetyg"' in APP
+    assert '"#", "Aktie", "Signal", "Borsify slutbetyg", "Förväntningar", "Köpläge", "Varför nu", "Recognition Window", "Risk", "Datatillit"' in APP
     assert 'Visa teknisk jämförelsetabell' in APP
     assert 'Vad betyder signalerna?' in APP
     assert 'Signal: {first.get' in APP

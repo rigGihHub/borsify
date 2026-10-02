@@ -7962,7 +7962,7 @@ def main() -> None:
                     z if z == "—" else f"{z} {cur}".strip()
                     for z, cur in zip(_zones, currencies)
                 ]
-                show_cols = ["#", "Aktie", "Signal", "Förväntningar", "Köpläge", "Varför nu", "Recognition Window", "Risk", "Datatillit", "Borsify slutbetyg"]
+                show_cols = ["#", "Aktie", "Signal", "Borsify slutbetyg", "Förväntningar", "Köpläge", "Varför nu", "Recognition Window", "Risk", "Datatillit"]
                 st.markdown("**Topp 10 i kategorin**")
                 st.dataframe(table[show_cols], use_container_width=True, hide_index=True)
                 st.caption("Listan visar beslutet först. Klicka på en aktie nedan för full Borsify-analys och AI-frågor.")
