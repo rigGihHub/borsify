@@ -16,6 +16,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import yfinance as yf
+from acquisition_bootstrap import ensure_current_acquisition_modules
+ensure_current_acquisition_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
 from data_acquisition import (
     bulk_price_history as _bulk_price_history_source,

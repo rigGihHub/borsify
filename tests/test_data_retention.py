@@ -82,3 +82,21 @@ def test_partial_refresh_does_not_replace_richer_fundamental_cache(monkeypatch, 
     assert health['status'] == 'PARTIAL'
     assert np.isnan(payload['P/E'])
     assert get_cached_fundamentals(db, 'AAA') == original
+
+
+def test_hot_deploy_reloads_obsolete_apis_before_app_imports(monkeypatch):
+    import inspect
+    import fundamental_acquisition
+    import scan_snapshot_cache
+    from acquisition_bootstrap import ensure_current_acquisition_modules
+    monkeypatch.setattr(fundamental_acquisition, 'fetch_fundamentals', lambda symbol, db_path, currency, max_age=24: None)
+    monkeypatch.delattr(scan_snapshot_cache, 'fundamental_coverage')
+    ensure_current_acquisition_modules()
+    assert 'force_refresh' in inspect.signature(fundamental_acquisition.fetch_fundamentals).parameters
+    assert callable(scan_snapshot_cache.fundamental_coverage)
+
+
+def test_normal_rerun_does_not_reload_modules(monkeypatch):
+    import acquisition_bootstrap
+    monkeypatch.setattr(acquisition_bootstrap.importlib, 'reload', lambda module: (_ for _ in ()).throw(AssertionError('unexpected reload')))
+    acquisition_bootstrap.ensure_current_acquisition_modules()
