@@ -28,7 +28,10 @@ def source_for_country(country: str) -> ReportSource | None:
 def candidate_report(title: str, published_at: str, url: str, attachment_url: str = "", source: str = "") -> dict[str, Any]:
     low=str(title or "").lower()
     report_type="Other"
-    if "annual" in low or "årsrapport" in low or "årsredovisning" in low: report_type="Annual Report"
+    navigation = low.strip() in {"delårsrapporter", "delårspresentationer", "årsredovisningar", "annual reports", "interim reports"}
+    meeting = "annual general meeting" in low or "årsstämma" in low
+    if navigation or meeting: report_type="Other"
+    elif "annual report" in low or "årsrapport" in low or "årsredovisning" in low: report_type="Annual Report"
     elif "half-year" in low or "halvår" in low: report_type="Half-yearly Report"
     elif "interim" in low or "delårs" in low: report_type="Interim Report"
     elif "bokslutsrapport" in low or "bokslutskommunik" in low or "financial statement release" in low or "year-end" in low: report_type="Financial Statement Release"

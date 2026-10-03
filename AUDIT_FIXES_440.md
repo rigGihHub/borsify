@@ -57,7 +57,7 @@ alone do not create a mandatory deployment approval gate.
 
 ## Release verification
 
-Full regression suite: 1,331 passing tests on Python 3.12 and Python 3.14
+Full regression suite: 1,332 passing tests on Python 3.12 and Python 3.14
 with the committed dependency locks. Existing deprecation warnings remain
 (1 on 3.12, 21 on 3.14). Compilation, application import and diff checks pass.
 
@@ -67,3 +67,6 @@ First-time candidate acquisition still depends on upstream response times.
 
 Displayed wait/build decisions also constrain sizing: waiting gives no new position,
 and a staged-build decision cannot simultaneously advise a full first position.
+
+Live IR checks also exposed navigation/AGM candidates; these are rejected before
+download. A verified IR domain does not guarantee discovery of its latest report.

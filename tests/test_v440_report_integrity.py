@@ -128,3 +128,11 @@ def test_repeated_view_reuses_report_evidence_but_changed_identity_rechecks(monk
         assert len(calls) == 4
     finally:
         cached.clear()
+
+
+def test_ir_navigation_and_annual_meeting_are_not_financial_reports():
+    from report_sources import candidate_report
+    for title in ['Annual General Meeting', 'Delårsrapporter', 'Delårspresentationer', 'Årsredovisningar']:
+        assert not candidate_report(title, '', 'https://www.investorab.com/')['is_financial_report']
+    assert candidate_report('Annual report 2025', '', 'https://www.investorab.com/')['is_financial_report']
+    assert candidate_report('Delårsrapport, 1 januari – 30 juni 2026', '', 'https://www.industrivarden.se/')['is_financial_report']
