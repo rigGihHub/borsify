@@ -1113,6 +1113,12 @@ def fetch_deep_statements(symbol: str) -> dict[str, Any]:
     """Fetch deep statements via the dedicated acquisition layer."""
     return _deep_statements_source(symbol)
 
+@st.cache_data(ttl=900, max_entries=128, show_spinner=False)
+def cached_primary_report_verification(events_json: str, country: str, company_name: str, checked_day: str) -> dict[str, Any] | None:
+    """Reuse identical network evidence briefly; reverify changed issuer/events/day."""
+    return verify_primary_report_from_events(json.loads(events_json), country, company_name=company_name)
+
+
 def build_report_delta_with_provenance(
     inflection_metrics: dict[str, Any],
     post_report: dict[str, Any],
@@ -1125,10 +1131,11 @@ def build_report_delta_with_provenance(
     result = build_report_delta({**inflection_metrics, "Rapport bolagsnamn": str(context.get("Namn") or "")}, post_report, source.get("catalyst_events"))
     verified_report = None
     try:
-        verified_report = verify_primary_report_from_events(
-            source.get("catalyst_events"),
+        verified_report = cached_primary_report_verification(
+            json.dumps(source.get("catalyst_events") or {}, sort_keys=True, default=str),
             str(context.get("Land") or context.get("Landkod") or ""),
-            company_name=str(context.get("Namn") or ""),
+            str(context.get("Namn") or ""),
+            _borsify_today(),
         )
     except Exception:
         verified_report = None

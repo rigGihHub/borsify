@@ -105,6 +105,15 @@ def assess_position_entry(row: pd.Series | dict[str, Any]) -> dict[str, Any]:
         action, size_pct = PARTIAL, 50
         reason = "Köpläget kan vara intressant, men datatilliten räcker inte för full startstorlek."
         size_reason = "Ofullständigt eller okänt underlag begränsar första positionen."
+    signal = str(row.get("Signal") or "").strip()
+    if signal in {"BEVAKA", "AVVAKTA", "UNDVIK", "SÄLJ"}:
+        action, size_pct = WAIT, 0
+        reason = "Aktuellt beslut är inget köpbeslut. Startstorlek för en ny position är därför noll."
+        size_reason = reason
+    elif signal in {"BYGG POSITION", "BYGG LÅNGSIKTIGT"} and size_pct == 100:
+        action, size_pct = PARTIAL, 50
+        reason = "Borsifys beslut är att bygga stegvis, vilket begränsar första positionen."
+        size_reason = reason
     if action != FULL and better != "—":
         reason += f" Borsify ser en bättre referenszon kring {better}."
 

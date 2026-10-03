@@ -106,3 +106,25 @@ def test_investment_company_explanations_use_specialist_basis():
     assert 'Substans' in card['Därför kan aktien vara värd att köpa']
     assert 'försäljningen' not in card['Därför kan aktien vara värd att köpa']
     assert '17.7' not in assess_market_implied_expectations(row)['Market-Implied Expectations förklaring']
+
+
+def test_repeated_view_reuses_report_evidence_but_changed_identity_rechecks(monkeypatch):
+    import app
+    calls = []
+    def verify(events, country, company_name):
+        calls.append((events, country, company_name))
+        return {"Rapport läst": False, "issuer": company_name}
+    monkeypatch.setattr(app, 'verify_primary_report_from_events', verify)
+    cached = app.cached_primary_report_verification
+    cached.clear()
+    try:
+        first = cached('{"news": []}', 'Sverige', 'Company A', '2026-10-03')
+        first['issuer'] = 'Modified view'
+        assert cached('{"news": []}', 'Sverige', 'Company A', '2026-10-03')['issuer'] == 'Company A'
+        assert len(calls) == 1
+        cached('{"news": []}', 'Sverige', 'Company B', '2026-10-03')
+        cached('{"news": []}', 'Sverige', 'Company A', '2026-10-04')
+        cached('{"news": [{"link": "new"}]}', 'Sverige', 'Company A', '2026-10-03')
+        assert len(calls) == 4
+    finally:
+        cached.clear()

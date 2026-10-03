@@ -204,3 +204,11 @@ def test_price_only_index_cannot_manufacture_total_return_alpha():
     assert ns['fetch_ledger_benchmark_history']('^OMXS30', '2025-01-02').empty
     assert calls == []
     assert not ns['fetch_ledger_benchmark_history']('VT', '2025-01-02').empty
+
+
+def test_position_size_respects_displayed_wait_and_build_decisions():
+    row = {'Bolagsbedömning nivå': 'green', 'Ingångsläge nivå': 'green', 'Risk': 75,
+           'Data Trust status': 'GOTT UNDERLAG', 'Analysis Confidence Score': 80}
+    assert assess_position_entry({**row, 'Signal': 'KÖP / ÄG'})['Första positionsstorlek %'] == 100
+    assert assess_position_entry({**row, 'Signal': 'BYGG POSITION'})['Första positionsstorlek %'] == 50
+    assert assess_position_entry({**row, 'Signal': 'BEVAKA'})['Första positionsstorlek %'] == 0
