@@ -70,3 +70,19 @@ and a staged-build decision cannot simultaneously advise a full first position.
 
 Live IR checks also exposed navigation/AGM candidates; these are rejected before
 download. A verified IR domain does not guarantee discovery of its latest report.
+
+## Report queue follow-up
+
+- Filter primary financial-report candidates before applying the eight-report cap;
+  normal news can no longer hide an older actual report. Duplicate URLs are tried once.
+- Failed vendor links may fall back to the registered issuer's original archive.
+- Investor discovery uses the current year's archive, with the prior year as a
+  fallback. Industrivärden uses its direct interim-report PDF archive. Presentation
+  links and unregistered external copies are excluded; no publication time is
+  inferred from an archive year.
+- A shared 12-second attempt budget limits repeated slow downloads; an in-flight
+  operation can finish after that deadline. Failed downloads stay unverified.
+- Full suite: 1,338 passing tests in both committed Python environments. Live-source
+  probes found archive/PDF links, but download timeouts prevented complete report
+  verification in this execution environment. This is not evidence that reports
+  were read, and full issuer coverage remains unfinished.

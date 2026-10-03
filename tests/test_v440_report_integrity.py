@@ -136,3 +136,92 @@ def test_ir_navigation_and_annual_meeting_are_not_financial_reports():
         assert not candidate_report(title, '', 'https://www.investorab.com/')['is_financial_report']
     assert candidate_report('Annual report 2025', '', 'https://www.investorab.com/')['is_financial_report']
     assert candidate_report('Delårsrapport, 1 januari – 30 juni 2026', '', 'https://www.industrivarden.se/')['is_financial_report']
+
+
+def test_non_report_news_cannot_hide_an_older_primary_report(monkeypatch):
+    news = [{'title': 'Company A market update', 'link': URL + str(i),
+             'published_at': '2026-07-16T08:00Z'} for i in range(12)]
+    news.append({'title': 'Company A Q2 2026 report', 'link': URL + 'report', 'published_at': '2026-07-15T08:00Z'})
+    calls = []
+    def fetch(url, **kwargs):
+        calls.append(url)
+        return {'ok': True, 'text': body(), 'resolved_url': url}
+    monkeypatch.setattr('report_fetcher.fetch_report_text', fetch)
+    result = verify_primary_report_from_events({'news': news}, 'Sverige', company_name='Company A')
+    assert result['Rapport läst'] is True
+    assert calls == [URL + 'report']
+
+
+def test_duplicate_urls_do_not_consume_report_attempts(monkeypatch):
+    news = [{'title': 'Company A Q2 2026 report', 'link': URL + 'bad', 'published_at': '2026-07-16T08:00Z'}] * 12
+    news.append({'title': 'Company A Q2 2026 report', 'link': URL + 'good', 'published_at': '2026-07-15T08:00Z'})
+    calls = []
+    def fetch(url, **kwargs):
+        calls.append(url)
+        return {'ok': True, 'text': body() if url.endswith('good') else 'Cookie page', 'resolved_url': url}
+    monkeypatch.setattr('report_fetcher.fetch_report_text', fetch)
+    result = verify_primary_report_from_events({'news': news}, 'Sverige', company_name='Company A')
+    assert result['Rapport läst'] is True and len(calls) == 2
+
+
+def test_failed_primary_link_can_fall_back_to_registered_issuer(monkeypatch):
+    calls = []
+    ir = 'https://www.investorab.com/report'
+    monkeypatch.setattr('report_fetcher.discover_issuer_report_events',
+                        lambda name, **kwargs: [{'title': 'Investor Q2 2026 report', 'link': ir}])
+    def fetch(url, **kwargs):
+        calls.append(url)
+        return {'ok': True, 'text': body('Investor') if url == ir else 'Cookie page', 'resolved_url': url}
+    monkeypatch.setattr('report_fetcher.fetch_report_text', fetch)
+    news = [{'title': 'Investor Q2 2026 report', 'link': URL, 'published_at': '2026-07-15T08:00Z'}]
+    result = verify_primary_report_from_events({'news': news}, 'Sverige', company_name='Investor AB ser. B')
+    assert result['Rapport läst'] is True and calls == [URL, ir]
+
+
+def test_request_budget_prevents_new_attempts_after_a_slow_failure(monkeypatch):
+    clock = [100.0]
+    calls = []
+    monkeypatch.setattr('report_fetcher.time.monotonic', lambda: clock[0])
+    def fetch(url, **kwargs):
+        calls.append((url, kwargs['timeout']))
+        clock[0] += 13
+        return {'ok': False, 'text': '', 'error': 'Timed out'}
+    monkeypatch.setattr('report_fetcher.fetch_report_text', fetch)
+    news = [{'title': 'Company A Q2 2026 report', 'link': URL + str(i)} for i in range(8)]
+    result = verify_primary_report_from_events({'news': news}, 'Sverige', company_name='Company A')
+    assert result['Rapport läst'] is False
+    assert len(calls) == 1 and calls[0][1] <= 8
+
+
+def test_issuer_archive_discovers_reports_not_presentations_or_external_copies(monkeypatch):
+    from report_fetcher import discover_issuer_report_events
+    class Response:
+        def __init__(self, url): self.url = url
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def geturl(self): return self.url
+        def read(self, limit):
+            return b'<a href="/media/q2-2026.pdf">PDF Q2 Report</a><a href="/media/q2-slides.pdf">Q2 Presentation</a><a href="https://unknown.example/q2.pdf">Q2 Report</a><a href="/media/q2-2026.pdf">Q2 Report</a>'
+    calls = []
+    def open_url(request, **kwargs):
+        calls.append(request.full_url)
+        return Response(request.full_url)
+    monkeypatch.setattr('report_fetcher.urlopen', open_url)
+    result = discover_issuer_report_events('Investor AB ser. B')
+    assert len(result) == 1 and result[0]['link'].endswith('/media/q2-2026.pdf')
+    assert len(calls) == 1 and calls[0].rsplit('/', 1)[-1].isdigit()
+    assert result[0]['published_at'] == ''  # Archive year is not a publication time.
+
+
+def test_issuer_pdf_labels_preserve_archive_period_and_latest_first(monkeypatch):
+    from report_fetcher import discover_issuer_report_events
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def geturl(self): return 'https://www.industrivarden.se/investerare/rapporter-och-presentationer/Delarsrapporter/'
+        def read(self, limit):
+            return b'<a href="/2025_q4.pdf">2025 12M</a><a href="/2026_q1.pdf">2026 3M</a><a href="/2026_q2.pdf">2026 6M</a>'
+    monkeypatch.setattr('report_fetcher.urlopen', lambda *args, **kwargs: Response())
+    result = discover_issuer_report_events('Industrivärden, AB ser. C')
+    assert [item['link'].split('/')[-1] for item in result] == ['2026_q2.pdf', '2026_q1.pdf', '2025_q4.pdf']
+    assert all(item['title'].startswith('Delårsrapport ') and item['published_at'] == '' for item in result)

@@ -5,12 +5,13 @@ from urllib.parse import urlsplit
 SOURCES = {
     "industrivärden": {
         "hosts": {"industrivarden.se", "www.industrivarden.se"},
-        "index": "https://www.industrivarden.se/media/Pressmeddelanden/",
+        "index": "https://www.industrivarden.se/investerare/rapporter-och-presentationer/Delarsrapporter/",
+        "pdf_label": "Delårsrapport",
         "evidence": "https://www.industrivarden.se/investerare/Kalender/",
     },
     "investor": {
         "hosts": {"investorab.com", "www.investorab.com"},
-        "index": "https://www.investorab.com/investors-media/reports-presentations/",
+        "index": "https://www.investorab.com/investors-media/reports-presentations/{year}",
         "evidence": "https://www.investorab.com/investors-media/reports-presentations/2026",
     },
 }

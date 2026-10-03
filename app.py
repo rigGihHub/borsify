@@ -1114,7 +1114,7 @@ def fetch_deep_statements(symbol: str) -> dict[str, Any]:
     return _deep_statements_source(symbol)
 
 @st.cache_data(ttl=900, max_entries=128, show_spinner=False)
-def cached_primary_report_verification(events_json: str, country: str, company_name: str, checked_day: str) -> dict[str, Any] | None:
+def cached_primary_report_verification(events_json: str, country: str, company_name: str, checked_day: str, pipeline_version: str = "report-queue-v2") -> dict[str, Any] | None:
     """Reuse identical network evidence briefly; reverify changed issuer/events/day."""
     return verify_primary_report_from_events(json.loads(events_json), country, company_name=company_name)
 
