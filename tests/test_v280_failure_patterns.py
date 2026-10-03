@@ -12,7 +12,7 @@ def _dataset(n_signal=10, n_clean=10, signal_failures=6, clean_failures=1, relat
         has_signal=i<n_signal
         snap={"Case Evidence Count": 2 if has_signal else 6}
         recs.append({
-            "record_id":f"r{i}", "horizon_type":"long", "snapshot_json":json.dumps(snap),
+            "record_id":f"r{i}", "symbol": f"S{i}", "captured_date": "2025-01-01", "horizon_type":"long", "snapshot_json":json.dumps(snap),
         })
         if has_signal:
             failed=i<signal_failures

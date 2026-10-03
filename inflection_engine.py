@@ -49,8 +49,12 @@ def _yoy(series: pd.Series, offset: int = 4) -> float:
     s = pd.to_numeric(series, errors="coerce").dropna()
     if len(s) <= offset:
         return np.nan
+    if isinstance(s.index, pd.DatetimeIndex):
+        span = (s.index[0] - s.index[offset]).days
+        if offset == 4 and not 330 <= span <= 400:
+            return np.nan
     latest, prior = _num(s.iloc[0]), _num(s.iloc[offset])
-    if np.isfinite(latest) and np.isfinite(prior) and prior != 0:
+    if np.isfinite(latest) and np.isfinite(prior) and prior > 0:
         return latest / prior - 1
     return np.nan
 
@@ -60,7 +64,7 @@ def _qoq(series: pd.Series) -> float:
     if len(s) < 2:
         return np.nan
     latest, prior = _num(s.iloc[0]), _num(s.iloc[1])
-    if np.isfinite(latest) and np.isfinite(prior) and prior != 0:
+    if np.isfinite(latest) and np.isfinite(prior) and prior > 0:
         return latest / prior - 1
     return np.nan
 
@@ -212,7 +216,7 @@ def _positive_yoy_share(series: pd.Series, max_points: int = 4) -> float:
     for i in range(min(max_points, max(0, len(s) - 4))):
         latest = _num(s.iloc[i])
         prior = _num(s.iloc[i + 4])
-        if np.isfinite(latest) and np.isfinite(prior) and prior != 0:
+        if np.isfinite(latest) and np.isfinite(prior) and prior > 0:
             vals.append(latest / prior - 1)
     if not vals:
         return np.nan
@@ -223,8 +227,12 @@ def _latest_change(series: pd.Series, offset: int) -> float:
     s = pd.to_numeric(series, errors="coerce").dropna()
     if len(s) <= offset:
         return np.nan
+    if isinstance(s.index, pd.DatetimeIndex):
+        span = (s.index[0] - s.index[offset]).days
+        if offset == 4 and not 330 <= span <= 400:
+            return np.nan
     latest, prior = _num(s.iloc[0]), _num(s.iloc[offset])
-    if np.isfinite(latest) and np.isfinite(prior) and prior != 0:
+    if np.isfinite(latest) and np.isfinite(prior) and prior > 0:
         return latest / prior - 1
     return np.nan
 
@@ -295,6 +303,8 @@ def build_inflection_metrics(
 
     return {
         "Kvartalsdata antal": int(max(len(revenue), len(net_income), len(fcf))),
+        "Rapportmått periodslut": str(revenue.index[0].date()) if len(revenue) and isinstance(revenue.index, pd.DatetimeIndex) else "",
+        "Rapportmått periodkonflikt": bool(len(revenue) and any(len(series) and series.index[0] != revenue.index[0] for series in [net_income, fcf, margin_series])) ,
         "Omsättning YoY senaste kvartal": rev_yoy,
         "Omsättning YoY föregående kvartal": previous_rev_yoy,
         "Omsättning acceleration": rev_yoy - previous_rev_yoy if np.isfinite(rev_yoy) and np.isfinite(previous_rev_yoy) else np.nan,

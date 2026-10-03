@@ -82,7 +82,7 @@ def test_ranking_prefers_shared_final_score_over_raw_year_score():
 
 def test_app_has_direct_button_clickable_list_and_honest_copy():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.39.2"' in app
+    assert 'APP_VERSION = "4.40.0"' in app
     assert "🚀 Visa bästa up and coming-aktierna" in app
     assert 'bq_horizon_focus"] = "upcoming"' in app
     assert "render_up_and_coming(filtered, profile)" in app

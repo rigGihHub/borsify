@@ -32,7 +32,7 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _guidance_signal(catalyst_events: dict[str, Any] | None) -> tuple[int, str]:
+def _guidance_signal(catalyst_events: dict[str, Any] | None, report_date: str = "", now: Any = None, company_name: str = "") -> tuple[int, str]:
     """Return only explicit guidance/outlook changes found in current news titles.
 
     Generic optimism/pessimism is intentionally ignored. This avoids pretending a
@@ -53,13 +53,33 @@ def _guidance_signal(catalyst_events: dict[str, Any] | None) -> tuple[int, str]:
         r"\b(guidance|outlook|forecast|prognos|utsikter)\b.*\b(cut[sd]?|lower(?:s|ed)?|reduce[sd]?|sänk(?:er|te|t)|nedjuster(?:ar|ade))\b",
         re.IGNORECASE,
     )
+    from issuer_report_sources import issuer_name
+    expected = issuer_name(company_name)
+    usable = []
+    try:
+        event = pd.to_datetime(report_date, utc=True)
+        current = pd.Timestamp(now or pd.Timestamp.now(tz="UTC"))
+        if current.tzinfo is None:
+            current = current.tz_localize("UTC")
+    except Exception:
+        return 0, "Guidningens koppling till rapportdatum är inte verifierad"
+    if pd.isna(event):
+        return 0, "Guidningens koppling till rapportdatum är inte verifierad"
     for item in news[:8]:
+        if not isinstance(item, dict):
+            continue
+        published = pd.to_datetime(item.get("published_at"), utc=True, errors="coerce")
+        title_name = issuer_name(item.get("title"))
+        belongs = bool(expected and re.search(r"(?<!\w)" + re.escape(expected) + r"(?!\w)", title_name))
+        if belongs and pd.notna(published) and event.normalize() <= published <= current and (published.normalize() - event.normalize()).days <= 2:
+            usable.append(item)
+    for item in usable:
         if not isinstance(item, dict):
             continue
         title = _text(item.get("title"))
         if title and negative.search(title):
             return -1, "Explicit sänkt guidning/utsikt i färsk rubrik"
-    for item in news[:8]:
+    for item in usable:
         if not isinstance(item, dict):
             continue
         title = _text(item.get("title"))
@@ -75,7 +95,7 @@ def build_report_delta(
 ) -> dict[str, Any]:
     """Summarise what materially changed in the latest report.
 
-    Independent evidence families are counted once each. Price response is kept
+    Correlated financial observations are descriptive, not independent statistical evidence. Price response is kept
     separate from the fundamental delta so a muted reaction can be observed rather
     than rewarded as if it were fundamental evidence.
     """
@@ -84,6 +104,10 @@ def build_report_delta(
 
     days = _num(p.get("Post-report dagar sedan"))
     fresh = bool(np.isfinite(days) and 0 <= days <= 45)
+    period = pd.to_datetime(m.get("Rapportmått periodslut"), errors="coerce", utc=True)
+    event = pd.to_datetime(p.get("Post-report datum"), errors="coerce", utc=True)
+    linked = bool(pd.notna(period) and pd.notna(event) and 0 <= (event - period).days <= 120 and not m.get("Rapportmått periodkonflikt", False))
+    fresh = fresh and linked
 
     positives: list[str] = []
     negatives: list[str] = []
@@ -137,7 +161,10 @@ def build_report_delta(
     eps_change = _num(m.get("EPS-estimat förändring"))
     revision_balance = _num(m.get("EPS-revisionsbalans"))
     estimate_weight = _num(m.get("Estimat tillförlitlighetsvikt"))
-    analyst_usable = np.isfinite(estimate_weight) and estimate_weight >= 0.40
+    window = str(m.get("EPS-estimat jämförelseperiod") or "")
+    window_days = {"7 dagar": 7, "30 dagar": 30, "60 dagar": 60, "90 dagar": 90}.get(window)
+    # Only a revision window wholly after the event can support the causal wording.
+    analyst_usable = bool(np.isfinite(estimate_weight) and estimate_weight >= 0.40 and window_days and np.isfinite(days) and window_days <= days)
     if analyst_usable and (np.isfinite(eps_change) or np.isfinite(revision_balance)):
         observed += 1
         analyst_pos = ((np.isfinite(eps_change) and eps_change >= 0.02) or
@@ -149,7 +176,7 @@ def build_report_delta(
         elif analyst_neg and not analyst_pos:
             negatives.append("analytikernas vinstprognoser har sänkts efter rapporten")
 
-    guidance_dir, guidance_text = _guidance_signal(catalyst_events)
+    guidance_dir, guidance_text = _guidance_signal(catalyst_events, str(p.get("Post-report datum") or ""), company_name=str(m.get("Rapport bolagsnamn") or ""))
     if guidance_dir:
         observed += 1
         (positives if guidance_dir > 0 else negatives).append(
@@ -167,15 +194,15 @@ def build_report_delta(
     broad_positive = fresh and observed >= 4 and positive_count >= 3 and negative_count <= 1
     broad_negative = fresh and observed >= 3 and negative_count >= 2 and negative_count > positive_count
 
-    candidate = bool(broad_positive and not adverse_reaction)
+    candidate = bool(broad_positive and np.isfinite(reaction) and not adverse_reaction)
     underreaction = bool(candidate and muted_reaction)
 
     if not fresh:
         status = "Ingen färsk rapport att jämföra"
-        why = "Report Delta används bara när senaste verifierade rapporten är högst cirka 45 dagar gammal."
+        why = "Report Delta kräver en färsk rapporthändelse och kvartalsdata med verifierbar periodkoppling. Saknad eller motstridig period ger ingen rapportsignal."
     elif observed < 3:
         status = "För lite rapportdelta-data"
-        why = "För få oberoende rapportmått är verifierade för att Borsify ska dra en bred slutsats."
+        why = "För få rapportmått med periodkoppling finns för att Borsify ska dra en bred slutsats."
     elif broad_negative:
         status = "Bred negativ rapportförändring"
         why = "; ".join(negatives[:3]) + "."
@@ -203,6 +230,8 @@ def build_report_delta(
 
     return {
         "Report Delta status": status,
+        "Report Delta periodkoppling": linked,
+        "Report Delta rapportperiod": str(m.get("Rapportmått periodslut") or ""),
         "Report Delta kandidat": candidate,
         "Report Delta underreaktion": underreaction,
         "Report Delta evidens": int(observed),

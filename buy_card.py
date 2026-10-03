@@ -63,6 +63,11 @@ def build_buy_card(row: pd.Series | dict[str,Any], horizon: str) -> dict[str,str
         why=_sentence(reasons[:3],"Flera tecken tyder på att bolaget kan vara starkt under lång tid.")
         now="Det här är ett förslag för den som kan tänka sig att äga länge. Borsify letar efter företag som kan fortsätta vara bra, inte bara aktier som nyligen gått upp."
         change="Borsify blir mer försiktig om lönsamheten faller, skulderna blir ett större problem eller flera av bolagets långsiktiga styrkor försvinner."
+    if row.get("Investmentbolag") is True or str(row.get("Investmentbolag status") or "") not in {"", "Ej investmentbolag", "ej relevant", "nan", "—"}:
+        specialist = str(row.get("Investmentbolag enkel förklaring") or "Substansvärde, innehav och rabatt behöver kontrolleras.")
+        why = specialist
+        now = "Investmentbolag bedöms främst genom daterat substansvärde och innehaven. Generella marginal- och kassaflödesmått räcker inte som köpskäl."
+        change = "Ompröva om substansrabatten försvinner, innehavens kvalitet försämras eller substansunderlaget blir för gammalt."
     return {
         "Därför kan aktien vara värd att köpa": why,
         "Varför just nu": now,

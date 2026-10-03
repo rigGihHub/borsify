@@ -24,8 +24,8 @@ def _rec(record_id, gate, decision=None, horizon_type="long", rank=1, snapshot=N
 
 def test_new_ledger_records_freeze_recommended_vs_not_recommended():
     frame = pd.DataFrame([
-        {"Ticker":"A.ST","Namn":"A","Pris":100,"Case Gate":"Toppcase","INVEST Score":80},
-        {"Ticker":"B.ST","Namn":"B","Pris":90,"Case Gate":"Bevaka","INVEST Score":70},
+        {"Ticker":"A.ST","Namn":"A","Pris":100,"Case Gate":"Toppcase","INVEST Score":80,"Signal":"KÖP / ÄG"},
+        {"Ticker":"B.ST","Namn":"B","Pris":90,"Case Gate":"Bevaka","INVEST Score":70,"Signal":"BEVAKA"},
     ])
     rows = build_recommendation_records(frame, "long", "2.85.0", "Balanserad", "Sverige", pd.Timestamp("2026-09-04T10:00Z"))
     a = json.loads(rows[0]["snapshot_json"])

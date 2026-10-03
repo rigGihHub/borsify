@@ -8,7 +8,7 @@ import pandas as pd
 # Trading-session horizons used by the ledger. Calendar spacing is deliberately
 # conservative: a repeated signal is not treated as new evidence while the prior
 # signal's forward outcome window is still open.
-HORIZON_TRADING_DAYS = {"1m": 21, "3m": 63, "6m": 126, "1y": 252, "2y": 504}
+HORIZON_TRADING_DAYS = {"1w": 5, "1m": 21, "3m": 63, "6m": 126, "1y": 252, "2y": 504}
 
 
 def _calendar_days(horizon: str) -> int:
@@ -33,7 +33,7 @@ def independent_case_sample(data: pd.DataFrame, horizon: str) -> pd.DataFrame:
     if "symbol" not in data.columns or "captured_date" not in data.columns:
         # Legacy/test datasets may predate these ledger fields. Preserve old analysis
         # rather than deleting it; production ledger rows include both fields.
-        return data.copy()
+        return data.iloc[0:0].copy()
     gap = _calendar_days(horizon)
     if gap <= 0:
         return data.iloc[0:0].copy()
@@ -73,7 +73,7 @@ def independence_audit(data: pd.DataFrame, horizon: str) -> dict[str, Any]:
         "unique_tickers": unique_tickers,
         "horizon": str(horizon),
         "text": (
-            f"{kept} oberoende case används av {raw} mogna observationer. "
+            f"{kept} tidsseparerade case används av {raw} mogna observationer. Gemensam sektor, innehav och marknad kan fortfarande korrelera. "
             f"{removed} överlappande upprepningar av samma aktie räknas inte som ny evidens."
         ),
     }

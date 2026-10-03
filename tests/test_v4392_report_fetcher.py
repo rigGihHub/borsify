@@ -11,7 +11,7 @@ class _Response:
         return False
 
     def read(self, _limit):
-        body = "<html><body>Q3 2026 Quarterly report guidance. Revenue SEK 100 million. Cash flow SEK 20 million. " + ("The company discusses its operations, margin and risk. " * 40) + "</body></html>"
+        body = "<html><body>Example AB Q3 2026 Quarterly report guidance. Revenue SEK 100 million. Cash flow SEK 20 million. " + ("The company discusses its operations, margin and risk. " * 40) + "</body></html>"
         return body.encode("utf-8")
 
     def geturl(self):
@@ -37,7 +37,7 @@ def test_primary_report_event_can_be_verified(monkeypatch):
                 "provider": "Nasdaq Nordic",
             }]
         },
-        "Sverige",
+        "Sverige", company_name="Example AB",
     )
     assert report is not None
     assert report["Rapport läst"] is True

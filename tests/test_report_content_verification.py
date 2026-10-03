@@ -23,7 +23,7 @@ BODY = (
 
 
 def candidate():
-    return candidate_report("Example AB Q3 2026 report", "2026-09-01T08:00:00+02:00", URL, source="Nasdaq")
+    return {**candidate_report("Example AB Q3 2026 report", "2026-09-01T08:00:00+02:00", URL, source="Nasdaq"), "issuer_name": "Example AB"}
 
 
 @pytest.mark.parametrize("url", [

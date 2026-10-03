@@ -22,6 +22,7 @@ def _metrics(rev_acc=.02, margin=.01, fcf=.10, earnings=.08, estimate=.01):
 
 def _report(date, positives=2, negatives=0):
     return {"Post-report datum": date}, {
+        "Report Delta periodkoppling": True, "Report Delta rapportperiod": "2026-06-30",
         "Report Delta evidens": 6, "Report Delta positiva": positives,
         "Report Delta negativa": negatives, "Report Delta kandidat": positives >= 3,
         "Report Delta underreaktion": False, "Report Delta status": "test",
@@ -73,6 +74,6 @@ def test_missing_verified_report_date_creates_no_snapshot():
 def test_release_wiring():
     root = Path(__file__).resolve().parents[1]
     app = (root / "app.py").read_text(encoding="utf-8")
-    assert 'APP_VERSION = "4.39.2"' in app
+    assert 'APP_VERSION = "4.40.0"' in app
     assert "compare_report_delta_memory" in app
     assert "Rapportminne status" in app

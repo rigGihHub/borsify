@@ -18,6 +18,8 @@ import streamlit as st
 import yfinance as yf
 from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
+from model_bootstrap import ensure_current_model_modules
+ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
 from data_acquisition import (
     bulk_price_history as _bulk_price_history_source,
@@ -29,6 +31,9 @@ from data_acquisition import (
 
 from idea_radar import fetch_public_idea_flow, map_mentions, build_verified_ideas
 from fx import FX_TO_SEK_SYMBOLS, major_currency, quote_amount_to_sek, major_amount_to_sek
+from outcome_currency import prices_in_sek
+from prospective_coverage import outcome_coverage
+from score_inputs import _percentile_score, _risk_score
 from case_journal import assess_case_change, journal_table
 from case_breaker import evaluate_case_breakers
 from case_alert import evaluate_case_alert
@@ -118,7 +123,7 @@ from daytrade_universe_validation import (
     split_downloaded_histories, validate_universe, universe_validation_label,
 )
 from recommendation_ledger import (
-    build_recommendation_records, evaluate_record_from_history,
+    build_recommendation_records, evaluate_record_from_history, restore_frozen_scores, horizons_for_record, target_date,
     outcome_summary, outcome_summary_by_horizon, calibration_by_final_score, score_calibration_warning, calibration_by_gate, calibration_by_deal_conviction,
 )
 from recommendation_relevance import apply_recommendation_relevance
@@ -275,7 +280,8 @@ except Exception:
     Client = Any  # type: ignore
     create_client = None
 
-APP_VERSION = "4.39.2"
+APP_VERSION = "4.40.0"
+MODEL_VERSION = "4.40.0"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""
@@ -611,10 +617,14 @@ def add_sek_conversions(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float
 
     out["Pris SEK"] = [quote_amount_to_sek(v, c, rates) for v, c in zip(out.get("Pris", pd.Series(np.nan, index=out.index)), quote_ccy)]
     local_cap = out.get("Börsvärde lokal mdr", out.get("Börsvärde BSEK", pd.Series(np.nan, index=out.index)))
-    out["Börsvärde BSEK"] = [major_amount_to_sek(v, c, rates) for v, c in zip(local_cap, fin_ccy)]
+    out["Börsvärde BSEK"] = [major_amount_to_sek(v, c, rates) for v, c in zip(local_cap, quote_ccy)]
     local_turn = out.get("Omsättning lokal M/dag", out.get("Omsättning MSEK/dag", pd.Series(np.nan, index=out.index)))
     out["Omsättning MSEK/dag"] = [quote_amount_to_sek(v, c, rates) for v, c in zip(local_turn, quote_ccy)]
     out["FX till SEK"] = [rates.get(major_currency(c), np.nan) for c in quote_ccy]
+    if "_Raw freeCashflow" in out and "_Raw marketCap" in out:
+        fcf_sek = pd.Series([major_amount_to_sek(v, c, rates) for v, c in zip(out["_Raw freeCashflow"], fin_ccy)], index=out.index)
+        cap_sek = pd.Series([major_amount_to_sek(v, c, rates) for v, c in zip(out["_Raw marketCap"], quote_ccy)], index=out.index)
+        out["FCF-yield"] = fcf_sek / cap_sek.where(cap_sek > 0)
     return out, rates, missing
 
 
@@ -638,18 +648,6 @@ def fetch_index_snapshot(symbol: str = "^OMXS30") -> dict[str, float]:
     st.session_state["bq_source_health_index"] = health
     return result
 
-def _percentile_score(series: pd.Series, higher_is_better: bool = True) -> pd.Series:
-    s = pd.to_numeric(series, errors="coerce")
-    valid = s.notna()
-    out = pd.Series(50.0, index=s.index, dtype=float)
-    if valid.sum() >= 2:
-        pct = s[valid].rank(pct=True, method="average") * 100
-        if not higher_is_better:
-            pct = 100 - pct + (100 / valid.sum())
-        out.loc[valid] = pct.clip(0, 100)
-    return out
-
-
 def _sector_percentile_score(df: pd.DataFrame, column: str, higher_is_better: bool = True) -> pd.Series:
     """Compare valuation mainly inside sector; fall back to whole universe when sector sample is tiny."""
     result = _percentile_score(df[column], higher_is_better)
@@ -664,22 +662,6 @@ def _sector_percentile_score(df: pd.DataFrame, column: str, higher_is_better: bo
 
 def _mean_scores(parts: list[pd.Series]) -> pd.Series:
     return pd.concat(parts, axis=1).mean(axis=1) if parts else pd.Series(dtype=float)
-
-
-def _risk_score(out: pd.DataFrame) -> pd.Series:
-    risk = pd.Series(75.0, index=out.index)
-    debt = pd.to_numeric(out["Skuld/eget kapital"], errors="coerce")
-    roe = pd.to_numeric(out["ROE"], errors="coerce")
-    margin = pd.to_numeric(out["Vinstmarginal"], errors="coerce")
-    draw = pd.to_numeric(out["52v från topp"], errors="coerce")
-    dist = pd.to_numeric(out["Avstånd SMA200"], errors="coerce")
-    m3 = pd.to_numeric(out["3 mån"], errors="coerce")
-    risk -= np.where(debt > 300, 25, np.where(debt > 200, 15, 0))
-    risk -= np.where(roe < 0, 18, 0)
-    risk -= np.where(margin < 0, 18, 0)
-    risk -= np.where(draw < -.50, 16, np.where(draw < -.35, 8, 0))
-    risk -= np.where((dist < -.10) & (m3 < -.15), 18, 0)
-    return risk.clip(0, 100)
 
 
 def add_scores(df: pd.DataFrame, profile: str) -> pd.DataFrame:
@@ -698,8 +680,8 @@ def add_scores(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     valuation = valuation_detail["Värdering"]
     debt = out["Skuld/eget kapital"].where(out["Skuld/eget kapital"].between(0, 1000))
     quality = _mean_scores([
-        _percentile_score(out["ROE"].clip(-1, 2), True), _percentile_score(out["Vinstmarginal"].clip(-1, 1), True),
-        _percentile_score(out["Omsättningstillväxt"].clip(-1, 2), True), _percentile_score(out["Vinsttillväxt"].clip(-1, 3), True),
+        _percentile_score(out["ROE"].where(out["ROE"].between(-1, 2)), True), _percentile_score(out["Vinstmarginal"].where(out["Vinstmarginal"].between(-1, 1)), True),
+        _percentile_score(out["Omsättningstillväxt"].where(out["Omsättningstillväxt"].between(-1, 2)), True), _percentile_score(out["Vinsttillväxt"].where(out["Vinsttillväxt"].between(-1, 3)), True),
         _percentile_score(debt, False),
     ])
 
@@ -731,7 +713,7 @@ def add_scores(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     w = PROFILE_WEIGHTS[profile]
     base = sum(out[name] * w[key] for name, key in [("Värdering","valuation"),("Kvalitet","quality"),("Marknadsläge","setup"),("Utdelning","income"),("Risk","risk")])
     coverage_cols = ["P/E", "Forward P/E", "EV/EBITDA", "FCF-yield", "ROE", "Vinstmarginal", "Omsättningstillväxt", "Skuld/eget kapital"]
-    coverage = out[coverage_cols].notna().mean(axis=1)
+    coverage = out[coverage_cols].apply(pd.to_numeric, errors="coerce").apply(np.isfinite).mean(axis=1)
     out["Datatäckning"] = coverage
     out["Borsify Score"] = (base * (.80 + .20 * coverage)).round(1).clip(0, 100)
     out["Riskflaggor"] = out.apply(_risk_flags, axis=1)
@@ -742,8 +724,8 @@ def add_scores(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     # v2.27: growth no longer includes FCF-yield. FCF-yield is a valuation/cash-return
     # measure and previously leaked the same information into both valuation and growth.
     growth = _mean_scores([
-        _percentile_score(out["Omsättningstillväxt"].clip(-1, 2), True),
-        _percentile_score(out["Vinsttillväxt"].clip(-1, 3), True),
+        _percentile_score(out["Omsättningstillväxt"].where(out["Omsättningstillväxt"].between(-1, 2)), True),
+        _percentile_score(out["Vinsttillväxt"].where(out["Vinsttillväxt"].between(-1, 3)), True),
     ])
     invest = .34 * valuation + .31 * quality + .18 * risk + .12 * growth + .05 * setup
 
@@ -953,7 +935,6 @@ def add_full_deal_evidence(df: pd.DataFrame, horizon: str) -> pd.DataFrame:
     ranked = add_action_signals(df, horizon)
     ranked = add_entry_timing(ranked, horizon)
     ranked = add_company_quality(ranked)
-    ranked = add_position_entry_guidance(ranked)
     ranked = add_good_deal(ranked, horizon)
     ranked = add_negative_overreaction(ranked)
     ranked = add_mispriced_acceleration(ranked)
@@ -968,6 +949,7 @@ def add_full_deal_evidence(df: pd.DataFrame, horizon: str) -> pd.DataFrame:
     ranked = add_revision_breadth(ranked)
     ranked = add_deal_conviction(ranked, horizon)
     ranked = add_analysis_confidence(ranked)
+    ranked = add_position_entry_guidance(ranked)
     ranked = add_confidence_adjusted_decision(ranked)
     ranked = add_exceptional_deal_nose(ranked, horizon)
     ranked = add_value_trap_test(ranked)
@@ -1139,13 +1121,14 @@ def build_report_delta_with_provenance(
 ) -> dict[str, Any]:
     """Keep Report Delta useful without overstating original-report coverage."""
     source = raw if isinstance(raw, dict) else {}
-    result = build_report_delta(inflection_metrics, post_report, source.get("catalyst_events"))
     context = row if row is not None else {}
+    result = build_report_delta({**inflection_metrics, "Rapport bolagsnamn": str(context.get("Namn") or "")}, post_report, source.get("catalyst_events"))
     verified_report = None
     try:
         verified_report = verify_primary_report_from_events(
             source.get("catalyst_events"),
             str(context.get("Land") or context.get("Landkod") or ""),
+            company_name=str(context.get("Namn") or ""),
         )
     except Exception:
         verified_report = None
@@ -2356,10 +2339,10 @@ def save_recommendation_records(records: list[dict[str, Any]]) -> None:
     client = _supabase_client(); uid = current_user_id()
     if client is not None and uid:
         for rec in records:
-            payload = {"user_id": uid, **rec}
+            payload = {"user_id": uid, **{k: v for k, v in rec.items() if k not in {"final_score", "raw_borsify_score"}}}
             try:
                 client.table("recommendation_ledger").upsert(
-                    payload, on_conflict="user_id,record_id"
+                    payload, on_conflict="user_id,record_id", ignore_duplicates=True
                 ).execute()
             except Exception:
                 st.session_state["bq_recommendation_ledger_migration_needed"] = True
@@ -2393,17 +2376,17 @@ def get_recommendation_records(limit: int = 500) -> pd.DataFrame:
                 .eq("user_id", uid).order("captured_at", desc=True).limit(int(limit))
                 .execute().data or []
             )
-            return pd.DataFrame(data, columns=cols)
+            return restore_frozen_scores(pd.DataFrame(data, columns=cols))
         except Exception:
             st.session_state["bq_recommendation_ledger_migration_needed"] = True
             return pd.DataFrame(columns=cols)
 
     init_db()
     with _db_connect() as conn:
-        return pd.read_sql_query(
+        return restore_frozen_scores(pd.read_sql_query(
             f"SELECT {','.join(cols)} FROM recommendation_ledger ORDER BY captured_at DESC LIMIT ?",
             conn, params=(int(limit),)
-        )
+        ))
 
 
 def save_recommendation_outcomes(rows: list[dict[str, Any]]) -> None:
@@ -2415,7 +2398,7 @@ def save_recommendation_outcomes(rows: list[dict[str, Any]]) -> None:
             payload = {"user_id": uid, **row}
             try:
                 client.table("recommendation_outcomes").upsert(
-                    payload, on_conflict="user_id,record_id,horizon"
+                    payload, on_conflict="user_id,record_id,horizon", ignore_duplicates=True
                 ).execute()
             except Exception:
                 st.session_state["bq_recommendation_ledger_migration_needed"] = True
@@ -2430,17 +2413,7 @@ def save_recommendation_outcomes(rows: list[dict[str, Any]]) -> None:
         "positive","gain_10","loss_10","evaluated_at",
     ]
     placeholders = ",".join(["?"] * len(cols))
-    sql = (
-        f"INSERT INTO recommendation_outcomes({','.join(cols)}) VALUES ({placeholders}) "
-        "ON CONFLICT(record_id,horizon) DO UPDATE SET "
-        "evaluated_date=excluded.evaluated_date,evaluated_price=excluded.evaluated_price,"
-        "return_pct=excluded.return_pct,benchmark_symbol=excluded.benchmark_symbol,"
-        "benchmark_name=excluded.benchmark_name,benchmark_return_pct=excluded.benchmark_return_pct,"
-        "excess_return_pct=excluded.excess_return_pct,beat_benchmark=excluded.beat_benchmark,"
-        "best_return_pct=excluded.best_return_pct,worst_return_pct=excluded.worst_return_pct,"
-        "sessions_to_best=excluded.sessions_to_best,positive=excluded.positive,gain_10=excluded.gain_10,"
-        "loss_10=excluded.loss_10,evaluated_at=excluded.evaluated_at"
-    )
+    sql = f"INSERT OR IGNORE INTO recommendation_outcomes({','.join(cols)}) VALUES ({placeholders})"
     with _db_connect() as conn:
         for row in rows:
             vals = []
@@ -2467,7 +2440,7 @@ def get_recommendation_outcomes(limit: int = 2000) -> pd.DataFrame:
                 .eq("user_id", uid).order("evaluated_at", desc=True).limit(int(limit))
                 .execute().data or []
             )
-            return pd.DataFrame(data, columns=cols)
+            return restore_frozen_scores(pd.DataFrame(data, columns=cols))
         except Exception:
             st.session_state["bq_recommendation_ledger_migration_needed"] = True
             return pd.DataFrame(columns=cols)
@@ -2485,12 +2458,19 @@ def fetch_ledger_history(symbol: str, start_date: str) -> pd.DataFrame:
     """Fetch raw price history needed to evaluate an already-frozen recommendation."""
     try:
         start = (pd.Timestamp(start_date) - pd.Timedelta(days=7)).date().isoformat()
-        hist = yf.Ticker(symbol).history(
-            start=start, interval="1d", auto_adjust=True, actions=False
-        )
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(start=start, interval="1d", auto_adjust=True, actions=False)
         if hist is None or hist.empty or "Close" not in hist:
             return pd.DataFrame()
-        return hist[["Close"]].dropna()
+        currency = str((ticker.history_metadata or {}).get("currency") or "")
+        code = major_currency(currency) if currency else ""
+        fx_hist = None
+        if code != "SEK":
+            fx_symbol = FX_TO_SEK_SYMBOLS.get(code)
+            if not fx_symbol:
+                return pd.DataFrame()
+            fx_hist = yf.Ticker(fx_symbol).history(start=start, interval="1d", auto_adjust=True, actions=False)
+        return prices_in_sek(hist[["Close"]].dropna(), currency, fx_hist)
     except Exception:
         return pd.DataFrame()
 
@@ -2506,12 +2486,16 @@ def _ledger_benchmark_for_market(market: str) -> tuple[str | None, str]:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_ledger_benchmark_history(symbol: str, start_date: str) -> pd.DataFrame:
+    # Bare Yahoo index symbols generally exclude dividends. Do not compare
+    # stock total returns with a price-only index and call the difference alpha.
+    if not symbol or str(symbol).startswith("^"):
+        return pd.DataFrame()
     return fetch_ledger_history(symbol, start_date)
 
 
 def refresh_due_recommendation_outcomes(max_records: int = 12) -> int:
     """Evaluate mature recommendations without changing their original snapshot."""
-    recs = get_recommendation_records(limit=500)
+    recs = get_recommendation_records(limit=5000)
     if recs.empty:
         return 0
     existing = get_recommendation_outcomes(limit=5000)
@@ -2527,16 +2511,27 @@ def refresh_due_recommendation_outcomes(max_records: int = 12) -> int:
     for _, rec in work.iterrows():
         if checked >= int(max_records):
             break
+        try:
+            frozen = json.loads(rec.get("snapshot_json") or "{}")
+        except (ValueError, TypeError):
+            frozen = {}
+        if not isinstance(frozen, dict) or frozen.get("PIT Outcome Basis") != "next_session_close_total_return_v1":
+            continue
         horizon_type = str(rec.get("horizon_type"))
-        wanted = ["1m","3m","6m"] if horizon_type == "short" else ["6m","1y","2y"]
+        wanted = ["1w","1m","3m","6m"] if horizon_type == "short" else ["1w","1m","3m","6m","1y","2y"]
         if all((str(rec["record_id"]), h) in existing_keys for h in wanted):
             continue
 
         age_days = (now.tz_localize(None).normalize() - pd.Timestamp(str(rec["captured_date"])[:10])).days
-        min_age = 28 if horizon_type == "short" else 180
+        min_age = 7
         if age_days < min_age:
             continue
 
+        due = [h for h, days in horizons_for_record(rec.to_dict()).items()
+               if now.tz_localize(None).normalize() >= target_date(str(rec["captured_date"]), days).normalize() + pd.Timedelta(days=4)
+               and (str(rec["record_id"]), h) not in existing_keys]
+        if not due:
+            continue
         checked += 1
         hist = fetch_ledger_history(str(rec["symbol"]), str(rec["captured_date"]))
         if hist.empty:
@@ -5361,18 +5356,24 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                 )
 
     with st.expander("Tidigare rekommendationer · hur gick de?", expanded=False):
+        st.caption("Nya utfall mäts som totalavkastning från första börsstängningen nästa handelssession efter beslutet, med samma datum och valuta för index. Äldre utfallsmetoder visas bara som äldre historik.")
         st.caption(
             "Borsify fryser nu de fem kort- och långsiktiga finalisterna per modellversion/dag. "
             "Även svagare finalister sparas för att undvika att framtida utvärdering bara innehåller vinnarna."
         )
-        recs = get_recommendation_records(limit=500)
+        recs = get_recommendation_records(limit=5000)
         outs = get_recommendation_outcomes(limit=5000)
+        coverage = outcome_coverage(recs, outs)
+        if coverage["missing"]:
+            st.warning(f"{coverage['missing']} förväntat mogna mätperioder saknar utfall. Kalenderbedömningen är ungefärlig. Saknade eller avnoterade aktier får inte behandlas som lyckade case; tillgängliga utfall kan ge ett snedvridet urval.")
+        if coverage["legacy_basis"]:
+            st.caption(f"{coverage['legacy_basis']} äldre case saknar den nya jämförbara utfallsmetoden. De räknas inte om.")
 
         if st.button("Uppdatera mogna utfall", key="refresh_recommendation_outcomes"):
             with st.spinner("Kontrollerar rekommendationer vars mätperiod har löpt ut…"):
                 added = refresh_due_recommendation_outcomes(max_records=40)
             st.success(f"{added} nya utfall sparades." if added else "Inga nya utfall var mogna ännu.")
-            recs = get_recommendation_records(limit=500)
+            recs = get_recommendation_records(limit=5000)
             outs = get_recommendation_outcomes(limit=5000)
 
         if recs.empty:
@@ -5418,7 +5419,7 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                     if pit_schema == 2:
                         missing = frozen_snap.get("PIT Critical Missing") or []
                         st.caption(
-                            f"Point-in-time v2 · modell {frozen_snap.get('PIT Model Version','—')} · "
+                            f"Point-in-time v{frozen_snap.get('PIT Schema Version', 2)} · modell {frozen_snap.get('PIT Model Version','—')} · "
                             f"fryst {frozen_snap.get('PIT Captured At','—')}"
                         )
                         if missing:
@@ -5474,25 +5475,6 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         horizon_options,
                         key="ledger_calibration_horizon",
                     )
-                    score_cal = calibration_by_final_score(recs, outs, chosen_h)
-                    if score_cal.get("eligible", 0):
-                        st.markdown("#### Fungerar ett högre Borsify-betyg bättre?")
-                        st.caption("Här kontrollerar Borsify om aktier med högre betyg faktiskt har gått bättre efter förslaget. Små grupper ska inte övertolkas.")
-                        st.caption(score_calibration_warning(score_cal))
-                        if score_cal.get("status"):
-                            st.caption("Kontrollen gäller bara rekommendationer där dagens slutbetyg faktiskt sparades när förslaget skapades.")
-                        score_show = score_cal.get("table", pd.DataFrame()).copy()
-                        if not score_show.empty:
-                            for col in ["Typiskt resultat","Snittresultat","Slog index","Typiskt mot index"]:
-                                score_show[col] = pd.to_numeric(score_show[col], errors="coerce").map(lambda x: f"{x:+.1%}" if np.isfinite(x) else "—")
-                            st.dataframe(score_show, use_container_width=True, hide_index=True)
-                        if score_cal.get("monotonic") is True:
-                            st.success("Hittills går högre betyg åt rätt håll i de grupper som har tillräckligt med data.")
-                        elif score_cal.get("monotonic") is False:
-                            st.warning("Högre betyg har hittills inte gett bättre resultat på ett tydligt sätt. Betygsskalan behöver mer kontroll innan den kan tolkas som exakt.")
-                        else:
-                            st.info("Det finns ännu för lite data för att avgöra om högre betyg verkligen betyder bättre framtida resultat.")
-
                     cal = calibration_by_gate(recs, outs, chosen_h)
                     if not cal.empty:
                         cal_show = cal.copy()
@@ -5627,8 +5609,9 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         "Borsify jämför frysta scoregrupper mot senare utfall. Kortsiktig och långsiktig modell blandas aldrig, "
                         "och samma aktie räknas inte flera gånger när framtidsperioderna överlappar."
                     )
+                    st.caption("Tidsseparerade observationer av olika aktier kan fortfarande vara korrelerade genom sektor, gemensamma innehav och marknad. Kalibrering är diagnostik, inte bevisad överavkastning.")
                     # Current-model calibration must not mix older model versions.
-                    current_recs = recs[recs["model_version"].astype(str).eq(str(APP_VERSION))].copy()
+                    current_recs = recs[recs["model_version"].astype(str).eq(str(MODEL_VERSION))].copy()
                     calibration = score_calibration_table(current_recs, outs, chosen_h)
                     calibration_summary = score_calibration_summary(current_recs, outs, chosen_h)
                     if calibration_summary.get("status") == "Kalibreringen bör granskas":
@@ -5639,9 +5622,9 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         st.info(str(calibration_summary.get("text", "")))
                     if not calibration.empty:
                         cal_score_show = calibration.copy()
-                        cal_score_show["Median %"] = (pd.to_numeric(cal_score_show["Typiskt resultat"], errors="coerce") * 100).round(1)
+                        cal_score_show["Median %"] = (pd.to_numeric(cal_score_show["Medianutfall"], errors="coerce") * 100).round(1)
                         cal_score_show["Snitt %"] = (pd.to_numeric(cal_score_show["Snittutfall"], errors="coerce") * 100).round(1)
-                        cal_score_show["Gick upp %"] = (pd.to_numeric(cal_score_show["Gick upp"], errors="coerce") * 100).round(0)
+                        cal_score_show["Gick upp %"] = (pd.to_numeric(cal_score_show["Positiva"], errors="coerce") * 100).round(0)
                         st.dataframe(
                             cal_score_show[[
                                 "Typ", "Scoregrupp", "Oberoende case", "Median %", "Snitt %", "Gick upp %", "Mätning"
@@ -6852,8 +6835,8 @@ def main() -> None:
     # v3.82: make freshness explicit and put manual refresh in the primary UI.
     last_refresh = st.session_state.get("bq_last_manual_refresh_completed")
     refresh_requested_at = st.session_state.get("bq_manual_refresh_requested_at")
-    refresh_status = "Gammal/okänd data"
-    refresh_detail = "Ingen manuell uppdatering har slutförts i den här sessionen."
+    refresh_status = "Manuell uppdatering: inte körd"
+    refresh_detail = "Analysens sparade tid och bolagsdatas täckning visas nedan. Sparad analys kan innehålla äldre källuppgifter."
     if last_refresh:
         try:
             last_ts = pd.Timestamp(last_refresh)
@@ -7759,9 +7742,9 @@ def main() -> None:
         short_longlist = add_user_scores(short_longlist)
         deep_longlist = add_user_scores(deep_longlist)
         ledger_records = build_recommendation_records(
-            short_longlist, "short", APP_VERSION, profile, market, max_records=5
+            short_longlist, "short", MODEL_VERSION, profile, market, max_records=5
         ) + build_recommendation_records(
-            deep_longlist, "long", APP_VERSION, profile, market, max_records=5
+            deep_longlist, "long", MODEL_VERSION, profile, market, max_records=5
         )
         save_recommendation_records(ledger_records)
 
@@ -7829,13 +7812,17 @@ def main() -> None:
                 if ranked.empty:
                     render_horizon_alternatives(filtered, horizon)
                     return ranked
-                history_profile = f"{profile}::horizon::{horizon}"
+                history_profile = f"{profile}::horizon::{horizon}::final::{MODEL_VERSION}"
                 previous_horizon = previous_radar_snapshot(history_profile, limit=10)
-                ranked = add_change_signals(ranked, previous_horizon, score_col, horizon)
+                ranked = add_change_signals(ranked, previous_horizon, "Borsify slutbetyg", horizon)
                 ranked = add_change_reasons(ranked, previous_horizon, horizon)
                 history_frame = ranked.copy()
-                history_frame["Borsify Score"] = pd.to_numeric(history_frame.get(score_col), errors="coerce")
+                history_frame["Borsify Score"] = pd.to_numeric(history_frame.get("Borsify slutbetyg"), errors="coerce")
                 save_radar_history(history_frame, history_profile)
+                ranked["Visad horisont"] = horizon
+                save_recommendation_records(build_recommendation_records(
+                    ranked, "short" if horizon == "medium" else "long", MODEL_VERSION, profile, market, max_records=10
+                ))
                 first = ranked.iloc[0]
                 with st.container(border=True):
                     a, b = st.columns([4.2, 1.0])
@@ -7852,6 +7839,7 @@ def main() -> None:
                         score = _num(first.get(score_col))
                     b.metric("Borsify", f"{score:.0f}/100" if np.isfinite(score) else "—")
                     st.caption(plain_finance_text(first.get("Signal förklaring") or ""))
+                    st.caption("Slutbetyget är ett relativt analysbetyg i det aktuella urvalet, inte sannolikhet eller exakt uppsida.")
                     _axis1, _axis2 = st.columns(2)
                     _axis1.markdown(f"**Bolaget:** {first.get('Bolagsbedömning', '—')}")
                     _axis1.caption(str(first.get('Bolagsbedömning skäl', '')))
@@ -7920,6 +7908,9 @@ def main() -> None:
                         st.caption("**Vad #2–#3 gör bättre:** " + plain_finance_text(_why1["Utmanarnas fördelar"]))
                     _cmp = _why1.get("Jämförelseunderlag")
                     if isinstance(_cmp, pd.DataFrame) and not _cmp.empty:
+                        _cmp = _cmp.copy()
+                        if "Borsify slutbetyg" in _cmp:
+                            _cmp["Borsify slutbetyg"] = pd.to_numeric(_cmp["Borsify slutbetyg"], errors="coerce").round(0)
                         st.dataframe(_cmp, use_container_width=True, hide_index=True)
 
                 _paths = challenger_paths(ranked, score_col, horizon)
@@ -8053,7 +8044,7 @@ def main() -> None:
                 discovery_flags = discovery_selection_flags(snapshot_source, max_candidates=min(24, len(snapshot_source)))
                 missed_snapshot = build_universe_snapshot(
                     snapshot_source, profile, market, datetime.now().date().isoformat(), recommended_sets,
-                    discovery_flags=discovery_flags, model_version=APP_VERSION
+                    discovery_flags=discovery_flags, model_version=MODEL_VERSION
                 )
                 save_missed_winner_snapshot(missed_snapshot)
                 refresh_missed_winner_outcomes(filtered, profile, market)

@@ -61,7 +61,10 @@ def assess_position_entry(row: pd.Series | dict[str, Any]) -> dict[str, Any]:
     better = str(row.get("Bättre ingång", "—") or "—")
     risk = _num(row.get("Risk"))
 
-    if company in {"red"}:
+    if company not in {"green", "yellow", "red"} or entry not in {"green", "yellow", "orange", "red"} or not math.isfinite(risk):
+        action = WAIT
+        reason = "Bolagsbedömning, ingångsläge eller riskunderlag saknas. Borsify kan inte ange startstorlek."
+    elif company in {"red"}:
         action = WAIT
         reason = "Bolagsbedömningen är för svag för att motivera en ny position, oavsett pris."
     elif entry == "red":
@@ -93,6 +96,15 @@ def assess_position_entry(row: pd.Series | dict[str, Any]) -> dict[str, Any]:
             reason = "Ett bra pris räcker inte när bolagsbedömningen är svag."
 
     size_pct, size_reason = _initial_size(action, company, entry, risk)
+    if action == FULL and size_pct < 100:
+        action = PARTIAL
+        reason = size_reason
+    trust = str(row.get("Data Trust status") or "")
+    confidence = _num(row.get("Analysis Confidence Score"))
+    if size_pct == 100 and (trust != "GOTT UNDERLAG" or not math.isfinite(confidence) or confidence < 60):
+        action, size_pct = PARTIAL, 50
+        reason = "Köpläget kan vara intressant, men datatilliten räcker inte för full startstorlek."
+        size_reason = "Ofullständigt eller okänt underlag begränsar första positionen."
     if action != FULL and better != "—":
         reason += f" Borsify ser en bättre referenszon kring {better}."
 

@@ -14,10 +14,10 @@ SCORE_BANDS = [(-np.inf, 60, "Under 60"), (60, 70, "60–69"), (70, 80, "70–79
 
 
 def _outcome_basis(frame: pd.DataFrame) -> tuple[str, str]:
-    """Use benchmark-relative outcomes only when the whole cohort has them."""
+    """Use the benchmark-covered subset when available; never mix relative and raw outcomes."""
     if frame is not None and not frame.empty and "excess_return_pct" in frame.columns:
         rel = pd.to_numeric(frame["excess_return_pct"], errors="coerce")
-        if rel.notna().all():
+        if rel.notna().any():
             return "excess_return_pct", "Mot index"
     return "return_pct", "Rå kursutveckling"
 
@@ -132,6 +132,7 @@ def score_calibration_summary(
         raw = prepare_score_calibration_data(recommendations, outcomes, horizon, horizon_type)
         n = int(len(raw))
         metric_col, metric_label = _outcome_basis(raw) if not raw.empty else ("return_pct", "Rå kursutveckling")
+        n = int(pd.to_numeric(raw.get(metric_col), errors="coerce").notna().sum())
         corr = _rank_corr(pd.to_numeric(raw.get("score"), errors="coerce"), pd.to_numeric(raw.get(metric_col), errors="coerce")) if not raw.empty else np.nan
         if n < MIN_CALIBRATION_CASES or len(enough) < 2:
             details.append({"typ": typ, "status": "För lite underlag", "n": n, "groups": int(len(enough)), "corr": corr, "measurement": metric_label})

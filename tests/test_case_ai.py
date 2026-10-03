@@ -50,7 +50,7 @@ def test_local_fallback_is_explicitly_not_ai():
 def test_short_context_now_includes_current_valuation_and_price_relevance_data():
     case = {
         "Ticker":"BUFAB.ST","Pris":134.0,"Valuta":"SEK","Prisdatum":"2026-09-02",
-        "P/E":22.4,"Forward P/E":18.7,"EV/EBITDA":13.2,"FCF yield":0.041,
+        "P/E":22.4,"Forward P/E":18.7,"EV/EBITDA":13.2,"FCF-yield":0.041,
         "ROE":0.19,"Vinstmarginal":0.11,"Risk":68,
         "Short Alpha Score":71,"Short Trend":88,"Short Relative Strength":50,
     }
@@ -60,7 +60,7 @@ def test_short_context_now_includes_current_valuation_and_price_relevance_data()
     assert data["Valuta"] == "SEK"
     assert data["P/E"] == 22.4
     assert data["Forward P/E"] == 18.7
-    assert data["FCF yield"] == 0.041
+    assert data["FCF-yield"] == 0.041
     assert data["Short Trend"] == 88
 
 

@@ -11,7 +11,7 @@ import pandas as pd
 SHORT_FIELDS = [
     "Ticker", "Namn", "Sektor", "Pris", "Valuta", "Pris SEK", "Prisdatum",
     "Dagsförändring", "52v från topp", "RSI14", "SMA200 avstånd",
-    "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
+    "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF-yield",
     "ROE", "Vinstmarginal", "Skuld/eget kapital", "Datatäckning",
     "INVEST Score", "Värdering", "Kvalitet", "Risk", "Growth Score",
     "Short Alpha Score", "Short Alpha Gate", "Short Alpha Confidence",
@@ -47,7 +47,7 @@ LONG_FIELDS = [
     "Catalyst Timing", "Catalyst Effect", "Catalyst Evidence",
     "Catalyst Why Now", "Catalyst Warnings",
     "Varför marknaden kan ha fel", "Devil's Advocate",
-    "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF yield",
+    "P/E", "Forward P/E", "P/B", "EV/EBITDA", "FCF-yield",
     "ROE", "Vinstmarginal", "Skuld/eget kapital",
     "Omsättning CAGR", "Vinst CAGR", "FCF CAGR",
     "Relevans nu", "Relevans förklaring", "Sedan rekommendation",
@@ -82,7 +82,11 @@ def _clean(value: Any) -> Any:
 def build_case_ai_context(case: dict[str, Any] | pd.Series, horizon: str) -> dict[str, Any]:
     """Return only the fields that Borsify actually has for this recommendation."""
     horizon = str(horizon).lower().strip()
-    fields = SHORT_FIELDS if horizon == "short" else LONG_FIELDS
+    fields = (SHORT_FIELDS if horizon in {"short", "medium"} else LONG_FIELDS) + [
+        "Borsify slutbetyg", "Borsify grundbetyg", "Signal", "Signal kort", "Signal förklaring",
+        "Investmentbolag rankningstak", "Investmentbolag status", "Investmentbolag enkel förklaring",
+        "Investmentbolag källnot", "Data Trust status", "Data Trust varningar", "Rapport läst", "Report Delta datagrund",
+    ]
     raw = case.to_dict() if isinstance(case, pd.Series) else dict(case)
     data = {}
     for field in fields:
@@ -93,7 +97,7 @@ def build_case_ai_context(case: dict[str, Any] | pd.Series, horizon: str) -> dic
             continue
         data[field] = value
     return {
-        "horizon": "1–6 månader" if horizon == "short" else "2–5 år",
+        "horizon": {"short": "1–6 månader", "medium": "några veckor–3 månader", "year": "3–12 månader", "lifetime": "mycket lång ägarhorisont"}.get(horizon, "2–5 år"),
         "case_data": data,
         "important_limitations": [
             "Borsify-data kan vara fördröjd eller ofullständig.",

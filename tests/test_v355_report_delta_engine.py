@@ -7,6 +7,9 @@ from report_delta_engine import build_report_delta, select_report_delta_candidat
 
 def _metrics(**overrides):
     base = {
+        "Rapport bolagsnamn": "Example AB",
+        "Rapportmått periodslut": "2026-06-30",
+        "EPS-estimat jämförelseperiod": "7 dagar",
         "Senaste EPS-överraskning": 0.08,
         "Omsättning YoY senaste kvartal": 0.12,
         "Omsättning acceleration": 0.05,
@@ -23,6 +26,7 @@ def _metrics(**overrides):
 
 def _post(reaction=0.01, days=8):
     return {
+        "Post-report datum": "2026-07-15",
         "Post-report dagar sedan": days,
         "Post-report reaktion": reaction,
         "Post-report fortsatt rörelse": 0.02,
@@ -41,7 +45,7 @@ def test_missing_report_evidence_is_not_inferred_into_candidate():
     result = build_report_delta({}, _post())
     assert result["Report Delta kandidat"] is False
     assert result["Report Delta evidens"] == 0
-    assert result["Report Delta status"] == "För lite rapportdelta-data"
+    assert result["Report Delta status"] == "Ingen färsk rapport att jämföra"
 
 
 def test_clear_negative_price_reaction_blocks_discovery_advantage():
@@ -52,7 +56,7 @@ def test_clear_negative_price_reaction_blocks_discovery_advantage():
 
 
 def test_only_explicit_guidance_language_counts_as_guidance_change():
-    explicit = {"news": [{"title": "Bolaget höjer prognos efter stark rapport"}]}
+    explicit = {"news": [{"title": "Example AB höjer prognos efter stark rapport", "published_at": "2026-07-15T08:00Z"}]}
     generic = {"news": [{"title": "VD är optimistisk efter kvartalet"}]}
     pos = build_report_delta(_metrics(), _post(), explicit)
     neutral = build_report_delta(_metrics(), _post(), generic)
@@ -85,6 +89,6 @@ def test_report_delta_fields_are_frozen_in_point_in_time_ledger_schema():
 
 def test_v355_is_wired_into_app():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "4.39.2"' in app
+    assert 'APP_VERSION = "4.40.0"' in app
     assert "build_report_delta" in app
     assert "Vad förändrades i senaste rapporten?" in app

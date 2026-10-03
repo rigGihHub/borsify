@@ -125,7 +125,8 @@ def build_post_report_drift(
     if not np.isfinite(est_weight):
         est_weight = 0.0
     analyst_dir = 0
-    if est_weight >= .4:
+    window_days = {"7 dagar": 7, "30 dagar": 30, "60 dagar": 60, "90 dagar": 90}.get(str(metrics.get("EPS-estimat jämförelseperiod") or ""))
+    if est_weight >= .4 and window_days is not None and window_days <= days:
         positive = (np.isfinite(eps_change) and eps_change >= .02) or (np.isfinite(rev_balance) and rev_balance >= .35)
         negative = (np.isfinite(eps_change) and eps_change <= -.02) or (np.isfinite(rev_balance) and rev_balance <= -.35)
         analyst_dir = 1 if positive and not negative else (-1 if negative and not positive else 0)

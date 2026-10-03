@@ -1,0 +1,9 @@
+streamlit==1.65.0
+pandas==2.2.3; python_version < "3.14"
+pandas==3.0.6; python_version >= "3.14"
+numpy==2.3.5; python_version < "3.14"
+numpy==2.5.3; python_version >= "3.14"
+yfinance==1.7.0
+supabase==2.32.0
+openai==2.54.0
+pypdf==6.19.0

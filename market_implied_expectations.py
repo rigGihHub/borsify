@@ -21,6 +21,19 @@ def _n(value: Any) -> float:
 
 
 def assess_market_implied_expectations(row: pd.Series | dict[str, Any]) -> dict[str, Any]:
+    if row.get("Investmentbolag") is True or str(row.get("Investmentbolag status") or "") not in {"", "Ej investmentbolag", "ej relevant", "nan", "—"}:
+        return {
+            "Market-Implied Expectations": "Substans och innehav kräver specialistbedömning",
+            "Market-Implied Expectations status": "Specialistbedömning krävs",
+            "Market-Implied Expectations nivå": 0,
+            "Market-Implied Expectations burden": "Ej bedömd med generella bolagsmått",
+            "Market-Implied Expectations improvement families": 0,
+            "Market-Implied Expectations muted reactions": False,
+            "Market-Implied Expectations evidence count": 0,
+            "Market-Implied Expectations stöd": "",
+            "Market-Implied Expectations varningar": "Substansunderlag och innehavstäckning måste kontrolleras",
+            "Market-Implied Expectations förklaring": str(row.get("Investmentbolag enkel förklaring") or "Generell FCF-yield och marginalvärdering används inte för investmentbolagets förväntningsbörda."),
+        }
     valuation = _n(row.get("Värdering"))
     coverage = _n(row.get("Värdering täckning"))
     metric_count = _n(row.get("Värderingsmått antal"))

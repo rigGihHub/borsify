@@ -48,10 +48,16 @@ def ensure_report_delta_memory_table(conn: sqlite3.Connection) -> None:
             underreaction INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT '',
             guidance TEXT NOT NULL DEFAULT '',
+            period_end TEXT NOT NULL DEFAULT '',
+            source_basis TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY(symbol, report_date)
         )
     """)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(report_delta_snapshots)")}
+    for name in ["period_end", "source_basis"]:
+        if name not in columns:
+            conn.execute(f"ALTER TABLE report_delta_snapshots ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
 
 
 def snapshot_from_report_delta(
@@ -63,7 +69,7 @@ def snapshot_from_report_delta(
 ) -> dict[str, Any] | None:
     m, p, r = metrics or {}, post_report or {}, report_delta or {}
     report_date = _clean_date(p.get("Post-report datum"))
-    if not report_date:
+    if not report_date or not r.get("Report Delta periodkoppling"):
         return None
     margin_yoy = _num(m.get("Marginal YoY förändring"))
     margin_qoq = _num(m.get("Marginal QoQ förändring"))
@@ -87,6 +93,8 @@ def snapshot_from_report_delta(
         "underreaction": int(bool(r.get("Report Delta underreaktion"))),
         "status": str(r.get("Report Delta status") or ""),
         "guidance": str(r.get("Report Delta guidance") or ""),
+        "period_end": str(r.get("Report Delta rapportperiod") or ""),
+        "source_basis": str(r.get("Report Delta datagrund") or "Strukturerade leverantörsfält; primärtext ej använd i beräkning"),
     }
 
 
@@ -108,7 +116,7 @@ def save_report_snapshot(conn: sqlite3.Connection, snapshot: dict[str, Any] | No
         "symbol", "report_date", "captured_date", "eps_surprise", "revenue_yoy",
         "revenue_acceleration", "margin_change", "fcf_yoy", "earnings_yoy",
         "eps_estimate_change", "revision_balance", "evidence_count", "positive_count",
-        "negative_count", "candidate", "underreaction", "status", "guidance",
+        "negative_count", "candidate", "underreaction", "status", "guidance", "period_end", "source_basis",
     ]
     conn.execute(
         f"INSERT OR IGNORE INTO report_delta_snapshots({','.join(cols)}) VALUES ({','.join(['?'] * len(cols))})",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
+from issuer_report_sources import verified_issuer_url
 
 @dataclass(frozen=True)
 class ReportSource:
@@ -27,9 +28,10 @@ def source_for_country(country: str) -> ReportSource | None:
 def candidate_report(title: str, published_at: str, url: str, attachment_url: str = "", source: str = "") -> dict[str, Any]:
     low=str(title or "").lower()
     report_type="Other"
-    if "annual" in low or "årsrapport" in low: report_type="Annual Report"
+    if "annual" in low or "årsrapport" in low or "årsredovisning" in low: report_type="Annual Report"
     elif "half-year" in low or "halvår" in low: report_type="Half-yearly Report"
     elif "interim" in low or "delårs" in low: report_type="Interim Report"
+    elif "bokslutsrapport" in low or "bokslutskommunik" in low or "financial statement release" in low or "year-end" in low: report_type="Financial Statement Release"
     elif "quarter" in low or "kvartal" in low or "q1" in low or "q2" in low or "q3" in low or "q4" in low: report_type="Quarterly Report"
     return {"title":title,"published_at":published_at,"url":url,"attachment_url":attachment_url,"source":source,"report_type":report_type,"is_financial_report":report_type!="Other"}
 
@@ -70,7 +72,7 @@ def source_priority(url: str, country: str) -> int:
     except ValueError:
         return 9
     if country in {"Sverige","Danmark"} and (
-        host == "news.eu.nasdaq.com"
+        host in {"news.eu.nasdaq.com", "view.news.eu.nasdaq.com"}
         or (host in {"nasdaq.com", "www.nasdaq.com"}
             and parsed.path.startswith("/european-market-activity/news/company-news"))
     ):
@@ -84,6 +86,8 @@ def accept_report_candidate(candidate: dict[str, Any], country: str) -> tuple[bo
         return False,"Inte identifierad som finansiell rapport."
     url=str(candidate.get("attachment_url") or candidate.get("url") or "")
     priority=source_priority(url,country)
+    if verified_issuer_url(url, candidate.get("issuer_name")):
+        priority = 1
     if priority>2:
         return False,"Källan är inte börsens offentliggörande eller bolagets egen IR-sida."
     return True,"Godkänd primär rapportkälla."

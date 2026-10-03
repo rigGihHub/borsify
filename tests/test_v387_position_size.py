@@ -2,7 +2,7 @@ from position_entry_guidance import assess_position_entry
 
 
 def test_full_size_requires_green_axes_and_robust_risk():
-    r=assess_position_entry({"Bolagsbedömning nivå":"green","Ingångsläge nivå":"green","Risk":75})
+    r=assess_position_entry({"Bolagsbedömning nivå":"green","Ingångsläge nivå":"green","Risk":75,"Data Trust status":"GOTT UNDERLAG","Analysis Confidence Score":80})
     assert r["Första positionsstorlek %"] == 100
 
 
@@ -28,7 +28,7 @@ def test_yellow_company_never_gets_full_initial_size():
 
 def test_app_exposes_size_and_version():
     app=open('app.py',encoding='utf-8').read()
-    assert 'APP_VERSION = "4.39.2"' in app
+    assert 'APP_VERSION = "4.40.0"' in app
     assert '"Första positionsstorlek"' in app
     assert 'Första storlek' in app
     assert 'andel av din egen tänkta maxposition' in app

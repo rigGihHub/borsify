@@ -45,6 +45,8 @@ def frozen_decision(record: pd.Series | dict[str, Any]) -> str:
     if explicit in {"RECOMMENDED", "NOT_RECOMMENDED"}:
         return explicit
 
+    if explicit == "ANALYSED_FINALIST":
+        return "UNKNOWN"
     gate = str(record.get("gate") or "").strip()
     horizon_type = str(record.get("horizon_type") or "").strip().lower()
     if horizon_type == "short":

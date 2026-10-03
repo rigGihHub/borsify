@@ -10,8 +10,8 @@ import numpy as np
 import pandas as pd
 
 
-SHORT_HORIZONS = {"1m": 21, "3m": 63, "6m": 126}
-LONG_HORIZONS = {"6m": 126, "1y": 252, "2y": 504}
+SHORT_HORIZONS = {"1w": 5, "1m": 21, "3m": 63, "6m": 126}
+LONG_HORIZONS = {"1w": 5, "1m": 21, "3m": 63, "6m": 126, "1y": 252, "2y": 504}
 
 
 def _num(value: Any) -> float:
@@ -36,6 +36,24 @@ def _safe(value: Any) -> Any:
     if pd.isna(value) if not isinstance(value, (str, bool)) else False:
         return None
     return value
+
+
+def restore_frozen_scores(frame: pd.DataFrame) -> pd.DataFrame:
+    """Decode only values actually frozen at capture; never reconstruct old scores."""
+    out = frame.copy()
+    for column, key in [("final_score", "Borsify slutbetyg"), ("raw_borsify_score", "Borsify grundbetyg")]:
+        values = []
+        for _, row in out.iterrows():
+            try:
+                snap = json.loads(row.get("snapshot_json") or "{}")
+            except (ValueError, TypeError):
+                snap = {}
+            if not isinstance(snap, dict):
+                snap = {}
+            value = _num(row.get(column))
+            values.append(value if math.isfinite(value) else _num(snap.get(key)))
+        out[column] = pd.Series(values, index=out.index, dtype=float)
+    return out
 
 
 def stable_record_id(
@@ -127,7 +145,7 @@ def snapshot_columns(horizon_type: str) -> list[str]:
         "Rapport primärkälla verifierad", "Rapport textlängd", "Rapport källa",
         "Rapport URL", "Rapport titel", "Rapport typ", "Rapport publicerad",
         "Rapport färskhet", "Rapport kontroll", "Rapport användartext",
-        "Rapport datum verifierat", "Rapport verifieringsversion", "Rapport kontrollerad",
+        "Rapport datum verifierat", "Rapport datum tolkat", "Rapport bolag verifierat", "Rapport publicering status", "Rapport fakta status", "Rapport faktacitat", "Report Delta periodkoppling", "Report Delta rapportperiod", "Rapport verifieringsversion", "Rapport kontrollerad",
         "Rapport text SHA256", "Rapport periodtext", "Rapport finansiella ämnen", "Rapport textutdrag", "Rapport begärd URL",
         "Rapporttext tillgänglig", "Guidance nämns", "Orderläge nämns",
         "Marginaler nämns", "Kassaflöde nämns", "Engångsposter nämns", "Risker nämns",
@@ -354,12 +372,19 @@ def build_recommendation_records(
         else:
             recommended = gate in {"Toppcase", "Starkt case"}
             decision_basis = "Case Gate"
-        snap["Ledger Decision"] = "RECOMMENDED" if recommended else "NOT_RECOMMENDED"
+        if row.get("Signal"):
+            recommended = str(row.get("Signal")) in {"KÖP NU", "KÖP", "KÖP / ÄG", "BYGG POSITION", "KÖP / ÄG LÅNGSIKTIGT", "BYGG LÅNGSIKTIGT"}
+            decision_basis = "Signal"
+        snap["Ledger Decision"] = "RECOMMENDED" if recommended and row.get("Signal") else ("ANALYSED_FINALIST" if not row.get("Signal") else "NOT_RECOMMENDED")
+        snap["Signal"] = str(row.get("Signal") or "")
+        snap["Visad horisont"] = str(row.get("Visad horisont") or "")
         snap["Ledger Decision Basis"] = decision_basis
         snap["Ledger Rank"] = rank
         # Point-in-time envelope: provenance is frozen beside the model inputs so
         # future diagnostics never need to infer what version/date/profile was used.
-        snap["PIT Schema Version"] = 2
+        snap["PIT Schema Version"] = 3
+        snap["PIT Outcome Basis"] = "next_session_close_total_return_v1"
+        snap["PIT Decision Kind"] = "displayed" if row.get("Signal") else "analysed_finalist"
         snap["PIT Model Version"] = str(model_version)
         snap["PIT Captured At"] = captured.isoformat()
         snap["PIT Captured Date"] = captured_date
@@ -372,7 +397,7 @@ def build_recommendation_records(
         snap["PIT Complete"] = pit["complete"]
 
         record_id = stable_record_id(
-            symbol, horizon_type, captured_date, profile, market, model_version
+            symbol, horizon_type, captured_date, profile, market, model_version + ("::" + str(row.get("Visad horisont")) if row.get("Visad horisont") else "")
         )
         records.append({
             "record_id": record_id,
@@ -442,7 +467,13 @@ def deep_selection_outcome_summary(
 
 
 def horizons_for_record(record: dict[str, Any]) -> dict[str, int]:
-    return SHORT_HORIZONS.copy() if str(record.get("horizon_type")) == "short" else LONG_HORIZONS.copy()
+    try:
+        snapshot = json.loads(record.get("snapshot_json") or "{}")
+    except (ValueError, TypeError):
+        snapshot = {}
+    if isinstance(snapshot, dict) and snapshot.get("PIT Outcome Basis") == "next_session_close_total_return_v1":
+        return SHORT_HORIZONS.copy() if str(record.get("horizon_type")) == "short" else LONG_HORIZONS.copy()
+    return {"1m": 21, "3m": 63, "6m": 126} if str(record.get("horizon_type")) == "short" else {"6m": 126, "1y": 252, "2y": 504}
 
 
 def target_date(captured_date: str, trading_days: int) -> pd.Timestamp:
@@ -488,13 +519,22 @@ def evaluate_record_from_history(
     if not math.isfinite(entry_price) or entry_price <= 0:
         return []
 
-    after = work[work.index.normalize() >= captured.normalize()]
+    try:
+        frozen = json.loads(record.get("snapshot_json") or "{}")
+    except (ValueError, TypeError):
+        frozen = {}
+    comparable = isinstance(frozen, dict) and frozen.get("PIT Outcome Basis") == "next_session_close_total_return_v1"
+    after = work[work.index.normalize() > captured.normalize()] if comparable else work[work.index.normalize() >= captured.normalize()]
     if after.empty:
         return []
 
+    if comparable:
+        entry_price = _num(after.iloc[0]["Close"])
+        if not math.isfinite(entry_price) or entry_price <= 0:
+            return []
     out = []
     for label, trading_days in horizons_for_record(record).items():
-        # session 0 is the first market close on/after capture date.
+        # Session 0 follows the frozen policy: next session for new captures.
         if len(after) <= trading_days:
             continue
         row = after.iloc[trading_days]
@@ -531,11 +571,11 @@ def evaluate_record_from_history(
             bench = bench.sort_index()
             bench["Close"] = pd.to_numeric(bench["Close"], errors="coerce")
             bench = bench.dropna(subset=["Close"])
-            # Use the first benchmark close on/after capture and the last close on/before
-            # the stock's evaluated date. This avoids requiring identical exchange calendars.
-            b0 = bench[bench.index.normalize() >= captured.normalize()]
-            b1 = bench[bench.index.normalize() <= pd.Timestamp(eval_date).normalize()]
-            if not b0.empty and not b1.empty:
+            # New captures require identical stock/benchmark dates. Legacy captures
+            # retain their original nearest-session convention.
+            b0 = bench[bench.index.normalize() == after.index[0].normalize()] if comparable else bench[bench.index.normalize() >= captured.normalize()]
+            b1 = bench[bench.index.normalize() == pd.Timestamp(eval_date).normalize()] if comparable else bench[bench.index.normalize() <= pd.Timestamp(eval_date).normalize()]
+            if not b0.empty and not b1.empty and (not comparable or (history.attrs.get("currency") == benchmark_history.attrs.get("currency") == "SEK")):
                 b_start = _num(b0.iloc[0]["Close"])
                 b_end = _num(b1.iloc[-1]["Close"])
                 if math.isfinite(b_start) and b_start > 0 and math.isfinite(b_end) and b_end > 0:

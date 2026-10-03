@@ -24,3 +24,8 @@ jobs:
           BORSIFY_EMAIL_FROM: ${{ secrets.BORSIFY_EMAIL_FROM }}
           BORSIFY_DAILY_PROFILE: Balanserad
           BORSIFY_APP_URL: https://borsify.se
+      - run: python prospective_worker.py
+        if: always()
+        env:
+          BORSIFY_SUPABASE_URL: ${{ secrets.BORSIFY_SUPABASE_URL }}
+          BORSIFY_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.BORSIFY_SUPABASE_SERVICE_ROLE_KEY }}

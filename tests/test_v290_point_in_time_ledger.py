@@ -20,7 +20,7 @@ def test_long_ledger_v2_freezes_provenance_and_decision_inputs():
         captured_at=pd.Timestamp("2026-09-04T10:00:00Z"),
     )
     snap = json.loads(rows[0]["snapshot_json"])
-    assert snap["PIT Schema Version"] == 2
+    assert snap["PIT Schema Version"] == 3
     assert snap["PIT Model Version"] == "2.90.0"
     assert snap["PIT Captured At"] == "2026-09-04T10:00:00+00:00"
     assert snap["PIT Profile"] == "Balanserad"
@@ -59,7 +59,7 @@ def test_short_pit_summary_requires_decision_and_price_date():
 
 def test_v290_ui_exposes_frozen_decision_audit():
     app = open("app.py", encoding="utf-8").read()
-    assert 'APP_VERSION = "4.39.2"' in app
+    assert 'APP_VERSION = "4.40.0"' in app
     assert "Vad visste Borsify när beslutet togs?" in app
     assert "Borsify fyller inte i saknade gamla uppgifter i efterhand" in app
 
