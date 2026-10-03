@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from io import BytesIO
+from pathlib import Path
+import subprocess
+import sys
 from typing import Any
 from urllib.request import Request, urlopen
 import re
@@ -14,6 +16,7 @@ from report_sources import accept_report_candidate, candidate_report
 from report_verification import verify_report_text
 
 MAX_REPORT_BYTES = 4_000_000
+PDF_WORKER = Path(__file__).with_name("report_pdf_worker.py")
 
 
 def _clean_html(html: str) -> str:
@@ -24,19 +27,22 @@ def _clean_html(html: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _pdf_text(data: bytes) -> str:
-    try:
-        from pypdf import PdfReader
-    except Exception:
+def _pdf_text(data: bytes, timeout: float) -> str:
+    """Isolate PDF decompression/parsing from Streamlit's long-lived process.
+
+    subprocess.run kills and reaps the child on timeout, unlike a timed-out
+    thread/future which would keep consuming resources after the view returns.
+    """
+    if timeout <= 0:
+        raise subprocess.TimeoutExpired("report_pdf_worker", timeout)
+    result = subprocess.run(
+        [sys.executable, str(PDF_WORKER)], input=data,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        timeout=timeout, check=False,
+    )
+    if result.returncode:
         return ""
-    try:
-        reader = PdfReader(BytesIO(data))
-        pages = []
-        for page in reader.pages[:40]:
-            pages.append(page.extract_text() or "")
-        return re.sub(r"\s+", " ", " ".join(pages)).strip()
-    except Exception:
-        return ""
+    return result.stdout.decode("utf-8", errors="replace").strip()
 
 
 def original_publication_time(html: str) -> str:
@@ -118,9 +124,12 @@ def discover_issuer_report_events(company_name: str, timeout: float = 8.0) -> li
 
 def fetch_report_text(url: str, timeout: float = 8.0, max_bytes: int = MAX_REPORT_BYTES) -> dict[str, Any]:
     """Fetch report text conservatively from a direct primary-source URL."""
+    deadline = time.monotonic() + max(0.0, timeout)
     target = str(url or "").strip()
     if not target.lower().startswith(("https://", "http://")):
         return {"ok": False, "text": "", "error": "Ogiltig rapport-URL."}
+    if timeout <= 0:
+        return {"ok": False, "text": "", "error": "Rapportens tidsbudget är slut."}
     try:
         req = Request(target, headers={"User-Agent": "Borsify/4 report provenance checker"})
         with urlopen(req, timeout=timeout) as response:
@@ -132,8 +141,15 @@ def fetch_report_text(url: str, timeout: float = 8.0, max_bytes: int = MAX_REPOR
 
     if len(data) > max_bytes:
         return {"ok": False, "text": "", "error": "Rapporten var större än Borsifys säkra hämtningsgräns."}
-    if "pdf" in content_type or target.lower().split("?", 1)[0].endswith(".pdf"):
-        text = _pdf_text(data)
+    if ("pdf" in content_type or data.startswith(b"%PDF-")
+            or resolved_url.lower().split("?", 1)[0].endswith(".pdf")
+            or target.lower().split("?", 1)[0].endswith(".pdf")):
+        try:
+            text = _pdf_text(data, timeout=deadline - time.monotonic())
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "text": "", "error": "PDF-tolkningen avbröts när rapportens tidsbudget tog slut.", "resolved_url": resolved_url}
+        except OSError:
+            return {"ok": False, "text": "", "error": "PDF-tolkningen kunde inte startas.", "resolved_url": resolved_url}
         if not text:
             return {"ok": False, "text": "", "error": "PDF kunde hämtas men text kunde inte extraheras."}
         return {"ok": True, "text": text, "error": "", "resolved_url": resolved_url}

@@ -1,4 +1,13 @@
-# Borsify v4.39.2
+# Borsify v4.40.0
+
+## PDF-tolkning med avbrott och resursgräns
+
+- PDF-text extraheras i en separat process som avslutas och städas bort när tidsbudgeten tar slut.
+- Tolkningen använder återstående tid efter nedladdningen, inte en ny full tidsbudget.
+- Barnprocessen begränsar minne på plattformar med stöd för `RLIMIT_AS`, samt antal sidor och mängd extraherad text.
+- PDF-filer känns igen även via filsignatur eller omdirigerad PDF-adress när servern lämnar generisk innehållstyp.
+- Timeout eller trasig PDF markeras som oläst; efterföljande rapporter kan fortfarande kontrolleras inom kvarvarande köbudget.
+- Detta begränsar PDF-tolkningens väntetid. Nätverkshämtningen använder fortfarande socket-timeout, inte en absolut tidsgräns för hela överföringen. Full rapporttäckning och total analystid är inte verifierade av denna ändring.
 
 ## v4.39.2 – Primary report fetch groundwork
 
