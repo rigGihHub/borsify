@@ -4039,6 +4039,13 @@ def render_horizon_alternatives(source: pd.DataFrame, horizon: str) -> None:
             st.markdown("**Vad stoppar köp just nu?**")
             st.write(plain_finance_text("; ".join(row["Alternativ hinder"][:2])))
             with st.expander("Underlag och kvarvarande hinder", expanded=False):
+                for field, label in [("Decision Brief tes", "Bolagsunderlag"), ("Decision Brief risk", "Risk att kontrollera"), ("Decision Brief invalidation", "Nästa kontroll")]:
+                    detail = row.get(field)
+                    if isinstance(detail, str) and detail.strip():
+                        st.write(f"**{label}:** {detail}")
+                dividend_yield = _num(row.get("Direktavkastning"))
+                if np.isfinite(dividend_yield):
+                    st.caption(f"Direktavkastning: {dividend_yield:.2%} · {row.get('Direktavkastning källa', 'källa saknas')}")
                 for reason in row["Alternativ hinder"]:
                     st.write(plain_finance_text(reason))
                 st.caption(row["Borsify slutbetyg förklaring"])

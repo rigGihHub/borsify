@@ -149,7 +149,7 @@ def test_alternative_cards_show_final_score_and_observational_decision():
     metrics = []
     display = lambda value: shown.append(str(value))
     namespace = {
-        "pd": pd, "np": SimpleNamespace(isfinite=math.isfinite), "_num": float,
+        "pd": pd, "np": SimpleNamespace(isfinite=math.isfinite), "_num": lambda value: float(value) if value is not None else math.nan,
         "rank_horizon_alternatives": rank_horizon_alternatives,
         "add_full_deal_evidence": lambda frame, _h: frame,
         "_stock_identity": lambda row: row["Ticker"], "plain_finance_text": str,
@@ -161,8 +161,11 @@ def test_alternative_cards_show_final_score_and_observational_decision():
     }
     exec(compile(ast.Module(body=[node], type_ignores=[]), "app.py", "exec"), namespace)
     namespace[node.name](pd.DataFrame([case("CAP.ST", 92, Investmentbolag=True,
-                                            **{"Investmentbolag rankningstak": 60})]), "year")
+                                            **{"Investmentbolag rankningstak": 60, "Direktavkastning": 2.6/140, "Direktavkastning källa": "Årlig utdelning / aktuell kurs", "Decision Brief tes": "Verifierade nyckeltal"})]), "year")
     assert metrics == [("BORSIFY SLUTBETYG", "60/100")]
     assert any("BEVAKA · inget köpbeslut" in text for text in shown)
     assert "Vad stoppar köp just nu?" in " ".join(shown)
     assert "92/100" not in " ".join(shown)
+    assert "Direktavkastning: 1.86%" in " ".join(shown)
+    assert "Verifierade nyckeltal" in " ".join(shown)
+
