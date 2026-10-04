@@ -82,3 +82,20 @@ def test_research_merge_preserves_headline_scores_and_prices_but_fills_verified_
     assert row["Borsify Score"] == 68 and row["Pris"] == 140
     assert row["Deep Confidence"] == 85 and row["Historik år"] == 4
     assert math.isnan(base.iloc[0]["Deep Confidence"])
+
+
+def test_hot_deploy_reloads_stale_bootstrap_and_alternative_api():
+    import subprocess
+    import sys
+    result = subprocess.run([sys.executable, '-c', '''
+import inspect
+import model_bootstrap
+import horizon_alternatives
+model_bootstrap.RELEASE = 'old-release'
+model_bootstrap._MODULES = []
+horizon_alternatives.rank_horizon_alternatives = lambda frame, horizon, limit=3: frame
+import app
+assert model_bootstrap.RELEASE == '4.41.0-analyst-review'
+assert 'evidence_fn' in inspect.signature(app.rank_horizon_alternatives).parameters
+'''], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr[-2000:]

@@ -19,8 +19,11 @@ import streamlit as st
 import yfinance as yf
 from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
-from model_bootstrap import ensure_current_model_modules
-ensure_current_model_modules()
+import importlib
+import model_bootstrap as _model_bootstrap
+if getattr(_model_bootstrap, "RELEASE", None) != "4.41.0-analyst-review":
+    _model_bootstrap = importlib.reload(_model_bootstrap)
+_model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
 from data_acquisition import (
     bulk_price_history as _bulk_price_history_source,
