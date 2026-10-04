@@ -33,6 +33,7 @@ def _pair_edges(winner,other,score_col):
 def explain_top_pick(ranked:pd.DataFrame,score_col:str,horizon:str)->dict[str,Any]:
     if ranked is None or ranked.empty:
         return {"Varför #1":"Borsify hittade ingen aktie som klarade alla krav.","Förstavalets fördelar":"","Utmanarnas fördelar":"","Jämförelseunderlag":pd.DataFrame()}
+    horizon_col = score_col
     top=ranked.head(3).copy()
     # The visible comparison must use the same specialist-aware score as the ranking.
     score_col = "Borsify slutbetyg" if "Borsify slutbetyg" in top.columns else score_col
@@ -44,9 +45,18 @@ def explain_top_pick(ranked:pd.DataFrame,score_col:str,horizon:str)->dict[str,An
         if wins: comparisons.append(f"Jämfört med {label} " + " och ".join(wins[:2]))
         if losses: challenger.append(f"{label} " + " och ".join(losses[:2]))
     name=_label(winner)
-    headline=(f"Borsify väljer {name} först. " + ". ".join(comparisons) + ".") if comparisons else f"Borsify väljer {name} först eftersom aktien klarar kraven och ingen annan godkänd aktie tydligt är bättre i jämförelsen."
-    if challenger: headline += " Den är ändå inte bäst på allt."
-    cols=[c for c in ["Ticker","Namn",score_col,"Ingångsläge","Bolagsbedömning"] if c in top.columns]
+    order = list(dict.fromkeys([score_col, horizon_col, "Deal Conviction Score", "Affärsläge rangvärde", "Case Readiness"] + (["Relativ styrka", "RR rangvärde"] if horizon == "medium" else []) + ["Datatäckning"]))
+    decisive = []
+    for _, other in top.iloc[1:].iterrows():
+        for field in order:
+            a, b = _num(winner.get(field)), _num(other.get(field))
+            if np.isfinite(a) and np.isfinite(b) and a != b:
+                decisive.append(f"Mot {_label(other)} avgör {field}: {a:.2f} mot {b:.2f}.")
+                break
+        else:
+            decisive.append(f"Samma rangordningsmått som {_label(other)}; ingen mätbar fördel i underlaget.")
+    headline = f"Borsify väljer {name} först. " + (" ".join(decisive) if decisive else "Det finns bara en godkänd kandidat i listan.")
+    cols=[c for c in list(dict.fromkeys(["Ticker","Namn",score_col,horizon_col,"Deal Conviction Score","Case Readiness","Ingångsläge","Bolagsbedömning"])) if c in top.columns]
     view=top[cols].copy()
     if score_col in view.columns:
         view=view.rename(columns={score_col:"Borsify slutbetyg"})

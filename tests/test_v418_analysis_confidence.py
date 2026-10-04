@@ -1,4 +1,5 @@
 from analysis_confidence import assess_analysis_confidence
+import pandas as pd
 
 def test_high_confidence_requires_good_data_not_high_stock_score():
     r=assess_analysis_confidence({
@@ -9,6 +10,7 @@ def test_high_confidence_requires_good_data_not_high_stock_score():
         "Deep Confidence":90,
         "Deal Conviction oberoende familjer":4,
         "Data Failure penalty":0,
+        "Rapportdatum":pd.Timestamp.now(tz="UTC").isoformat(),
     })
     assert r["Analysis Confidence Score"]>=80
     assert "Mycket högt" in r["Analysis Confidence"]

@@ -20,6 +20,8 @@ def _profile(sector: str, industry: str) -> tuple[str,list[str]]:
     s=(sector+" "+industry).lower()
     if any(x in s for x in ["bank","financial","insurance","credit"]):
         return "Finans", ["CET1/kapitalrelation","kreditförluster","räntenetto/marginal","inlånings-/finansieringsmix"]
+    if any(x in s for x in ["it services", "information technology services", "infrastructure", "distribution"]):
+        return "IT-tjänster/infrastruktur", ["återkommande tjänsteintäkter", "nya tjänsteavtal", "rörelsemarginal", "operativt kassaflöde/rörelsekapital"]
     if any(x in s for x in ["software","saas","internet","technology","it services"]):
         return "Mjukvara/tech", ["ARR/återkommande intäkter","NRR/churn","CAC/payback","bruttomarginal/FCF-konvertering"]
     if any(x in s for x in ["retail","consumer cyclical","apparel","restaurant"]):

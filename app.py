@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import hashlib
 import re
 import json
 import sqlite3
@@ -57,6 +58,9 @@ from fundamental_cache import CACHE_MAX_AGE_HOURS
 from scan_snapshot_cache import get_scan_snapshot, put_scan_snapshot, fundamental_coverage
 from first_choice_gate import add_first_choice_gate
 from buy_now_selection import select_buy_now
+from research_merge import merge_research
+from purchase_consistency import reconcile_purchase_decisions
+from dividend_units import clean_legacy_dividend
 from horizon_alternatives import rank_horizon_alternatives
 from price_batching import partial_fallback_symbols, symbol_batches
 from first_choice_audit import build_first_choice_record, save_first_choice_records
@@ -281,7 +285,7 @@ except Exception:
     create_client = None
 
 APP_VERSION = "4.40.0"
-MODEL_VERSION = "4.40.0"
+MODEL_VERSION = "4.41.0"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""
@@ -709,6 +713,7 @@ def add_scores(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     for col in ["Värderingsprofil", "Värderingsunderlag", "Värderingsmått antal", "Värdering täckning", "Värderingsnotis"]:
         out[col] = valuation_detail[col]
     out["Kvalitet"] = quality.round(1); out["Marknadsläge"] = setup.round(1)
+    out["Tekniskt grundbetyg"] = setup.round(1)
     out["Utdelning"] = income.round(1); out["Risk"] = risk.round(1)
     w = PROFILE_WEIGHTS[profile]
     base = sum(out[name] * w[key] for name, key in [("Värdering","valuation"),("Kvalitet","quality"),("Marknadsläge","setup"),("Utdelning","income"),("Risk","risk")])
@@ -948,6 +953,8 @@ def add_full_deal_evidence(df: pd.DataFrame, horizon: str) -> pd.DataFrame:
     ranked = add_margin_recovery_before_consensus(ranked)
     ranked = add_revision_breadth(ranked)
     ranked = add_deal_conviction(ranked, horizon)
+    ranked = add_business_management_intelligence(ranked)
+    ranked = add_failure_transparency(ranked)
     ranked = add_analysis_confidence(ranked)
     ranked = add_position_entry_guidance(ranked)
     ranked = add_confidence_adjusted_decision(ranked)
@@ -958,6 +965,8 @@ def add_full_deal_evidence(df: pd.DataFrame, horizon: str) -> pd.DataFrame:
     ranked = add_catalyst_to_recognition(ranked)
     ranked = add_recognition_window(ranked)
     ranked = add_market_implied_expectations(ranked)
+    ranked = reconcile_purchase_decisions(ranked, horizon)
+    ranked = add_position_entry_guidance(ranked)
     ranked = add_decision_briefs(ranked)
     return add_business_management_intelligence(ranked)
 
@@ -981,6 +990,7 @@ def build_evidence_gated_shortlist(df: pd.DataFrame, profile: str, limit: int = 
     # Current first-choice cards must pass the shared purchase and anti-chase gate.
     finalists = select_buy_now(finalists, "medium")
     finalists = add_action_signals(finalists, "medium")
+    finalists = reconcile_purchase_decisions(finalists, "medium")
     # Keep the visible final score and the purchase decision aligned. A horizon
     # score may pass while specialist controls have lowered the headline score.
     finalists = finalists[pd.to_numeric(finalists["Borsify Score"], errors="coerce").ge(66)].copy()
@@ -2827,7 +2837,7 @@ def _score_explanation(row: pd.Series, profile: str) -> tuple[pd.DataFrame, list
     ]
     table = []
     for label, key in factors:
-        score = _num(row.get(label)); weight = weights[key]
+        score = _num(row.get("Tekniskt grundbetyg", row.get(label)) if key == "setup" else row.get(label)); weight = weights[key]
         weighted = score * weight if np.isfinite(score) else np.nan
         impact = (score - 50) * weight if np.isfinite(score) else np.nan
         if not np.isfinite(score): assessment = "Data saknas"
@@ -3657,27 +3667,24 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail", hori
     _deal = assess_good_deal({**dict(row), **_company_axis, **_entry_axis}, horizon)
     st.markdown(f"### {_deal['Affärsläge']}")
     st.caption(_deal["Affärsläge förklaring"])
-    _conv = assess_deal_conviction(row, "long")
+    _conv = {key: row.get(key) for key in ["Deal Conviction", "Deal Conviction Score", "Deal Conviction förklaring"]} if pd.notna(row.get("Deal Conviction Score")) else assess_deal_conviction(row, horizon)
     st.markdown(f"### {_conv['Deal Conviction']}")
     st.caption(f"Score {_conv['Deal Conviction Score']:.0f}/100 · {_conv['Deal Conviction förklaring']}")
     _bmi = assess_business_management_intelligence(row)
     _failure = assess_failure_transparency(row)
-    st.markdown("### Data Trust & Failure Transparency")
+    st.markdown("### Datakvalitet och kända brister")
     st.write(_failure["Data Failure status"])
     st.caption(_failure["Data Failure förklaring"] or "Inga kända dataproblem registrerade.")
-    _aconf = assess_analysis_confidence({**row.to_dict(), **_failure})
+    _aconf = {key: row.get(key) for key in ["Analysis Confidence", "Analysis Confidence Score", "Analysis Confidence förklaring", "Analysis Confidence blockerare"]} if pd.notna(row.get("Analysis Confidence Score")) else assess_analysis_confidence({**row.to_dict(), **_failure})
     st.markdown(f"### {_aconf['Analysis Confidence']}")
     st.caption(f"{_aconf['Analysis Confidence Score']:.0f}/100 · {_aconf['Analysis Confidence förklaring']}")
     _decision = assess_confidence_adjusted_decision({**row.to_dict(), **_failure, **_aconf, **_conv})
     st.markdown(f"### {_decision['Decision Support']}")
     st.caption(_decision["Decision Support förklaring"])
     st.markdown("### Verksamhet & ledning")
-    st.write({
-        "Bolagstyp": _bmi["Business profile"],
-        "Viktigaste KPI:er att följa": _bmi["Business key KPIs"],
-        "KPI-underlag": _bmi["Business KPI coverage"],
-        "Management execution": _bmi["Management execution"],
-    })
+    st.write(f"**Bolagstyp:** {_bmi['Business profile']}")
+    st.write(f"**Verksamhetsmått att följa:** {_bmi['Business key KPIs']}")
+    st.caption(str(_bmi["Business KPI coverage"]))
     if _bmi["Business KPI gaps"]:
         st.caption("Datagap: " + _bmi["Business KPI gaps"])
     st.caption(_bmi["Management execution förklaring"])
@@ -3800,7 +3807,8 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail", hori
     q1, q2, q3 = st.columns(3)
     q1.metric("Viktad grundscore", f"{base_score:.1f}")
     q2.metric("Datatäckningsfaktor", f"{coverage_factor:.3f}")
-    q3.metric("Beräknad slutscore", f"{calc_final:.1f}")
+    q3.metric("Borsify slutbetyg", f"{_num(row.get('Borsify slutbetyg', row.get('Borsify Score'))):.1f}")
+    st.caption(f"Grundbetyg efter datatäckning: {calc_final:.1f}. " + str(row.get("Borsify slutbetyg förklaring", "")))
     st.caption("Saknad data gör Borsify mer försiktigt.")
     sx, wx = st.columns(2)
     with sx:
@@ -4012,7 +4020,7 @@ def _stock_identity(row: pd.Series | dict[str, Any], include_name: bool = True) 
 
 
 def render_horizon_alternatives(source: pd.DataFrame, horizon: str) -> None:
-    alternatives = rank_horizon_alternatives(source, horizon, limit=3)
+    alternatives = rank_horizon_alternatives(source, horizon, limit=3, evidence_fn=add_full_deal_evidence)
     if alternatives.empty:
         st.info("Det finns inga aktier med ett tillgängligt slutbetyg i ditt urval. Ändra sökningen eller uppdatera data.")
         return
@@ -4631,7 +4639,7 @@ def render_overview(
                     st.caption("Borsify kräver minst fem separata körningar och mycket hög träff innan gallringen ens kan testas för aktivering. Därför används den inte för att styra dagens analys.")
             if idx:
                 st.write(f"{benchmark_name}: {idx['index']:.2f} ({fmt_pct(idx.get('daily'))})")
-            st.caption(f"Borsify v{APP_VERSION}. Data kan ibland vara fördröjd eller saknas.")
+            st.caption(f"Borsify v{APP_VERSION} · analysmodell {MODEL_VERSION}. Data kan ibland vara fördröjd eller saknas.")
             st.caption("Rapportkontroll: källadress, rapportperiod och finansiellt innehåll. Report Delta beräknas från strukturerade data.")
 
 
@@ -7088,6 +7096,11 @@ def main() -> None:
 
     start = time.perf_counter()
     raw_df, scan_snapshot = get_scan_snapshot(DB_PATH, scan_symbols, max_age_minutes=120) if not refresh else (pd.DataFrame(), {"hit": False, "reason": "manual_refresh"})
+    _session_key = tuple(sorted(requested_symbols)), bool(retry_quarantine)
+    _session_scan = st.session_state.get("bq_active_scan", {})
+    if not refresh and _session_scan.get("key") == _session_key and time.time() - _session_scan.get("time", 0) < 7200:
+        raw_df = _session_scan["frame"].copy()
+        scan_snapshot = {"hit": True, "age_minutes": (time.time() - _session_scan["time"]) / 60}
     errors: list[str] = []
     if bool(scan_snapshot.get("hit")):
         age_minutes = float(scan_snapshot.get("age_minutes", 0) or 0)
@@ -7141,6 +7154,9 @@ def main() -> None:
         if errors: st.code("\n".join(errors[:12]))
         st.stop()
 
+    if not raw_df.empty and (refresh or _session_scan.get("key") != _session_key or time.time() - _session_scan.get("time", 0) >= 7200):
+        st.session_state["bq_active_scan"] = {"key": _session_key, "time": time.time() - float(scan_snapshot.get("age_minutes", 0)) * 60, "frame": raw_df.copy()}
+    raw_df = pd.DataFrame([clean_legacy_dividend(row) for row in raw_df.to_dict("records")])
     coverage = fundamental_coverage(raw_df)
     st.caption(f"Bolagsunderlag: {coverage['with_data']}/{coverage['rows']} aktier har minst en av 8 kärnuppgifter · {coverage['complete']} har alla 8.")
     if coverage["with_data"] < coverage["rows"]:
@@ -7449,15 +7465,20 @@ def main() -> None:
             "Fördjupad kandidatgranskning körs först när du öppnar Fler aktier. "
             "Det gör startsidan snabbare utan att ta bort analysen."
         )
-        with st.spinner("Fördjupar de starkaste kandidaterna…"):
-            deep_longlist = build_deep_longlist(
-                filtered, pool_size=min(10, len(filtered)), limit=min(5, len(filtered))
-            )
-            deep_longlist = add_data_trust(deep_longlist)
-            short_longlist = build_short_term_longlist(
-                filtered, idx, pool_size=min(10, len(filtered)), limit=min(5, len(filtered))
-            )
-            short_longlist = add_data_trust(short_longlist)
+        _deep_key = hashlib.sha256((filtered.drop(columns=["_history"], errors="ignore").to_json(default_handler=str) + str(idx) + profile).encode()).hexdigest()
+        _deep_cached = st.session_state.get("bq_deep_view_cache", {})
+        if not refresh and _deep_cached.get("key") == _deep_key and time.time() - _deep_cached.get("time", 0) < 900:
+            deep_longlist, short_longlist = _deep_cached["long"].copy(), _deep_cached["short"].copy()
+            st.caption("Kandidatgranskningen återanvänds vid byte av vy. Uppdatera data för en ny kontroll.")
+        else:
+            with st.status("Granskar kandidater · steg 1 av 2", expanded=True) as _deep_status:
+                st.write(f"Långsiktigt underlag för högst {min(12, len(filtered))} kandidater. Väntetiden beror på datakällorna.")
+                deep_longlist = add_data_trust(build_deep_longlist(filtered, pool_size=min(10, len(filtered)), limit=min(5, len(filtered))))
+                _deep_status.update(label="Granskar kandidater · steg 2 av 2")
+                st.write(f"Kortsiktigt underlag för högst {min(10, len(filtered))} kandidater.")
+                short_longlist = add_data_trust(build_short_term_longlist(filtered, idx, pool_size=min(10, len(filtered)), limit=min(5, len(filtered))))
+                _deep_status.update(label="Kandidatgranskning klar", state="complete", expanded=False)
+            st.session_state["bq_deep_view_cache"] = {"key": _deep_key, "time": time.time(), "long": deep_longlist.copy(), "short": short_longlist.copy()}
 
         confirmed_view = st.session_state.get("bq_confirmed_why_now_radar", pd.DataFrame())
         if isinstance(confirmed_view, pd.DataFrame) and not confirmed_view.empty and "Bekräftat varför nu status" in confirmed_view.columns:
@@ -7789,11 +7810,12 @@ def main() -> None:
             )
 
             def _horizon_section(title: str, subtitle: str, horizon: str, score_col: str):
-                ranked = top_ranked(filtered, horizon, limit=10)
+                horizon_source = merge_research(filtered, deep_longlist, short_longlist)
+                ranked = top_ranked(horizon_source, horizon, limit=10)
                 st.markdown(f"### {title}")
                 st.caption(subtitle)
                 if ranked.empty:
-                    render_horizon_alternatives(filtered, horizon)
+                    render_horizon_alternatives(horizon_source, horizon)
                     return ranked
 
                 ranked = add_full_deal_evidence(ranked, horizon)
@@ -7817,7 +7839,7 @@ def main() -> None:
                 else:
                     ranked = ranked[ranked["Signal"].isin({"KÖP NU", "KÖP", "KÖP / ÄG", "BYGG POSITION"})].copy()
                 if ranked.empty:
-                    render_horizon_alternatives(filtered, horizon)
+                    render_horizon_alternatives(horizon_source, horizon)
                     return ranked
                 history_profile = f"{profile}::horizon::{horizon}::final::{MODEL_VERSION}"
                 previous_horizon = previous_radar_snapshot(history_profile, limit=10)
@@ -7917,7 +7939,7 @@ def main() -> None:
                     if isinstance(_cmp, pd.DataFrame) and not _cmp.empty:
                         _cmp = _cmp.copy()
                         if "Borsify slutbetyg" in _cmp:
-                            _cmp["Borsify slutbetyg"] = pd.to_numeric(_cmp["Borsify slutbetyg"], errors="coerce").round(0)
+                            _cmp["Borsify slutbetyg"] = pd.to_numeric(_cmp["Borsify slutbetyg"], errors="coerce").round(2)
                         st.dataframe(_cmp, use_container_width=True, hide_index=True)
 
                 _paths = challenger_paths(ranked, score_col, horizon)

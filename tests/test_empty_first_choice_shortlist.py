@@ -14,6 +14,7 @@ from decision_tiebreaker import rank_close_daily_candidates
 from first_choice_gate import add_first_choice_gate
 from horizon_signals import add_action_signals
 from user_score import add_user_scores
+from purchase_consistency import reconcile_purchase_decisions
 
 
 @pytest.fixture
@@ -22,7 +23,7 @@ def shortlist():
     function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
                     and node.name == "build_evidence_gated_shortlist")
     namespace = {
-        "pd": pd,
+        "pd": pd, "reconcile_purchase_decisions": reconcile_purchase_decisions,
         "build_discovery_pool": lambda frame, **_kw: frame.copy(),
         "add_user_scores": add_user_scores,
         "add_full_deal_evidence": lambda frame, _horizon: frame.copy(),
@@ -42,7 +43,11 @@ def case(**overrides):
         "Ticker": "EXAMPLE.ST", "Borsify Score": 75.0, "Mellan Score": 80.0,
         "1 mån": .03, "3 mån": .06, "6 mån": .10,
         "Kvalitet": 80, "Risk": 80, "Datatäckning": .9,
-        "Analysis Confidence nivå": 3,
+        "Analysis Confidence nivå": 3, "Deal Conviction Score": 75,
+        "KPI strukturerad täckning": 3, "Deep Confidence": 90,
+        "Fundamental source status": "OK", "Deep source status": "OK",
+        "Deal Conviction oberoende familjer": 4,
+        "Rapportdatum": pd.Timestamp.now(tz="UTC").isoformat(),
         **overrides,
     }
 

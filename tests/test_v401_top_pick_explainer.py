@@ -9,8 +9,8 @@ def test_explainer_names_real_edges_and_challenger_strengths():
         {"Ticker":"CCC","Namn":"C","Lång Score":82,"Deal Conviction Score":50,"Deal Conviction oberoende familjer":2,"Affärsläge nivå":2,"Ingångsläge nivå":"orange","Bolagsbedömning nivå":"yellow","Case Readiness":70,"Riktkurs potential":.12},
     ])
     r=explain_top_pick(df,"Lång Score","year")
-    assert "bättre samlat betyg" in r["Varför #1"]
-    assert "fler tydliga saker" in r["Varför #1"]
+    assert "Lång Score: 88.00 mot 84.00" in r["Varför #1"]
+    assert "fler tydliga saker" in r["Förstavalets fördelar"]
     assert "priset ser bättre ut" in r["Utmanarnas fördelar"]
     assert len(r["Jämförelseunderlag"]) == 3
 
@@ -21,13 +21,13 @@ def test_explainer_does_not_invent_edge_when_equal():
         {"Ticker":"BBB","Lång Score":80,"Deal Conviction Score":50},
     ])
     r=explain_top_pick(df,"Lång Score","year")
-    assert "ingen annan godkänd aktie tydligt är bättre" in r["Varför #1"]
+    assert "ingen mätbar fördel" in r["Varför #1"]
 
 
 def test_single_candidate_is_handled():
     df=pd.DataFrame([{"Ticker":"AAA","Lång Score":80}])
     r=explain_top_pick(df,"Lång Score","year")
-    assert "ingen annan godkänd aktie tydligt är bättre" in r["Varför #1"]
+    assert "bara en godkänd kandidat" in r["Varför #1"]
 
 
 def test_app_wires_top_pick_explainer_and_version():

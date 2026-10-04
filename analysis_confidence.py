@@ -44,7 +44,7 @@ def assess_analysis_confidence(row: pd.Series | dict[str,Any]) -> dict[str,Any]:
     for status in [fundamental_status,deep_status]:
         if status in {"ERROR","DEGRADED","CIRCUIT_OPEN"}: source-=8.0
         elif status in {"PARTIAL","NO_DATA"}: source-=4.0
-        elif not status: source-=1.5
+        elif not status: source-=5.0
     if fundamental_circuit: source-=5.0
     if deep_circuit: source-=5.0
     components["Källhälsa"]=max(0.0,source)
@@ -85,13 +85,19 @@ def assess_analysis_confidence(row: pd.Series | dict[str,Any]) -> dict[str,Any]:
     if fundamental_status=="ERROR": blockers.append("fundamental källa fel")
     if deep_status in {"ERROR","DEGRADED"}: blockers.append("djupkälla fel/försämrad")
     if np.isfinite(coverage) and coverage<.50: warnings.append("låg kärndatatäckning")
+    if components["Bransch-KPI"] == 0: warnings.append("verifierade verksamhetsmått saknas")
     if kpi_gaps: warnings.append("viktiga bransch-KPI:er saknas")
     if not np.isfinite(deep_conf) or deep_conf<=0: warnings.append("begränsad djupverifiering")
+
+    report_date = pd.to_datetime(row.get("Rapportdatum") or row.get("Rapportminne rapportdatum"), errors="coerce", utc=True)
+    report_verified = pd.notna(report_date) and 0 <= (pd.Timestamp.now(tz="UTC") - report_date).days <= 180
+    if not report_verified:
+        warnings.append("daterat rapportunderlag från senaste halvåret saknas")
 
     if blockers or score<35:
         label="🔴 Lågt analysförtroende"
         level=1
-    elif score<60:
+    elif score<60 or components["Bransch-KPI"] == 0 or components["Djupverifiering"] == 0 or not report_verified:
         label="🟡 Begränsat analysförtroende"
         level=2
     elif score<80:

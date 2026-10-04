@@ -20,5 +20,5 @@ def test_good_data_does_not_invent_warning():
 def test_app_wires_transparency_and_version():
     app=open("app.py",encoding="utf-8").read()
     assert 'APP_VERSION = "4.40.0"' in app
-    assert "Data Trust & Failure Transparency" in app
+    assert "Datakvalitet och kända brister" in app
     assert "assess_failure_transparency" in app

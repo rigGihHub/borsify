@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from research_merge import merge_research
 from horizon_alternatives import rank_horizon_alternatives
 from horizon_rankings import add_horizon_scores, top_ranked
 
@@ -95,7 +96,7 @@ def section():
     calls = []
     source = pd.DataFrame([case()])
     namespace = {
-        "pd": pd, "filtered": source,
+        "pd": pd, "filtered": source, "merge_research": merge_research, "deep_longlist": pd.DataFrame(), "short_longlist": pd.DataFrame(),
         "st": SimpleNamespace(markdown=lambda *_a: None, caption=lambda *_a: None),
         "top_ranked": lambda *_a, **_k: pd.DataFrame(),
         "add_full_deal_evidence": lambda frame, _h: frame.copy(),
@@ -110,7 +111,7 @@ def test_initial_empty_selection_shows_alternatives_but_returns_no_purchase_for_
     function, _, calls, source = section
     result = function("title", "subtitle", horizon, "score")
     assert result.empty
-    assert len(calls) == 1 and calls[0][0] is source and calls[0][1] == horizon
+    assert len(calls) == 1 and calls[0][0].equals(source) and calls[0][1] == horizon
 
 
 @pytest.mark.parametrize("horizon,signal", [
@@ -150,6 +151,7 @@ def test_alternative_cards_show_final_score_and_observational_decision():
     namespace = {
         "pd": pd, "np": SimpleNamespace(isfinite=math.isfinite), "_num": float,
         "rank_horizon_alternatives": rank_horizon_alternatives,
+        "add_full_deal_evidence": lambda frame, _h: frame,
         "_stock_identity": lambda row: row["Ticker"], "plain_finance_text": str,
         "st": SimpleNamespace(
             info=display, markdown=display, caption=display, write=display,

@@ -23,6 +23,8 @@ def _is_false(value: Any) -> bool:
 def first_choice_blockers(row: pd.Series | dict[str, Any]) -> list[str]:
     """Final presentation firewall; safeguards here never add investment score."""
     reasons: list[str] = []
+    if str(row.get("Köpbeslut hinder", "")).strip():
+        reasons.append(str(row["Köpbeslut hinder"]))
     if str(row.get("Value Trap verdict") or "") == "VALUE_TRAP":
         reasons.append("trolig value trap")
     if str(row.get("Ingångsläge nivå") or "").lower() == "red":

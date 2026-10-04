@@ -9,6 +9,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from dividend_units import clean_legacy_dividend
+
 import numpy as np
 import pandas as pd
 
@@ -77,7 +79,7 @@ def _decode_frame(payload: str) -> pd.DataFrame:
     raw = json.loads(payload)
     rows = []
     for source in raw if isinstance(raw, list) else []:
-        row = dict(source)
+        row = clean_legacy_dividend(source)
         history = row.get("_history")
         if isinstance(history, dict) and history.get("kind") == "dataframe-split":
             try:

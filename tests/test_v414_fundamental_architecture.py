@@ -36,7 +36,7 @@ def test_get_info_failure_can_fallback_to_info(monkeypatch,tmp_path):
     assert health["info_method"]=="info"
 
 def test_cache_hit_avoids_vendor(monkeypatch,tmp_path):
-    monkeypatch.setattr(fa,"get_cached_fundamentals",lambda *a,**k:{"Namn":"Cached", "P/E":15})
+    monkeypatch.setattr(fa,"get_cached_fundamentals",lambda *a,**k:{"Namn":"Cached", "P/E":15, "Utdelningsenhet version":1})
     monkeypatch.setattr(fa,"_yf",lambda:(_ for _ in ()).throw(AssertionError("vendor called")))
     payload,health=fa.fetch_fundamentals("AAA",tmp_path/"x.db",lambda x:x)
     assert payload["Namn"]=="Cached"

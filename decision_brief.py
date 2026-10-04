@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Any
 import pandas as pd
+from analyst_case import analyst_case
 
 _EMPTY = {"", "—", "-", "nan", "none"}
 
@@ -34,7 +35,7 @@ def _confidence(text: str) -> str:
     low = text.lower()
     if "begrän" in low:
         return "Borsify saknar en del information. Därför är bedömningen mer osäker."
-    if "hög" in low:
+    if "hög" in low or "gott" in low:
         return "Borsify har bra information att bygga analysen på."
     if "medel" in low:
         return "Borsify har ganska bra information, men det finns fortfarande luckor."
@@ -46,12 +47,19 @@ def build_decision_brief(row) -> dict[str, Any]:
     thesis = _first(row, "Varför köpa", "Horisontförklaring", "Affärsläge förklaring", default="Borsify ser ännu inget tillräckligt tydligt skäl att köpa aktien.")
     market_wrong = _first(row, "Market Blind Spot reasons", "Early Mispricing stöd", "Value Trap stöd", default="Borsify kan inte säkert förklara varför andra investerare skulle värdera aktien för lågt.")
     expectations = _expectations(_first(row, "Market-Implied Expectations", default=""))
-    recognition = _first(row, "Varför nu", "Catalyst Why Now", default="Borsify ser ingen tydlig händelse som kan göra aktien mer intressant snart.")
+    recognition = _first(row, "Catalyst Why Now", "Bekräftat varför nu", default="Borsify ser ingen tydlig händelse som kan göra aktien mer intressant snart.")
     timing = _timing(_first(row, "Recognition Window", default=""))
     payoff = _first(row, "Recognition Window payoff", default="Borsify kan inte säga säkert hur stor uppgången kan bli eller hur lång tid den kan ta.")
     risk = _first(row, "Största risk", "Riskflaggor", default="Borsify ser ingen enskild stor varningssignal, men aktien kan fortfarande falla.")
     invalidation = _first(row, "Vad ändrar Borsifys syn", "Vänta på", default="Borsify blir mer försiktig om bolaget börjar gå sämre eller riskerna ökar.")
     confidence = _confidence(_first(row, "Analysis Confidence", default=""))
+    observed, risk_checks, review_checks = analyst_case(row)
+    thesis = observed
+    if _text(row.get("Största risk")) and "ingen enskild" not in risk.lower():
+        risk = risk + ". " + risk_checks
+    else:
+        risk = risk_checks
+    invalidation = invalidation + " " + review_checks
     return {
         "Decision Brief beslut": decision, "Decision Brief kort": decision_short,
         "Decision Brief tes": thesis, "Decision Brief market wrong": market_wrong,

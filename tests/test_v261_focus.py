@@ -19,10 +19,10 @@ def test_main_navigation_is_conditional_not_streamlit_tabs():
 
 def test_deep_analysis_is_inside_discover_branch():
     discover=APP.index('elif page == "Fler aktier":')
-    deep=APP.index('deep_longlist = build_deep_longlist', discover)
+    deep=APP.index('deep_longlist = add_data_trust(build_deep_longlist', discover)
     assert deep > discover
     pre_discover=APP[:discover]
-    assert 'deep_longlist = build_deep_longlist' not in pre_discover
+    assert 'deep_longlist = add_data_trust(build_deep_longlist' not in pre_discover
 
 def test_discover_explains_lazy_loading():
     assert "Fördjupad kandidatgranskning körs först när du öppnar Fler aktier" in APP

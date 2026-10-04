@@ -9,6 +9,8 @@ import importlib
 
 import numpy as np
 
+from dividend_units import dividend_fields
+
 from data_errors import classify_data_error, format_error
 from resilience import call_with_resilience
 
@@ -88,7 +90,7 @@ def fetch_fundamentals(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return frozen fundamental payload plus structured source/cache health."""
     cached=None if force_refresh else get_cached_fundamentals(db_path,symbol,max_age_hours)
-    if _has_financial_data(cached, _CACHE_FINANCIAL_FIELDS):
+    if _has_financial_data(cached, _CACHE_FINANCIAL_FIELDS) and cached.get("Utdelningsenhet version") == 1:
         payload=dict(cached)
         payload["_Fundamental cache"]="beständig cache"
         return payload,{
@@ -153,7 +155,7 @@ def fetch_fundamentals(
         "Skuld/eget kapital":_num(info.get("debtToEquity")),
         "Omsättningstillväxt":_num(info.get("revenueGrowth")),
         "Vinsttillväxt":_num(info.get("earningsGrowth")),
-        "Direktavkastning":_num(info.get("dividendYield")),
+        **dividend_fields(info),
         "Utdelningsandel":_num(info.get("payoutRatio")),
         "Analytikermål":target,
         "Rekommendation":info.get("recommendationKey") or "",

@@ -5,6 +5,8 @@ import math
 
 import pandas as pd
 
+from purchase_consistency import purchase_blockers
+
 from anti_chase_gate import anti_chase_decision
 from buy_quality_gate import BUY_THRESHOLDS, apply_buy_gate
 from case_readiness import add_case_readiness
@@ -26,7 +28,7 @@ def _num(value) -> float:
 
 
 def _blocks(row, horizon: str, gate_horizon: str) -> list[str]:
-    reasons = []
+    reasons = purchase_blockers(row, horizon)
     if _num(row.get("Borsify slutbetyg")) < BUY_THRESHOLDS[gate_horizon]:
         reasons.append("slutbetyget når inte köpkravet")
     if not row.get("Köpfilter godkänd", False):
@@ -51,7 +53,7 @@ def _blocks(row, horizon: str, gate_horizon: str) -> list[str]:
     buy_actions = {"KÖP NU", "KÖP", "KÖP / ÄG", "BYGG POSITION", "KÖP / ÄG LÅNGSIKTIGT", "BYGG LÅNGSIKTIGT"}
     if row.get("Signal") not in buy_actions:
         reasons.append("underlaget eller köpläget räcker inte för en tydlig köpsignal")
-    return list(dict.fromkeys(reasons)) or ["ett fullständigt köpbeslut är ännu inte bekräftat"]
+    return list(dict.fromkeys(reasons)) or ["genomför fördjupad kandidatgranskning för ett verifierat köpbeslut"]
 
 
 def _interest(row) -> str:
@@ -71,7 +73,7 @@ def _interest(row) -> str:
     return "; ".join(positives[:3]) or "Tillhör de bäst rankade aktierna i ditt nuvarande urval."
 
 
-def rank_horizon_alternatives(frame: pd.DataFrame, horizon: str, limit: int = 3) -> pd.DataFrame:
+def rank_horizon_alternatives(frame: pd.DataFrame, horizon: str, limit: int = 3, evidence_fn=None) -> pd.DataFrame:
     """Rank without relaxing purchase gates or emitting any purchase decision.
 
     All diagnostics use current observations and the existing controls. No new
@@ -111,6 +113,8 @@ def rank_horizon_alternatives(frame: pd.DataFrame, horizon: str, limit: int = 3)
     if "Datatäckning" in out:
         sort_cols.append("Datatäckning")
     out = out.sort_values(sort_cols + ["Ticker"], ascending=[False] * len(sort_cols) + [True], na_position="last").head(limit).copy()
+    if evidence_fn is not None:
+        out = evidence_fn(out, horizon)
     out["Alternativ varför"] = [_interest(row) for _, row in out.iterrows()]
     out["Alternativ hinder"] = [_blocks(row, horizon, gate_horizon) for _, row in out.iterrows()]
     out["Alternativ köpstopp"] = out["Alternativ hinder"].map("; ".join)
