@@ -1,8 +1,8 @@
 """Refresh model APIs once when Streamlit retains imports during a hot deploy."""
 import importlib
 
-RELEASE = "4.41.2-alternative-fundamentals"
-_MODULES = ["data_trust", "source_health_dashboard", "research_merge", "dividend_units", "stockanalysis_fundamentals", "fundamental_acquisition", "scan_snapshot_cache", "analysis_confidence", "purchase_consistency", "analyst_case", "decision_brief", "first_choice_gate", "business_management_intelligence", "top_pick_explainer", "horizon_alternatives", "issuer_report_sources", "report_sources", "report_reader", "report_verification", "report_fetcher", "inflection_engine", "post_report_drift", "report_delta_engine", "report_delta_memory", "recommendation_ledger", "independent_case_validation", "score_calibration", "false_negative_analysis", "position_entry_guidance", "buy_card", "market_implied_expectations", "case_ai", "horizon_rankings"]
+RELEASE = "4.41.3-fx-and-ratios"
+_MODULES = ["ecb_fx", "data_acquisition", "data_trust", "source_health_dashboard", "research_merge", "dividend_units", "stockanalysis_fundamentals", "fundamental_acquisition", "scan_snapshot_cache", "analysis_confidence", "purchase_consistency", "analyst_case", "decision_brief", "first_choice_gate", "business_management_intelligence", "top_pick_explainer", "horizon_alternatives", "issuer_report_sources", "report_sources", "report_reader", "report_verification", "report_fetcher", "inflection_engine", "post_report_drift", "report_delta_engine", "report_delta_memory", "recommendation_ledger", "independent_case_validation", "score_calibration", "false_negative_analysis", "position_entry_guidance", "buy_card", "market_implied_expectations", "case_ai", "horizon_rankings"]
 
 def ensure_current_model_modules():
     for name in _MODULES:

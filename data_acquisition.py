@@ -7,6 +7,8 @@ structured source-health metadata so failures are observable by higher layers.
 """
 
 from typing import Any
+from ecb_fx import fetch_reference_rates
+
 import math
 
 import numpy as np
@@ -146,9 +148,24 @@ def fx_rates_to_sek(
                     continue
         errors[currency] = "NoData"
     missing = [c for c in needed if c not in rates]
+    ecb_used = []
+    ecb_date = None
+    if missing:
+        fallback, result = call_with_resilience(fetch_reference_rates,
+            provider_key="ecb:fx", context="fx:ecb", max_attempts=1)
+        if result["ok"]:
+            reference_rates, ecb_date = fallback
+            for currency in missing:
+                if currency in reference_rates:
+                    rates[currency] = reference_rates[currency]
+                    ecb_used.append(currency)
+        else:
+            errors["ECB"] = format_error(result["error"] or {})
+    missing = [c for c in needed if c not in rates]
     status = "OK" if not missing else ("PARTIAL" if len(rates) > 1 else "ERROR")
     return rates, {
-        "source":"Yahoo Finance via yfinance","status":status,"error":errors,
+        "source":"Yahoo Finance + ECB reference rates" if ecb_used else "Yahoo Finance via yfinance",
+        "status":status,"error":errors, "ecb_currencies":ecb_used,"ecb_date":ecb_date,
         "requested":needed,"missing":missing,"missing_mapping":missing_symbols,
     }
 

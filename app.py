@@ -21,7 +21,7 @@ from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
 import importlib
 import model_bootstrap as _model_bootstrap
-if getattr(_model_bootstrap, "RELEASE", None) != "4.41.2-alternative-fundamentals":
+if getattr(_model_bootstrap, "RELEASE", None) != "4.41.3-fx-and-ratios":
     _model_bootstrap = importlib.reload(_model_bootstrap)
 _model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
@@ -603,7 +603,7 @@ def _price_snapshot(symbol: str, hist: pd.DataFrame, fundamentals: dict[str, Any
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def fetch_fx_rates_to_sek(currencies: tuple[str, ...]) -> dict[str, float]:
+def fetch_fx_rates_to_sek(currencies: tuple[str, ...], pipeline_version: str = "ecb-fallback-v1") -> dict[str, float]:
     """Cached wrapper around FX acquisition; source health is retained for diagnostics."""
     rates, health = _fx_rates_to_sek_source(currencies, FX_TO_SEK_SYMBOLS, major_currency)
     st.session_state["bq_source_health_fx"] = health
@@ -629,7 +629,12 @@ def add_sek_conversions(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, float
     if "_Raw freeCashflow" in out and "_Raw marketCap" in out:
         fcf_sek = pd.Series([major_amount_to_sek(v, c, rates) for v, c in zip(out["_Raw freeCashflow"], fin_ccy)], index=out.index)
         cap_sek = pd.Series([major_amount_to_sek(v, c, rates) for v, c in zip(out["_Raw marketCap"], quote_ccy)], index=out.index)
-        out["FCF-yield"] = fcf_sek / cap_sek.where(cap_sek > 0)
+        converted_fcf_yield = fcf_sek / cap_sek.where(cap_sek > 0)
+        # A provider's dimensionless ratio needs no FX conversion. Preserve it
+        # when this row has no raw cash-flow fields (mixed-provider dataframes).
+        alternative = out.get("Fundamental reservkälla", pd.Series(False, index=out.index)).fillna(False).eq(True)
+        observed_yield = pd.to_numeric(out.get("FCF-yield", pd.Series(np.nan, index=out.index)), errors="coerce")
+        out["FCF-yield"] = converted_fcf_yield.where(~alternative, observed_yield)
     return out, rates, missing
 
 
@@ -7230,6 +7235,9 @@ def main() -> None:
     raw_df, fx_rates, missing_fx = add_sek_conversions(raw_df)
     if missing_fx:
         errors.append("Valutaomräkning saknas för: " + ", ".join(missing_fx))
+    _fx_health = st.session_state.get("bq_source_health_fx", {})
+    if _fx_health.get("ecb_currencies"):
+        st.caption(f"SEK-omräkning för {', '.join(_fx_health['ecb_currencies'])}: ECB:s referenskurser {_fx_health.get('ecb_date', 'okänt datum')}. Referenskurser, inte handlingsbara valutakurser.")
 
     raw_df = apply_universe_quality(raw_df)
     qc_all_fetched = raw_df.copy()
