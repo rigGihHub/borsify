@@ -9,7 +9,7 @@ import importlib
 
 import numpy as np
 
-from dividend_units import dividend_fields
+from dividend_units import dividend_fields, clean_legacy_dividend
 
 from data_errors import classify_data_error, format_error
 from resilience import call_with_resilience
@@ -90,8 +90,8 @@ def fetch_fundamentals(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return frozen fundamental payload plus structured source/cache health."""
     cached=None if force_refresh else get_cached_fundamentals(db_path,symbol,max_age_hours)
-    if _has_financial_data(cached, _CACHE_FINANCIAL_FIELDS) and cached.get("Utdelningsenhet version") == 1:
-        payload=dict(cached)
+    if _has_financial_data(cached, _CACHE_FINANCIAL_FIELDS):
+        payload=clean_legacy_dividend(cached)
         payload["_Fundamental cache"]="beständig cache"
         return payload,{
             "source":"persistent fundamentals cache",
@@ -100,6 +100,21 @@ def fetch_fundamentals(
             "symbol":symbol,
             "errors":[],
         }
+
+    # A failed refresh may use the last observed payload for at most 72 hours.
+    # Keep the entire payload and its original observation time; never blend vintages.
+    fallback = get_cached_fundamentals(db_path, symbol, max_age_hours=72)
+
+    def retained_payload(health):
+        if not _has_financial_data(fallback, _CACHE_FINANCIAL_FIELDS):
+            return None
+        retained = clean_legacy_dividend(fallback)
+        retained["_Fundamental cache"] = "reservcache · tidigare bolagsdata"
+        health["provider_status"] = health["status"]
+        health["status"] = "DEGRADED"
+        health["cache"] = "FALLBACK"
+        health["errors"].append("Ny hämtning ofullständig; tidigare bolagsdata används med ursprunglig hämtningstid (högst 72 timmar i cache).")
+        return retained
 
     health={
         "source":"Yahoo Finance via yfinance",
@@ -121,6 +136,9 @@ def fetch_fundamentals(
         health["retryable"]=bool(_err.get("retryable"))
         health["classified_error"]=format_error(_err)
         health["errors"].append(f"ticker:{_err.get('detail') or _err.get('type')}")
+        retained = retained_payload(health)
+        if retained is not None:
+            return retained, health
         return {
             "Namn":symbol,"Sektor":"Okänd","Bransch":"Okänd","Valuta":"SEK",
             "Finansiell valuta":"SEK","Fundamental hämtad":datetime.now().isoformat(timespec="seconds"),
@@ -134,6 +152,11 @@ def fetch_fundamentals(
         health["status"]="ERROR"
     elif info_health.get("status")=="PARTIAL":
         health["status"]="PARTIAL"
+
+    if health["status"] == "ERROR":
+        retained = retained_payload(health)
+        if retained is not None:
+            return retained, health
 
     market_cap,fcf,target=_num(info.get("marketCap")),_num(info.get("freeCashflow")),_num(info.get("targetMeanPrice"))
     quote_currency=info.get("currency") or "SEK"
@@ -181,6 +204,9 @@ def fetch_fundamentals(
             else:
                 health["status"] = "PARTIAL"
                 health["errors"].append("cache:previous_richer_payload_retained")
+                retained = retained_payload(health)
+                if retained is not None:
+                    return retained, health
         except Exception as exc:
             health["status"]="PARTIAL"
             _err=classify_data_error(exc,context="fundamental:cache_write")

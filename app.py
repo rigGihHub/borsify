@@ -21,7 +21,7 @@ from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
 import importlib
 import model_bootstrap as _model_bootstrap
-if getattr(_model_bootstrap, "RELEASE", None) != "4.41.0-analyst-review":
+if getattr(_model_bootstrap, "RELEASE", None) != "4.41.1-data-recovery":
     _model_bootstrap = importlib.reload(_model_bootstrap)
 _model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
@@ -58,7 +58,7 @@ from search_explanation import (
     main_risk_text, data_status_text, near_miss_reason,
 )
 from fundamental_cache import CACHE_MAX_AGE_HOURS
-from scan_snapshot_cache import get_scan_snapshot, put_scan_snapshot, fundamental_coverage
+from scan_snapshot_cache import get_scan_snapshot, put_scan_snapshot, fundamental_coverage, scan_reuse_seconds, snapshot_source_health
 from first_choice_gate import add_first_choice_gate
 from buy_now_selection import select_buy_now
 from research_merge import merge_research
@@ -528,14 +528,12 @@ def _rsi(close: pd.Series, period: int = 14) -> float:
     return _num((100 - 100 / (1 + rs)).iloc[-1])
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_fundamentals(symbol: str, force_refresh: bool = False) -> dict[str, Any]:
     """Cached-compatible wrapper around the dedicated fundamental acquisition layer."""
     if force_refresh:
         payload, health = _fetch_fundamentals_source(symbol, DB_PATH, major_currency, CACHE_MAX_AGE_HOURS, force_refresh=True)
     else:
         payload, health = _fetch_fundamentals_source(symbol, DB_PATH, major_currency, CACHE_MAX_AGE_HOURS)
-    st.session_state.setdefault("bq_source_health_fundamentals", {})[symbol] = health
     payload["Fundamental source status"] = str(health.get("status") or "")
     payload["Fundamental source errors"] = "; ".join(map(str, health.get("errors") or []))
     payload["Fundamental source attempts"] = int(health.get("attempts") or 0) if isinstance(health.get("attempts"), (int,float)) else 0
@@ -1088,7 +1086,7 @@ def scan_universe(symbols: list[str], progress_callback=None, force_refresh: boo
             try:
                 data = future.result()
                 fundamentals[sym] = data
-                if str(data.get("Fundamental source status")) in {"ERROR", "CIRCUIT_OPEN"}:
+                if str(data.get("Fundamental source status")) in {"ERROR", "CIRCUIT_OPEN", "DEGRADED"}:
                     errors.append(f"{sym}: bolagsdata kunde inte hämtas · {data.get('Fundamental source errors', '')}")
                 source = str(data.get("_Fundamental cache") or "")
                 if source == "Yahoo":
@@ -1099,6 +1097,8 @@ def scan_universe(symbols: list[str], progress_callback=None, force_refresh: boo
                 fundamentals[sym] = {
                     "Namn": sym, "Sektor": "Okänd", "Bransch": "Okänd",
                     "Valuta": "SEK", "Fundamental hämtad": "—",
+                    "Fundamental source status": "ERROR",
+                    "Fundamental source errors": f"{type(exc).__name__}: {exc}",
                 }
                 errors.append(f"{sym}: information om bolagets ekonomi {type(exc).__name__}")
             completed_fundamentals += 1
@@ -6828,7 +6828,7 @@ def main() -> None:
     .bq-status{display:flex;justify-content:space-between;gap:18px;padding:9px 0;border-bottom:1px solid rgba(148,163,184,.32);color:inherit}.bq-status span{opacity:.72}.bq-status strong{color:inherit}
     div[data-testid="stTabs"] button{font-weight:650}
     @media (max-width: 700px){
-      .block-container{padding-top:.65rem;padding-left:.75rem;padding-right:.75rem}
+      .block-container{padding-top:4rem;padding-left:.75rem;padding-right:.75rem}
       .bq-hero{padding:16px;border-radius:14px}.bq-title{font-size:1.55rem}.bq-sub{font-size:.82rem}
       [data-testid="stMetric"]{padding:9px 10px;border-radius:11px;min-height:84px}
       [data-testid="stMetric"] [data-testid="stMetricValue"]{font-size:1.15rem}
@@ -6876,6 +6876,9 @@ def main() -> None:
         except Exception:
             pass
 
+    if last_refresh and st.session_state.get("bq_manual_refresh_error_count", 0):
+        refresh_status = "Uppdatering med datavarningar"
+        refresh_detail += " Kontrollera bolagstäckning och källstatus nedan."
     refresh_col, freshness_col = st.columns([1, 2])
     with refresh_col:
         refresh = st.button("↻ Uppdatera data", type="primary", use_container_width=True, key="manual_refresh_top")
@@ -6886,30 +6889,6 @@ def main() -> None:
             st.warning(f"● {refresh_status} · {refresh_detail}")
         else:
             st.info(f"● {refresh_status} · {refresh_detail}")
-
-    _source_rows = build_source_health_rows(st.session_state)
-    _source_summary = summarize_source_health(_source_rows)
-    with st.expander("Datakällornas status", expanded=False):
-        st.caption(_source_summary["status"] + " · " + _source_summary["message"])
-        if not _source_rows.empty:
-            _src_show=_source_rows.copy()
-            _src_show["Endpoint"]=_src_show["endpoint"].map({
-                "bulk_prices":"Kurser · bulk","single_prices":"Kurser · fallback",
-                "fx":"Valutor","index":"Index","fundamentals":"Fundamenta","deep":"Djupanalys"
-            }).fillna(_src_show["endpoint"])
-            _src_show["Circuit"]=_src_show["circuit_open"].map(lambda x:"ÖPPEN" if bool(x) else "—")
-            _src_show=_src_show.rename(columns={
-                "status":"Status","scope":"Täckning","attempts":"Försök",
-                "errors":"Senaste fel","impact":"Påverkar"
-            })
-            st.dataframe(
-                _src_show[["Endpoint","Status","Täckning","Försök","Circuit","Senaste fel","Påverkar"]],
-                use_container_width=True, hide_index=True
-            )
-            if _source_summary["error"] or _source_summary["circuit"]:
-                st.warning("Borsify kan fortfarande visa resultat, men analyserna som anges i kolumnen Påverkar bör behandlas som försvagade tills källan återhämtats.")
-        else:
-            st.info(_source_summary["message"])
 
     _runtime_health = runtime_health(st.session_state)
     if _runtime_health["status"] == "DEGRADED":
@@ -7108,13 +7087,17 @@ def main() -> None:
     raw_df, scan_snapshot = get_scan_snapshot(DB_PATH, scan_symbols, max_age_minutes=120) if not refresh else (pd.DataFrame(), {"hit": False, "reason": "manual_refresh"})
     _session_key = tuple(sorted(requested_symbols)), bool(retry_quarantine)
     _session_scan = st.session_state.get("bq_active_scan", {})
-    if not refresh and _session_scan.get("key") == _session_key and time.time() - _session_scan.get("time", 0) < 7200:
+    if not refresh and _session_scan.get("key") == _session_key and time.time() - _session_scan.get("time", 0) < scan_reuse_seconds(_session_scan["frame"]):
         raw_df = _session_scan["frame"].copy()
         scan_snapshot = {"hit": True, "age_minutes": (time.time() - _session_scan["time"]) / 60}
     errors: list[str] = []
     if bool(scan_snapshot.get("hit")):
         age_minutes = float(scan_snapshot.get("age_minutes", 0) or 0)
-        st.success(f"Visar senast sparade analys direkt · {len(raw_df)} aktier · sparad för {age_minutes:.0f} min sedan.")
+        _saved_coverage = fundamental_coverage(raw_df)
+        if _saved_coverage["with_data"] == 0:
+            st.error(f"Sparad körning saknar bolagsdata · {len(raw_df)} aktier med kursdata. Nytt försök vid nästa siduppdatering efter fem minuter, eller välj Uppdatera data nu.")
+        else:
+            st.info(f"Visar sparat underlag · {len(raw_df)} aktier · sparat för {age_minutes:.0f} min sedan. Täckning och källstatus visas nedan.")
         st.session_state["bq_scan_metrics"] = {
             "requested": len(scan_symbols), "price_usable": len(raw_df),
             "snapshot_hit": True, "snapshot_age_minutes": age_minutes,
@@ -7158,19 +7141,50 @@ def main() -> None:
             if not saved_scan.get("saved"):
                 st.warning("Den nya körningen har mindre underlag. Tidigare sparad analys behålls; nedan visas den nya körningens aktuella, ofullständiga underlag.")
         _scan_progress.progress(100, text=f"Grundanalys klar · {len(raw_df)} aktier")
-        _scan_status.update(label="Grundanalys klar", state="complete", expanded=False)
+        if fundamental_coverage(raw_df)["with_data"] == 0:
+            _scan_status.update(label="Kursdata hämtad · bolagsdata saknas", state="error", expanded=False)
+        else:
+            _scan_status.update(label="Grundanalys klar", state="complete", expanded=False)
     if raw_df.empty:
         st.error("Ingen marknadsdata kunde hämtas. Yahoo Finance kan tillfälligt begränsa anrop.")
         if errors: st.code("\n".join(errors[:12]))
         st.stop()
 
-    if not raw_df.empty and (refresh or _session_scan.get("key") != _session_key or time.time() - _session_scan.get("time", 0) >= 7200):
-        st.session_state["bq_active_scan"] = {"key": _session_key, "time": time.time() - float(scan_snapshot.get("age_minutes", 0)) * 60, "frame": raw_df.copy()}
+    if not raw_df.empty:
+        st.session_state["bq_active_scan"] = {"key": _session_key, "time": time.time() - (float(scan_snapshot.get("age_minutes", 0)) * 60 if scan_snapshot.get("hit") else 0), "frame": raw_df.copy()}
     raw_df = pd.DataFrame([clean_legacy_dividend(row) for row in raw_df.to_dict("records")])
     coverage = fundamental_coverage(raw_df)
     st.caption(f"Bolagsunderlag: {coverage['with_data']}/{coverage['rows']} aktier har minst en av 8 kärnuppgifter · {coverage['complete']} har alla 8.")
     if coverage["with_data"] < coverage["rows"]:
         st.warning(f"{coverage['rows'] - coverage['with_data']} aktier saknar samtliga 8 kärnuppgifter om ekonomi och värdering. Kursdata räcker inte för en fullständig bolagsbedömning.")
+
+    _fallback_count = int(raw_df.get("_Fundamental cache", pd.Series(dtype=str)).astype(str).str.startswith("reservcache").sum())
+    if _fallback_count:
+        st.warning(f"{_fallback_count} aktier använder tidigare bolagsdata eftersom den nya hämtningen misslyckades eller blev ofullständig. Ursprunglig hämtningstid behålls; underlaget är inte nyhämtat.")
+    st.session_state["bq_source_health_fundamentals"] = snapshot_source_health(raw_df)
+    _source_rows = build_source_health_rows(st.session_state)
+    _source_summary = summarize_source_health(_source_rows)
+    with st.expander("Datakällornas status", expanded=False):
+        st.caption(_source_summary["status"] + " · " + _source_summary["message"])
+        if not _source_rows.empty:
+            _src_show=_source_rows.copy()
+            _src_show["Endpoint"]=_src_show["endpoint"].map({
+                "bulk_prices":"Kurser · bulk","single_prices":"Kurser · fallback",
+                "fx":"Valutor","index":"Index","fundamentals":"Fundamenta","deep":"Djupanalys"
+            }).fillna(_src_show["endpoint"])
+            _src_show["Circuit"]=_src_show["circuit_open"].map(lambda x:"ÖPPEN" if bool(x) else "—")
+            _src_show=_src_show.rename(columns={
+                "status":"Status","scope":"Täckning","attempts":"Försök",
+                "errors":"Senaste fel","impact":"Påverkar"
+            })
+            st.dataframe(
+                _src_show[["Endpoint","Status","Täckning","Försök","Circuit","Senaste fel","Påverkar"]],
+                use_container_width=True, hide_index=True
+            )
+            if _source_summary["error"] or _source_summary["circuit"]:
+                st.warning("Borsify kan fortfarande visa resultat, men analyserna som anges i kolumnen Påverkar bör behandlas som försvagade tills källan återhämtats.")
+        else:
+            st.info(_source_summary["message"])
 
     # Keep the core recommendation paths on the first screen, especially on
     # mobile. The same session-state targets are used by the detailed view.
@@ -7438,8 +7452,8 @@ def main() -> None:
         else:
             st.caption("Borsifys sista kontroll höll med om aktien som låg först. Resultatet sparas så att Borsify senare kan kontrollera hur valet gick.")
     if errors:
-        with st.expander(f"Datakällan saknade {len(errors)} ticker(s) — övriga analyserades"):
-            st.caption("Detta beror oftast på tillfälliga Yahoo-problem, ändrad ticker eller otillräcklig kurshistorik. Det påverkar inte aktier som redan har lästs in.")
+        with st.expander(f"Visa {len(errors)} datavarningar från hämtningen"):
+            st.caption("Varningarna kan gälla kurser eller bolagsdata. En aktie kan ha giltig kurs men sakna underlag för bolagsanalys. Se felorsakerna nedan.")
             for error in errors:
                 st.write(f"• {error}")
     if filtered.empty: st.warning("Inga aktier klarade filtren."); st.stop()

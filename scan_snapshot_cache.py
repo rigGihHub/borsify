@@ -30,6 +30,27 @@ def fundamental_coverage(frame: pd.DataFrame) -> dict[str, int]:
             "facts": int(counts.sum())}
 
 
+def scan_reuse_seconds(frame: pd.DataFrame) -> int:
+    """Failed fundamentals retry after five minutes, healthy scans after two hours."""
+    return 7200 if fundamental_coverage(frame)["with_data"] else 300
+
+
+def snapshot_source_health(frame: pd.DataFrame) -> dict[str, dict]:
+    """Reconstruct observed acquisition health, including across sessions/restarts."""
+    result = {}
+    for index, row in frame.iterrows():
+        status = row.get("Fundamental source status")
+        if not isinstance(status, str) or not status:
+            status = "UNKNOWN" if fundamental_coverage(pd.DataFrame([row]))["with_data"] else "NO_DATA"
+        error = row.get("Fundamental source errors")
+        result[str(row.get("Ticker", index))] = {
+            "status": status, "attempts": 0,
+            "circuit_open": row.get("Fundamental circuit open") is True,
+            "errors": [error] if isinstance(error, str) and error else [],
+        }
+    return result
+
+
 def symbol_set_key(symbols: list[str] | tuple[str, ...]) -> str:
     normalized = sorted({str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()})
     return hashlib.sha256("\n".join(normalized).encode("utf-8")).hexdigest()
@@ -166,6 +187,8 @@ def get_scan_snapshot(
         frame = _decode_frame(str(row[3]))
         if frame.empty or len(frame) != int(row[2]):
             return pd.DataFrame(), {"hit": False, "reason": "invalid_payload"}
+        if age_minutes * 60 >= scan_reuse_seconds(frame):
+            return pd.DataFrame(), {"hit": False, "reason": "incomplete_retry_due", "age_minutes": age_minutes}
         return frame, {
             "hit": True,
             "captured_at": str(row[0]),

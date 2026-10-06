@@ -46,8 +46,10 @@ def test_failed_forced_refresh_preserves_prior_payload_and_timestamp(monkeypatch
         Ticker = staticmethod(lambda s: T())
     monkeypatch.setattr(fa, '_yf', lambda: YF)
     payload, health = fa.fetch_fundamentals('AAA', db, lambda x: x, force_refresh=True)
-    assert health['status'] == 'ERROR'
-    assert payload['Namn'] == 'AAA'  # current failure, never merged with old facts
+    assert health['status'] == 'DEGRADED'
+    assert payload['Namn'] == 'Old'
+    assert payload['P/E'] == 12
+    assert payload['Fundamental hämtad'] == original['Fundamental hämtad']
     assert get_cached_fundamentals(db, 'AAA') == original
 
 
@@ -79,8 +81,8 @@ def test_partial_refresh_does_not_replace_richer_fundamental_cache(monkeypatch, 
         Ticker = staticmethod(lambda s: T())
     monkeypatch.setattr(fa, '_yf', lambda: YF)
     payload, health = fa.fetch_fundamentals('AAA', db, lambda x: x, force_refresh=True)
-    assert health['status'] == 'PARTIAL'
-    assert np.isnan(payload['P/E'])
+    assert health['status'] == 'DEGRADED'
+    assert payload['P/E'] == 12
     assert get_cached_fundamentals(db, 'AAA') == original
 
 

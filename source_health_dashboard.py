@@ -105,7 +105,7 @@ def summarize_source_health(rows: pd.DataFrame | None) -> dict[str, Any]:
                 "message":"Källstatus visas efter att Borsify har gjort minst en datahämtning."}
     ranks=rows["status"].astype(str).map(_status_rank)
     error=int((ranks>=3).sum())
-    warning=int((ranks==2).sum())
+    warning=int(((ranks==2) | (ranks==1)).sum())
     ok=int((ranks==0).sum())
     circuit=int(rows["circuit_open"].fillna(False).astype(bool).sum())
     if error or circuit:
