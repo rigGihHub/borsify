@@ -6883,12 +6883,13 @@ def main() -> None:
     with refresh_col:
         refresh = st.button("↻ Uppdatera data", type="primary", use_container_width=True, key="manual_refresh_top")
     with freshness_col:
+        _refresh_feedback = st.empty()
         if refresh_status == "Färsk data":
-            st.success(f"● {refresh_status} · {refresh_detail}")
+            _refresh_feedback.success(f"● {refresh_status} · {refresh_detail}")
         elif refresh_status == "Delvis färsk":
-            st.warning(f"● {refresh_status} · {refresh_detail}")
+            _refresh_feedback.warning(f"● {refresh_status} · {refresh_detail}")
         else:
-            st.info(f"● {refresh_status} · {refresh_detail}")
+            _refresh_feedback.info(f"● {refresh_status} · {refresh_detail}")
 
     _runtime_health = runtime_health(st.session_state)
     if _runtime_health["status"] == "DEGRADED":
@@ -6909,7 +6910,7 @@ def main() -> None:
         st.session_state.pop("bq_manual_refresh_error", None)
         # Bypass persistent caches during refresh; retain previous data until success.
         st.cache_data.clear()
-        st.info("Hämtar färsk kurs-, bolags-, analytiker- och rapportdata och räknar om analysen …")
+        _refresh_feedback.info("Uppdatering pågår · hämtar kurs- och bolagsdata …")
 
     with st.sidebar:
         st.header("Borsifys val")
@@ -7140,7 +7141,7 @@ def main() -> None:
             saved_scan = put_scan_snapshot(DB_PATH, scan_symbols, raw_df)
             if not saved_scan.get("saved"):
                 st.warning("Den nya körningen har mindre underlag. Tidigare sparad analys behålls; nedan visas den nya körningens aktuella, ofullständiga underlag.")
-        _scan_progress.progress(100, text=f"Grundanalys klar · {len(raw_df)} aktier")
+        _scan_progress.empty()
         if fundamental_coverage(raw_df)["with_data"] == 0:
             _scan_status.update(label="Kursdata hämtad · bolagsdata saknas", state="error", expanded=False)
         else:
@@ -7214,6 +7215,12 @@ def main() -> None:
         st.session_state["bq_manual_refresh_in_progress"] = False
         st.session_state["bq_manual_refresh_fetched_count"] = int(len(raw_df))
         st.session_state["bq_manual_refresh_error_count"] = int(len(errors))
+        if coverage["with_data"] == 0:
+            _refresh_feedback.error("Uppdatering avslutad · bolagsdata kunde inte hämtas. Se källstatus nedan.")
+        elif errors:
+            _refresh_feedback.warning(f"Uppdatering avslutad med datavarningar · {coverage['with_data']}/{coverage['rows']} aktier har bolagsunderlag.")
+        else:
+            _refresh_feedback.info(f"Uppdatering avslutad · {coverage['with_data']}/{coverage['rows']} aktier har bolagsunderlag. Se täckning och källstatus nedan.")
 
     raw_df, fx_rates, missing_fx = add_sek_conversions(raw_df)
     if missing_fx:
