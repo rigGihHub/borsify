@@ -21,7 +21,7 @@ from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
 import importlib
 import model_bootstrap as _model_bootstrap
-if getattr(_model_bootstrap, "RELEASE", None) != "4.41.1-data-recovery":
+if getattr(_model_bootstrap, "RELEASE", None) != "4.41.2-alternative-fundamentals":
     _model_bootstrap = importlib.reload(_model_bootstrap)
 _model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
@@ -4043,6 +4043,8 @@ def render_horizon_alternatives(source: pd.DataFrame, horizon: str) -> None:
                     detail = row.get(field)
                     if isinstance(detail, str) and detail.strip():
                         st.write(f"**{label}:** {detail}")
+                if row.get("Fundamental reservkälla") is True:
+                    st.caption(f"Bolagsdata uppdaterad hos källan: {row.get('Fundamental källdatum', 'okänt datum')} · {row.get('Fundamental käll-URL', '')}")
                 dividend_yield = _num(row.get("Direktavkastning"))
                 if np.isfinite(dividend_yield):
                     st.caption(f"Direktavkastning: {dividend_yield:.2%} · {row.get('Direktavkastning källa', 'källa saknas')}")
@@ -7159,6 +7161,9 @@ def main() -> None:
     if coverage["with_data"] < coverage["rows"]:
         st.warning(f"{coverage['rows'] - coverage['with_data']} aktier saknar samtliga 8 kärnuppgifter om ekonomi och värdering. Kursdata räcker inte för en fullständig bolagsbedömning.")
 
+    _alternative_count = int(raw_df.get("Fundamental reservkälla", pd.Series(False, index=raw_df.index)).fillna(False).astype(bool).sum())
+    if _alternative_count:
+        st.info(f"{_alternative_count} aktier har bolagsnyckeltal från Stock Analysis / S&P Global Market Intelligence. Kurser hämtas separat. Historisk tillväxt och bolagsprofil kan saknas; reservkällan ersätter inte rapportgranskning.")
     _fallback_count = int(raw_df.get("_Fundamental cache", pd.Series(dtype=str)).astype(str).str.startswith("reservcache").sum())
     if _fallback_count:
         st.warning(f"{_fallback_count} aktier använder tidigare bolagsdata eftersom den nya hämtningen misslyckades eller blev ofullständig. Ursprunglig hämtningstid behålls; underlaget är inte nyhämtat.")

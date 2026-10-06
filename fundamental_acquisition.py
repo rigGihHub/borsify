@@ -9,6 +9,8 @@ import importlib
 
 import numpy as np
 
+from stockanalysis_fundamentals import fetch_stockanalysis
+
 from dividend_units import dividend_fields, clean_legacy_dividend
 
 from data_errors import classify_data_error, format_error
@@ -95,7 +97,7 @@ def fetch_fundamentals(
         payload["_Fundamental cache"]="beständig cache"
         return payload,{
             "source":"persistent fundamentals cache",
-            "status":"OK",
+            "status":"PARTIAL" if payload.get("Fundamental reservkälla") else "OK",
             "cache":"HIT",
             "symbol":symbol,
             "errors":[],
@@ -115,6 +117,26 @@ def fetch_fundamentals(
         health["cache"] = "FALLBACK"
         health["errors"].append("Ny hämtning ofullständig; tidigare bolagsdata används med ursprunglig hämtningstid (högst 72 timmar i cache).")
         return retained
+
+    def alternative_payload(health):
+        alternative, alternative_health = fetch_stockanalysis(symbol)
+        health["errors"].extend(alternative_health.get("errors", []))
+        if not alternative:
+            return None
+        health["source"] = alternative_health["source"]
+        health["status"] = "PARTIAL"
+        health["cache"] = "ALTERNATIVE"
+        health["errors"].append("Yahoo saknar bolagsdata; observerade nyckeltal hämtade från Stock Analysis. Historisk tillväxt och bolagsprofil kan saknas.")
+        try:
+            # Do not replace richer last-good data with a thinner alternate source.
+            old = get_cached_fundamentals(db_path, symbol, max_age_hours=72) or {}
+            old_count = sum(np.isfinite(_num(old.get(key))) for key in _CACHE_FINANCIAL_FIELDS)
+            new_count = sum(np.isfinite(_num(alternative.get(key))) for key in _CACHE_FINANCIAL_FIELDS)
+            if new_count >= old_count:
+                put_cached_fundamentals(db_path, symbol, alternative)
+        except Exception as exc:
+            health["errors"].append(format_error(classify_data_error(exc, context="alternative:cache_write")))
+        return alternative
 
     health={
         "source":"Yahoo Finance via yfinance",
@@ -136,6 +158,9 @@ def fetch_fundamentals(
         health["retryable"]=bool(_err.get("retryable"))
         health["classified_error"]=format_error(_err)
         health["errors"].append(f"ticker:{_err.get('detail') or _err.get('type')}")
+        alternative = alternative_payload(health)
+        if alternative is not None:
+            return alternative, health
         retained = retained_payload(health)
         if retained is not None:
             return retained, health
@@ -154,6 +179,9 @@ def fetch_fundamentals(
         health["status"]="PARTIAL"
 
     if health["status"] == "ERROR":
+        alternative = alternative_payload(health)
+        if alternative is not None:
+            return alternative, health
         retained = retained_payload(health)
         if retained is not None:
             return retained, health
@@ -161,6 +189,7 @@ def fetch_fundamentals(
     market_cap,fcf,target=_num(info.get("marketCap")),_num(info.get("freeCashflow")),_num(info.get("targetMeanPrice"))
     quote_currency=info.get("currency") or "SEK"
     payload={
+        "Fundamental källa":"Yahoo Finance",
         "Namn":info.get("shortName") or info.get("longName") or symbol,
         "Sektor":info.get("sector") or "Okänd",
         "Bransch":info.get("industry") or "Okänd",

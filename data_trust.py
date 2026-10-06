@@ -94,7 +94,7 @@ def assess_data_trust(row: pd.Series | dict[str,Any]) -> dict[str,Any]:
         "Data Trust varningar":"; ".join(warnings[:4]) if warnings else "inga tydliga datavarningar",
         "Data Trust stopp":"; ".join(blockers),
         "Data Trust kursålder dagar":price_age,
-        "Data Trust källa":"Yahoo Finance via yfinance",
+        "Data Trust källa":("Kurser: Yahoo Finance · Bolagsdata: " + str(row.get("Fundamental källa"))) if row.get("Fundamental källa") else "Yahoo Finance via yfinance",
         "Data Trust kursdatum":str(price_date or "—"),
         "Data Trust bolagsdata hämtad":fundamental_at or "—",
         "Data Trust rapportstatus":report_status,

@@ -17,7 +17,8 @@ def analyst_case(row):
         value = number(row.get(key))
         if math.isfinite(value):
             thesis += f" {label.capitalize()}: {value:.1%}."
-    thesis += f" Källa: Yahoo Finance, hämtat {date}. Måtten kan avse olika perioder; hämtningstid är inte rapportdatum."
+    source = str(row.get("Fundamental källa") or "Yahoo Finance")
+    thesis += f" Källa: {source}, hämtat {date}. Måtten kan avse olika perioder; hämtningstid är inte rapportdatum."
     sector = str(row.get("Sektor", "")) + " " + str(row.get("Bransch", ""))
     sector = sector.lower()
     if any(word in sector for word in ["construction", "industrial", "engineering"]):
