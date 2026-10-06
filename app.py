@@ -603,9 +603,13 @@ def _price_snapshot(symbol: str, hist: pd.DataFrame, fundamentals: dict[str, Any
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def fetch_fx_rates_to_sek(currencies: tuple[str, ...], pipeline_version: str = "ecb-fallback-v1") -> dict[str, float]:
-    """Cached wrapper around FX acquisition; source health is retained for diagnostics."""
-    rates, health = _fx_rates_to_sek_source(currencies, FX_TO_SEK_SYMBOLS, major_currency)
+def _cached_fx_acquisition(currencies: tuple[str, ...], pipeline_version: str = "ecb-fallback-v2"):
+    return _fx_rates_to_sek_source(currencies, FX_TO_SEK_SYMBOLS, major_currency)
+
+
+def fetch_fx_rates_to_sek(currencies: tuple[str, ...]) -> dict[str, float]:
+    """Restore dated source health on cache hits as well as fresh requests."""
+    rates, health = _cached_fx_acquisition(currencies)
     st.session_state["bq_source_health_fx"] = health
     return rates
 
