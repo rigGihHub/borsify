@@ -108,9 +108,9 @@ def top_ranked(df: pd.DataFrame,horizon: str,limit: int=3)->pd.DataFrame:
     out=add_good_deal(out,horizon); out=add_negative_overreaction(out); out=add_mispriced_acceleration(out); out=add_hidden_inflection(out); out=add_quality_compounder_ignored(out,horizon); out=add_underfollowed_quality(out,horizon); out=add_earnings_power_noise(out,horizon); out=add_operating_leverage_setup(out,horizon); out=add_balance_sheet_optionality(out,horizon); out=add_cash_conversion_inflection(out); out=add_margin_recovery_before_consensus(out); out=add_revision_breadth(out); out=add_deal_conviction(out,horizon)
     if gate_horizon in {"day","medium"}:
         rr=[build_risk_reward(r,gate_horizon) for _,r in out.iterrows()]; out["RR plan"]=rr; out["RR rangvärde"]=[risk_reward_rank_value(p) for p in rr]
-        out=out.sort_values(["Borsify slutbetyg",col,"Deal Conviction Score","Affärsläge rangvärde","Case Readiness","Relativ styrka","RR rangvärde","Datatäckning"],ascending=[False]*8).head(limit).copy()
+        out=out.sort_values([col,"Borsify slutbetyg","Deal Conviction Score","Affärsläge rangvärde","Case Readiness","Relativ styrka","RR rangvärde","Datatäckning"],ascending=[False]*8).head(limit).copy()
     else:
-        out=out.sort_values(["Borsify slutbetyg",col,"Deal Conviction Score","Affärsläge rangvärde","Case Readiness","Datatäckning"],ascending=[False]*6).head(limit).copy(); out["RR plan"]=[build_risk_reward(r,gate_horizon) for _,r in out.iterrows()]
+        out=out.sort_values([col,"Borsify slutbetyg","Deal Conviction Score","Affärsläge rangvärde","Case Readiness","Datatäckning"],ascending=[False]*6).head(limit).copy(); out["RR plan"]=[build_risk_reward(r,gate_horizon) for _,r in out.iterrows()]
     reason_horizon="long" if horizon=="year" else horizon
     out["Horisontförklaring"]=[horizon_reason(r,reason_horizon) for _,r in out.iterrows()]
     cards=[build_buy_card(r,gate_horizon) for _,r in out.iterrows()]

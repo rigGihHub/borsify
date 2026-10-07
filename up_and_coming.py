@@ -61,8 +61,13 @@ def assess_up_and_coming(row: pd.Series | dict[str, Any]) -> dict[str, Any]:
     if change: families.append("förändring")
     resilience = []
     if np.isfinite(quality) and quality >= 55: resilience.append("god kvalitet")
-    if not np.isfinite(debt) or debt <= 150: resilience.append("ingen tydlig skuldblockerare")
+    if np.isfinite(debt) and debt <= 150: resilience.append("observerad skuldsättning högst 150 %")
     if resilience: families.append("uthållighet")
+
+    if not np.isfinite(revenue_growth) and not np.isfinite(earnings_growth):
+        blockers.append("historisk tillväxt saknas")
+    if not np.isfinite(debt):
+        blockers.append("skuldsättning saknas")
 
     eligible = not blockers and "tillväxt" in families and len(families) >= 3
     if eligible and len(families) == 4 and len(growth_reasons) == 2 and len(economics) >= 2:
@@ -97,22 +102,25 @@ def add_up_and_coming(frame: pd.DataFrame) -> pd.DataFrame:
     return out.drop(columns=[c for c in extra.columns if c in out.columns], errors="ignore").join(extra)
 
 
-def select_up_and_coming(frame: pd.DataFrame, limit: int = 10) -> pd.DataFrame:
+def select_up_and_coming(frame: pd.DataFrame, limit: int = 5) -> pd.DataFrame:
+    """Best available smaller companies; qualification is separate from ranking."""
     assessed = add_up_and_coming(frame)
-    if assessed.empty:
-        return assessed
-    selected = assessed[assessed["Up and coming godkänd"]].copy()
+    if assessed.empty or limit <= 0 or "Ticker" not in assessed:
+        return assessed.iloc[:0]
+    cap = pd.to_numeric(assessed.get("Börsvärde BSEK", pd.Series(index=assessed.index, dtype=float)), errors="coerce")
+    catalog = assessed.get("Avanza-universum", pd.Series(False, index=assessed.index)).fillna(False).eq(True)
+    selected = assessed.loc[catalog & cap.gt(0) & cap.le(50)].copy()
+    selected = selected.loc[selected["Ticker"].notna() & selected["Ticker"].astype(str).str.strip().ne("")].drop_duplicates("Ticker")
     if selected.empty:
         return selected
-    revenue = pd.to_numeric(selected.get("Omsättningstillväxt", pd.Series(np.nan, index=selected.index)), errors="coerce")
-    earnings = pd.to_numeric(selected.get("Vinsttillväxt", pd.Series(np.nan, index=selected.index)), errors="coerce")
-    selected["__growth"] = pd.concat([revenue, earnings], axis=1).max(axis=1).fillna(-1)
-    # Prefer the shared final Borsify score when it is available. Up & Coming
-    # remains a discovery ranking, but must not silently use a raw/pre-cap score.
-    selected["__score"] = pd.to_numeric(
-        selected.get("Borsify Score", selected.get("Års Score")), errors="coerce"
-    ).fillna(-1)
+    def number(name):
+        return pd.to_numeric(selected.get(name, pd.Series(np.nan, index=selected.index)), errors="coerce")
+    selected["__growth"] = pd.concat([number("Omsättningstillväxt"), number("Vinsttillväxt")], axis=1).max(axis=1).fillna(-np.inf)
+    selected["__score"] = number("Borsify slutbetyg") if "Borsify slutbetyg" in selected else number("Borsify Score") if "Borsify Score" in selected else number("Års Score")
+    selected["__risk"] = [int(str(r.get("Value Trap verdict")) == "VALUE_TRAP" or str(r.get("Bolagsbedömning nivå")) == "red") for _, r in selected.iterrows()]
+    selected["Up and coming köpstatus"] = "BEVAKA – inget köpbeslut"
+    selected.loc[~selected["Up and coming godkänd"], "Up and coming"] = "🟡 Bevakningskandidat – ej bekräftad"
     return selected.sort_values(
-        ["Up and coming evidensfamiljer", "__growth", "__score", "Ticker"],
-        ascending=[False, False, False, True],
-    ).drop(columns=["__growth", "__score"]).head(max(1, int(limit)))
+        ["Up and coming godkänd", "__risk", "Up and coming evidensfamiljer", "__growth", "__score", "Ticker"],
+        ascending=[False, True, False, False, False, True], na_position="last",
+    ).drop(columns=["__growth", "__score", "__risk"]).head(int(limit))

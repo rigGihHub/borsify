@@ -169,3 +169,18 @@ def test_alternative_cards_show_final_score_and_observational_decision():
     assert "Direktavkastning: 1.86%" in " ".join(shown)
     assert "Verifierade nyckeltal" in " ".join(shown)
 
+
+
+def test_horizon_fit_beats_shared_score_and_does_not_force_artificial_diversity():
+    source = pd.DataFrame([
+        case("MOMENTUM", 65, **{"1 mån": .15, "3 mån": .30, "6 mån": .45,
+                                  "Kvalitet": 50, "Risk": 50, "ROE": .05, "Vinstmarginal": .02}),
+        case("COMPOUNDER", 80, **{"1 mån": -.05, "3 mån": -.10, "6 mån": -.15,
+                                    "Kvalitet": 95, "Risk": 90, "ROE": .25, "Vinstmarginal": .22}),
+    ])
+    short = rank_horizon_alternatives(source, "medium")
+    lifetime = rank_horizon_alternatives(source, "lifetime")
+    assert short.iloc[0]["Ticker"] == "MOMENTUM"
+    assert lifetime.iloc[0]["Ticker"] == "COMPOUNDER"
+    assert short.iloc[0]["Borsify slutbetyg"] == 65
+    assert set(short["Ticker"]) == set(lifetime["Ticker"])

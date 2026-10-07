@@ -45,7 +45,7 @@ def explain_top_pick(ranked:pd.DataFrame,score_col:str,horizon:str)->dict[str,An
         if wins: comparisons.append(f"Jämfört med {label} " + " och ".join(wins[:2]))
         if losses: challenger.append(f"{label} " + " och ".join(losses[:2]))
     name=_label(winner)
-    order = list(dict.fromkeys([score_col, horizon_col, "Deal Conviction Score", "Affärsläge rangvärde", "Case Readiness"] + (["Relativ styrka", "RR rangvärde"] if horizon == "medium" else []) + ["Datatäckning"]))
+    order = list(dict.fromkeys([horizon_col, score_col, "Deal Conviction Score", "Affärsläge rangvärde", "Case Readiness"] + (["Relativ styrka", "RR rangvärde"] if horizon == "medium" else []) + ["Datatäckning"]))
     decisive = []
     for _, other in top.iloc[1:].iterrows():
         for field in order:

@@ -58,7 +58,10 @@ def test_value_trap_red_entry_and_low_confidence_are_blocked():
         _case(**{"Ingångsläge nivå": "red"}),
         _case(**{"Analysis Confidence nivå": 1}),
     ]
-    assert not select_up_and_coming(pd.DataFrame(cases)).shape[0]
+    selected = select_up_and_coming(pd.DataFrame(cases))
+    assert len(selected) == 1  # duplicate ticker appears only once
+    assert not selected["Up and coming godkänd"].any()
+    assert selected["Up and coming köpstatus"].str.startswith("BEVAKA").all()
 
 
 def test_ranking_uses_evidence_then_growth_without_new_mega_score():
@@ -98,3 +101,24 @@ def test_cold_start_card_is_explicitly_stale_not_current():
     assert "UPPDATERAS NU" in app
     assert "inte ett aktuellt köpråd" in app
     assert "latest_first_choice(DB_PATH, profile, market)" in app
+
+
+def test_five_candidates_survive_missing_growth_without_inventing_evidence():
+    frame = pd.DataFrame([_case(Ticker=f"C{i}", **{
+        "Omsättningstillväxt": None, "Vinsttillväxt": None,
+        "Skuld/eget kapital": None, "Analysis Confidence nivå": 1,
+    }) for i in range(8)])
+    out = select_up_and_coming(frame)
+    assert len(out) == 5
+    assert out["Ticker"].is_unique
+    assert not out["Up and coming godkänd"].any()
+    assert out["Up and coming blockerare"].str.contains("historisk tillväxt saknas").all()
+    assert not out["Up and coming stöd"].str.contains("skuld").any()
+    assert out["Omsättningstillväxt"].isna().all()
+
+
+def test_discovery_scope_and_limit_are_honest():
+    frame = pd.DataFrame([_case(Ticker="SMALL"), _case(Ticker="LARGE", **{"Börsvärde BSEK": 90}),
+                          _case(Ticker="UNKNOWN", **{"Börsvärde BSEK": None})])
+    assert select_up_and_coming(frame)["Ticker"].tolist() == ["SMALL"]
+    assert select_up_and_coming(frame, 0).empty

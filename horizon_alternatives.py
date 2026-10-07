@@ -109,7 +109,7 @@ def rank_horizon_alternatives(frame: pd.DataFrame, horizon: str, limit: int = 3,
         out[column] = anti[column]
     out = add_entry_timing(out, horizon)
     out = add_action_signals(out, horizon)
-    sort_cols = ["Borsify slutbetyg", score_col]
+    sort_cols = [score_col, "Borsify slutbetyg"]
     if "Datatäckning" in out:
         sort_cols.append("Datatäckning")
     out = out.sort_values(sort_cols + ["Ticker"], ascending=[False] * len(sort_cols) + [True], na_position="last").head(limit).copy()
