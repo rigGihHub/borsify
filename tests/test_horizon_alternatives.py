@@ -98,7 +98,7 @@ def section():
     calls = []
     source = pd.DataFrame([case()])
     namespace = {
-        "pd": pd, "filtered": source, "merge_research": merge_research, "deep_longlist": pd.DataFrame(), "short_longlist": pd.DataFrame(),
+        "pd": pd, "filtered": source, "research_history": pd.DataFrame(), "merge_research": merge_research, "deep_longlist": pd.DataFrame(), "short_longlist": pd.DataFrame(),
         "st": SimpleNamespace(markdown=lambda *_a: None, caption=lambda *_a: None),
         "top_ranked": lambda *_a, **_k: pd.DataFrame(),
         "add_full_deal_evidence": lambda frame, _h: frame.copy(),

@@ -5,12 +5,13 @@ from datetime import datetime, timezone
 import hashlib
 import re
 from issuer_report_sources import issuer_name
+from business_report_evidence import extract_business_evidence
 
 from report_sources import accept_report_candidate, report_identity, report_freshness
 from report_reader import report_reader_fields, report_reader_user_text
 
 MIN_REPORT_TEXT_CHARS = 1500
-REPORT_VERIFICATION_VERSION = 3
+REPORT_VERIFICATION_VERSION = 4
 
 # These checks establish report-like content, not the correctness of its figures
 # or any investment conclusion. At least two numeric financial topics must occur.
@@ -121,6 +122,7 @@ def verify_report_text(candidate: dict[str, Any], country: str, text: str, compa
     return {
         **base,
         **fields,
+        **extract_business_evidence(clean, identity["Rapport URL"], identity["Rapport publicerad"], matching[0]),
         "Rapport läst": True,
         "Rapport text SHA256": hashlib.sha256(clean.encode("utf-8")).hexdigest(),
         "Rapport kontroll": "Primär källa, rapportperiod och finansiellt textinnehåll kontrollerade. Siffrornas riktighet är inte verifierad.",

@@ -1,4 +1,5 @@
 """Dated business context and conditional industry analysis, never fabricated alpha."""
+from business_report_evidence import usable_business_evidence
 from datetime import date
 import math
 import re
@@ -9,6 +10,7 @@ import pandas as pd
 REVIEWED = "2026-10-07"
 # Company disclosures describe exposure, not independent proof of future growth.
 PROFILES = {
+ "MEDS.ST": ("MEDS driver ett svenskt nätapotek med receptbelagda läkemedel, receptfria läkemedel och apoteksprodukter.", "online_pharmacy", "https://corporate.meds.se/media/pressmeddelanden/2026/meds-delarsrapport-q2-2026-18-omsattningstillvaxt-och-38-tillvaxt-i-ebit/", "I rapporten för andra kvartalet 2026 beskriver MEDS uppstarten av ett logistikcentrum i Eskilstuna. Bedöm om kapaciteten ger lönsam försäljning och kassaflöde; en större anläggning bevisar inte framtida efterfrågan."),
  "HAFNI.OL": ("Hafnia transporterar oljeprodukter och kemikalier till sjöss med tankfartyg.", "tankers", "https://hafnia.com/about-hafnia/", "Produkt- och kemikalietankers ger exponering mot transportbehov, handelsvägar och fraktpriser."),
  "FRO.OL": ("Frontline transporterar råolja och raffinerade oljeprodukter med tankfartyg.", "tankers", "https://www.frontlineplc.cy/", "Transportvolymer och transportsträckor behöver vägas mot hur många nya fartyg som levereras."),
  "BWLPG.OL": ("BW LPG äger och driver fartyg som transporterar gasol, LPG, och bedriver även handel med produkten.", "lpg", "https://www.bwlpg.com/about/our-business/", "LPG är gasol, inte LNG. Efterfrågan från hushåll och petrokemi måste analyseras separat från råolja."),
@@ -24,6 +26,7 @@ PROFILES = {
 }
 # Scenarios are explicitly analysis questions, not live market forecasts.
 SCENARIOS = {
+ "online_pharmacy": ("Apotek med digital distribution", "Återkommande läkemedelsbehov och effektiv distribution kan stödja försäljningen om kunderna stannar.", "Priskonkurrens, reglering och kostnader för lager och distribution kan pressa marginalen trots tillväxt.", "Aktiva kunder, återköp, receptandel, marginal och kassaflöde efter logistikinvesteringar. Jämför med konkurrerande nätapotek."),
  "digital": ("Tillväxtmöjlighet med teknikskifte", "Digitalisering, moln, dataskydd och AI kan skapa nya uppdrag och produkter.", "AI kan också automatisera debiterbart arbete; konkurrens och kundernas IT-budgetar kan pressa priserna.", "Organisk tillväxt, återkommande intäkter, kundbehållning och marginal efter AI-investeringar."),
  "tankers": ("Cyklisk bransch med omställningsrisk", "Längre handelsvägar och begränsat fartygsutbud kan stödja fraktpriser även utan stark volymtillväxt.", "Nya fartyg, kortare handelsvägar och lägre efterfrågan på fossila bränslen kan pressa lönsamheten.", "Fraktintäkt per dag, flottans orderbok, beläggning, skulder och kassaflöde över en hel fraktcykel."),
  "lpg": ("Cyklisk transportmarknad", "Gasolanvändning och längre handelsvägar kan öka behovet av LPG-transporter.", "Överutbud av fartyg, handelshinder och förändrad energimix kan minska intjäningen.", "LPG-handelsvolymer, transportsträckor, fartygsleveranser och fraktintäkter; skilj handel från rederidrift."),
@@ -66,6 +69,10 @@ def business_context(row, today=None):
         source = "https://finance.yahoo.com/quote/" + quote(ticker, safe="") + "/profile/" if summary else ""
         provenance = "Yahoo Finance, originaltext · hämtad " + (clean(row.get("Fundamental hämtad")) or "okänd tidpunkt") if summary else "Ingen verifierad bolagsbeskrivning"
         initiative = "Ingen aktuell bolagsspecifik satsning har verifierats i detta underlag. Branschens möjligheter är inte bevis för bolagets tillväxt."
+    report_evidence = usable_business_evidence(row, today)
+    initiatives = [x["text"] for x in report_evidence if x["ämne"] == "Tillväxt och investeringar"]
+    if initiatives:
+        initiative = "Bolaget uppger i rapporten (originaltext): " + " ".join(initiatives)
     scenario = SCENARIOS.get(category)
     result = {"Verksamhet kort": description, "Verksamhet källa": source, "Verksamhet källstatus": provenance,
               "Bransch klassificering": category, "Bransch underlag": industry or sector or "Okänd bransch",
@@ -94,6 +101,7 @@ def business_context(row, today=None):
     result.update({"Branschutsikt": label, "Bransch möjlighet": opportunity, "Bransch hot": threat, "Bransch att verifiera": checks,
                    "Bransch bolagskoppling": ("Tillgängliga bolagsmått: " + "; ".join(observed) + ". " if observed else "Bolagets tillväxt och lönsamhet kan inte verifieras här. ") + "En enskild period visar inte om branschtrenden ger uthållig tillväxt. Segmentdata och flerårsutveckling behövs.",
                    "Bransch slutsats": "Borsifys villkorade bedömning, inte en verifierad tillväxtprognos. På kort sikt styr även order och konjunktur; på lång sikt måste affärens relevans och lönsamhet bestå. Ingen extra betygspoäng ges enbart för ett branschtema."})
+    result["Verksamhet rapportunderlag"] = report_evidence
     return result
 
 def add_business_context(frame):
@@ -116,6 +124,11 @@ def render_business_context(st, row, compact=False):
         st.write("**Källbelagd bakgrund och begränsning:** " + context["Bransch källfakta"])
         st.write("**Bolagets exponering och satsningar:** " + context["Bolagets framtidssatsning"])
         st.write(context["Bransch bolagskoppling"])
+        for item in context["Verksamhet rapportunderlag"]:
+            st.markdown("**" + item["ämne"] + "**")
+            st.write(item["text"])
+            st.caption("Bolagets uppgift · " + str(item["period"]) + " · " + str(item["publicerad"]))
+            st.markdown("[Rapportkälla](" + item["källa"] + ")")
         st.write("**Följ i nästa rapport:** " + context["Bransch att verifiera"])
         st.caption(context["Bransch slutsats"])
         if context["Verksamhet källa"]:

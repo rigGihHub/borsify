@@ -21,7 +21,7 @@ from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
 import importlib
 import model_bootstrap as _model_bootstrap
-if getattr(_model_bootstrap, "RELEASE", None) != "4.41.7-logic-review":
+if getattr(_model_bootstrap, "RELEASE", None) != "4.41.8-research-breadth":
     _model_bootstrap = importlib.reload(_model_bootstrap)
 _model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
@@ -66,6 +66,8 @@ from purchase_consistency import reconcile_purchase_decisions
 from dividend_units import clean_legacy_dividend
 from horizon_alternatives import rank_horizon_alternatives
 from business_outlook import add_business_context, render_business_context
+from research_rotation import rotation_candidates, save_research_batch, cached_research
+from prospective_score_audit import prospective_score_audit
 from price_batching import partial_fallback_symbols, symbol_batches
 from first_choice_audit import build_first_choice_record, save_first_choice_records
 try:
@@ -289,7 +291,7 @@ except Exception:
     create_client = None
 
 APP_VERSION = "4.40.0"
-MODEL_VERSION = "4.41.0"
+MODEL_VERSION = "4.42.0"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""
@@ -992,7 +994,7 @@ def build_evidence_gated_shortlist(df: pd.DataFrame, profile: str, limit: int = 
     if df is None or df.empty:
         empty = df.copy() if isinstance(df, pd.DataFrame) else pd.DataFrame()
         return empty, empty
-    finalists = build_discovery_pool(df, max_candidates=min(12, len(df)))
+    finalists = build_discovery_pool(df, max_candidates=len(df))
     # The first-choice path must use the same specialist-adjusted headline score
     # as horizon lists, history and the recommendation ledger.
     finalists = add_user_scores(finalists)
@@ -1137,7 +1139,7 @@ def fetch_deep_statements(symbol: str) -> dict[str, Any]:
     return _deep_statements_source(symbol)
 
 @st.cache_data(ttl=900, max_entries=128, show_spinner=False)
-def cached_primary_report_verification(events_json: str, country: str, company_name: str, checked_day: str, pipeline_version: str = "report-pdf-budget-v3") -> dict[str, Any] | None:
+def cached_primary_report_verification(events_json: str, country: str, company_name: str, checked_day: str, pipeline_version: str = "report-business-v4") -> dict[str, Any] | None:
     """Reuse identical network evidence briefly; reverify changed issuer/events/day."""
     return verify_primary_report_from_events(json.loads(events_json), country, company_name=company_name)
 
@@ -1177,12 +1179,19 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
     # Discovery Engine 2.0: reserve deep-analysis capacity for different ways an
     # excellent stock can surface (one-year, lifetime, quality, valuation, reversal).
     # No new aggregate score is introduced; the existing deep gates remain decisive.
-    discovery_pool = build_discovery_pool(df, max_candidates=max(18, pool_size * 2))
+    discovery_pool = build_discovery_pool(df, max_candidates=max(36, pool_size * 2))
+    try:
+        rotating = rotation_candidates(df, DB_PATH, limit=4)
+    except Exception as exc:
+        rotating = df.iloc[:0].copy()
+        record_runtime_issue(st.session_state, "research_rotation", exc, "roterande bolagsgranskning kunde inte läsas")
+    # Reserved slots survive every subsequent narrowing of the candidate pool.
+    discovery_pool = pd.concat([discovery_pool, rotating]).loc[lambda f: ~f.index.duplicated()].copy()
 
     # v3.53 Estimate Revision Radar 2.0: probe a bounded, diversified subset before
     # the final deep slots are locked. The fetch is cached and reused by the later
     # deep analysis. Missing analyst data never earns a slot.
-    estimate_probe = discovery_pool.head(min(12, len(discovery_pool))).copy()
+    estimate_probe = pd.concat([discovery_pool.head(12), rotating]).loc[lambda f: ~f.index.duplicated()].copy()
     estimate_records: dict[Any, dict[str, Any]] = {}
     if not estimate_probe.empty:
         with ThreadPoolExecutor(max_workers=min(3, len(estimate_probe))) as executor:
@@ -1286,6 +1295,7 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
             "Rapport URL", "Rapport kontroll", "Rapport användartext",
             "Rapport primärkälla verifierad", "Rapport textlängd", "Rapport källa", "Rapport färskhet",
             "Rapport datum verifierat", "Rapport verifieringsversion", "Rapport kontrollerad",
+            "Rapport verksamhetsunderlag", "Rapport verksamhetsstatus",
             "Rapport text SHA256", "Rapport periodtext", "Rapport finansiella ämnen", "Rapport textutdrag", "Rapport begärd URL",
             "Rapportminne status", "Rapportminne historik", "Rapportminne förbättring",
             "Rapportminne försämring", "Rapportminne rapportdatum",
@@ -1374,6 +1384,7 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
         pass
 
     pool = select_deep_finalist_pool(discovery_pool, pool_size=pool_size)
+    pool = pd.concat([pool, discovery_pool.loc[rotating.index]]).loc[lambda f: ~f.index.duplicated()].copy()
     records: dict[str, dict[str, Any]] = {}
     max_workers = min(3, max(1, len(pool)))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1524,6 +1535,10 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
         pool = pool.join(assessment_frame, how="left")
     # Final ordering is evidence-gate first. INVEST only breaks ties after the
     # independent quality, inflection, mispricing and scenario checks.
+    try:
+        save_research_batch(pool, DB_PATH)
+    except Exception as exc:
+        record_runtime_issue(st.session_state, "research_rotation", exc, "flerårsunderlaget kunde inte sparas för återanvändning")
     order = sorted(pool.index, key=lambda idx: case_gate_rank_key(pool.loc[idx]), reverse=True)
     return pool.loc[order].head(limit).copy()
 
@@ -5689,6 +5704,16 @@ def render_edge_lab(default_symbol: str, universe_symbols: list[str], benchmark_
                         "Endast aktuell modellversion visas här; äldre versioner följs separat i historiken. Det här är kalibreringsdiagnostik, inte en sannolikhet och leder aldrig till automatisk viktändring."
                     )
 
+                    st.markdown("#### Håller betygen efter handelskostnader?")
+                    audit_cost = st.number_input("Antagen kostnad per köp respektive försäljning (baspunkter)", min_value=0, max_value=1000, value=20, step=5, key="audit_cost_bps")
+                    st.caption("20 baspunkter = 0,20 % per sida. Kostnaden är ett scenario för courtage, spread och slippage; verkliga kostnader varierar. Jämförelseindex redovisas före kostnader.")
+                    audit = prospective_score_audit(recs, outs, MODEL_VERSION, chosen_h, cost_bps=audit_cost)
+                    if audit.empty:
+                        st.info("Ingen mogen, komplett framåtriktad uppföljning för aktuell modell med sparad synlig tidshorisont och jämförbart index finns ännu. Betyget är inte en sannolikhet.")
+                    else:
+                        st.dataframe(audit, hide_index=True, use_container_width=True)
+                    st.caption("Frysta bedömningar följs i tidsordnade startkvartal, separat per tidshorisont och index. Höga betyg = minst 70. Historiska bedömningar återskapas inte med dagens data. Överlappande observationer av samma aktie tas bort. Urvalet består av sparade bedömningar, inte hela börsen. Det här är ingen optimering av modellvikter eller portföljavkastning; mycket lång sikt kan inte verifieras med några månaders utfall.")
+
                     tables = learning_tables(recs, outs, chosen_h)
                     selected_outcomes = outs[outs["horizon"].astype(str).eq(str(chosen_h))].copy()
                     basis = learning_metric_basis(selected_outcomes)
@@ -7408,7 +7433,7 @@ def main() -> None:
         filtered = add_fundamental_change_radar(filtered, pd.DataFrame(), datetime.now().date().isoformat())
     # Discovery 2.0 is a candidate doorway, not a new score. Keep an auditable
     # multi-lens pool so advanced diagnostics can show whether the search is broad.
-    discovery_pool_global = build_discovery_pool(filtered, max_candidates=min(24, len(filtered)))
+    discovery_pool_global = build_discovery_pool(filtered, max_candidates=min(36, len(filtered)))
     st.session_state["bq_discovery_coverage"] = discovery_coverage_summary(filtered, discovery_pool_global)
     top = filtered.head(top_n).copy()
     daily_shortlist, evidence_finalists = build_evidence_gated_shortlist(filtered, profile, limit=min(5, len(filtered)))
@@ -7530,21 +7555,29 @@ def main() -> None:
             "Fördjupad kandidatgranskning körs först när du öppnar Fler aktier. "
             "Det gör startsidan snabbare utan att ta bort analysen."
         )
+        next_research_batch = st.button("Granska nästa omgång bolag", key="next_research_batch")
         _deep_key = hashlib.sha256((filtered.drop(columns=["_history"], errors="ignore").to_json(default_handler=str) + str(idx) + profile).encode()).hexdigest()
         _deep_cached = st.session_state.get("bq_deep_view_cache", {})
-        if not refresh and _deep_cached.get("key") == _deep_key and time.time() - _deep_cached.get("time", 0) < 900:
+        if not refresh and not next_research_batch and _deep_cached.get("key") == _deep_key and time.time() - _deep_cached.get("time", 0) < 900:
             deep_longlist, short_longlist = _deep_cached["long"].copy(), _deep_cached["short"].copy()
             st.caption("Kandidatgranskningen återanvänds vid byte av vy. Uppdatera data för en ny kontroll.")
         else:
             with st.status("Granskar kandidater · steg 1 av 2", expanded=True) as _deep_status:
-                st.write(f"Långsiktigt underlag för högst {min(12, len(filtered))} kandidater. Väntetiden beror på datakällorna.")
-                deep_longlist = add_data_trust(build_deep_longlist(filtered, pool_size=min(10, len(filtered)), limit=min(5, len(filtered))))
+                st.write(f"Långsiktigt underlag för högst {min(20, len(filtered))} kandidater, inklusive roterande urval. Väntetiden beror på datakällorna.")
+                deep_longlist = add_data_trust(build_deep_longlist(filtered, pool_size=min(16, len(filtered)), limit=min(5, len(filtered))))
                 _deep_status.update(label="Granskar kandidater · steg 2 av 2")
                 st.write(f"Kortsiktigt underlag för högst {min(10, len(filtered))} kandidater.")
                 short_longlist = add_data_trust(build_short_term_longlist(filtered, idx, pool_size=min(10, len(filtered)), limit=min(5, len(filtered))))
                 _deep_status.update(label="Kandidatgranskning klar", state="complete", expanded=False)
             st.session_state["bq_deep_view_cache"] = {"key": _deep_key, "time": time.time(), "long": deep_longlist.copy(), "short": short_longlist.copy()}
 
+        try:
+            research_history = cached_research(DB_PATH)
+        except Exception as exc:
+            research_history = pd.DataFrame()
+            record_runtime_issue(st.session_state, "research_rotation", exc, "sparad fördjupning kunde inte läsas")
+        covered = int(filtered["Ticker"].isin(research_history.get("Ticker", pd.Series(dtype=str))).sum())
+        st.caption(f"Flerårsunderlag hämtat för {covered} av {len(filtered)} bolag de senaste sju dagarna. Tillgängliga uppgifter kan fortfarande vara ofullständiga. Listorna visar bäst bland analyserade kandidater.")
         confirmed_view = st.session_state.get("bq_confirmed_why_now_radar", pd.DataFrame())
         if isinstance(confirmed_view, pd.DataFrame) and not confirmed_view.empty and "Bekräftat varför nu status" in confirmed_view.columns:
             _cw = confirmed_view.copy()
@@ -7875,7 +7908,7 @@ def main() -> None:
             )
 
             def _horizon_section(title: str, subtitle: str, horizon: str, score_col: str):
-                horizon_source = merge_research(filtered, deep_longlist, short_longlist)
+                horizon_source = merge_research(filtered, research_history, deep_longlist, short_longlist)
                 ranked = top_ranked(horizon_source, horizon, limit=10)
                 st.markdown(f"### {title}")
                 st.caption(subtitle)

@@ -39,7 +39,7 @@ def test_missing_confidence_is_not_misrepresented_as_low():
 def test_app_uses_diverse_finalists_and_full_evidence_before_first_choice():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     assert 'APP_VERSION = "4.40.0"' in app
-    assert "build_discovery_pool(df, max_candidates=min(12, len(df)))" in app
+    assert "build_discovery_pool(df, max_candidates=len(df))" in app
     assert "finalists = add_user_scores(finalists)" in app
     assert app.index("finalists = add_user_scores(finalists)") < app.index("finalists = add_full_deal_evidence(finalists, \"year\")")
     assert "finalists = add_full_deal_evidence(finalists, \"year\")" in app

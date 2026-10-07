@@ -96,7 +96,7 @@ model_bootstrap.RELEASE = 'old-release'
 model_bootstrap._MODULES = []
 horizon_alternatives.rank_horizon_alternatives = lambda frame, horizon, limit=3: frame
 import app
-assert model_bootstrap.RELEASE == '4.41.7-logic-review'
+assert model_bootstrap.RELEASE == '4.41.8-research-breadth'
 assert 'evidence_fn' in inspect.signature(app.rank_horizon_alternatives).parameters
 '''], capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr[-2000:]

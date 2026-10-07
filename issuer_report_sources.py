@@ -3,6 +3,21 @@ import re
 from urllib.parse import urlsplit
 
 SOURCES = {
+    "meds apotek": {
+        "hosts": {"corporate.meds.se"},
+        "index": "https://corporate.meds.se/media/pressmeddelanden/",
+        "evidence": "https://corporate.meds.se/finansiell-information/rapporter-och-presentationer/",
+    },
+    "moment group": {
+        "hosts": {"momentgroup.com", "www.momentgroup.com"},
+        "index": "https://momentgroup.com/finansiella-rapporter/",
+        "evidence": "https://momentgroup.com/investor-relations/",
+    },
+    "observe medical": {
+        "hosts": {"observemedical.com", "www.observemedical.com"},
+        "index": "https://observemedical.com/investor-relations/",
+        "evidence": "https://observemedical.com/regulatory-news/",
+    },
     "industrivärden": {
         "hosts": {"industrivarden.se", "www.industrivarden.se"},
         "index": "https://www.industrivarden.se/investerare/rapporter-och-presentationer/Delarsrapporter/",
