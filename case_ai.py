@@ -88,6 +88,10 @@ def build_case_ai_context(case: dict[str, Any] | pd.Series, horizon: str) -> dic
         "Investmentbolag källnot", "Data Trust status", "Data Trust varningar", "Rapport läst", "Report Delta datagrund",
     ]
     raw = case.to_dict() if isinstance(case, pd.Series) else dict(case)
+    from business_outlook import business_context
+    context = business_context(raw)
+    raw.update(context)
+    fields += list(context)
     data = {}
     for field in fields:
         if field not in raw:
@@ -106,6 +110,7 @@ def build_case_ai_context(case: dict[str, Any] | pd.Series, horizon: str) -> dic
             "Fundamental Value Range är rådgivande, påverkar inte rankingen och är inte en riktkurs.",
             "Extern rubrikdata är inte samma sak som verifierad ekonomisk effekt.",
             "Svaret får inte fylla luckor med påhittade fakta.",
+            "Branschutsikter är villkorade analyser. Skilj bolagets egen beskrivning, daterade källfakta och modellens bedömning; kalla inte en bransch utdöende utan belägg.",
         ],
     }
 

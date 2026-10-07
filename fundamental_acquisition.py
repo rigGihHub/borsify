@@ -193,6 +193,7 @@ def fetch_fundamentals(
         "Namn":info.get("shortName") or info.get("longName") or symbol,
         "Sektor":info.get("sector") or "Okänd",
         "Bransch":info.get("industry") or "Okänd",
+        "Verksamhetsbeskrivning": str(info.get("longBusinessSummary") or "")[:6000],
         "Valuta":quote_currency,
         "Finansiell valuta":info.get("financialCurrency") or major_currency_fn(quote_currency),
         "Börsvärde lokal mdr":market_cap/1e9 if np.isfinite(market_cap) else np.nan,

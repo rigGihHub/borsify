@@ -1,6 +1,7 @@
 """Evidence-grounded case text; no invented catalysts, targets or report claims."""
 import math
 from purchase_consistency import number
+from business_outlook import business_context
 
 def analyst_case(row):
     facts = []
@@ -35,4 +36,9 @@ def analyst_case(row):
     if math.isfinite(margin):
         invalidation += f" Nuvarande registrerade marginal är {margin:.1%}; en försämring kräver en förklaring."
     invalidation += " Nytt köp kräver att alla köpkrav fortfarande är uppfyllda."
+    context = business_context(row)
+    thesis += " Verksamhet: " + context["Verksamhet kort"]
+    thesis += " Branschbedömning: " + context["Branschutsikt"] + ". Möjlighet att verifiera: " + context["Bransch möjlighet"]
+    risk += " Branschhot: " + context["Bransch hot"]
+    invalidation += " Branschkontroll: " + context["Bransch att verifiera"]
     return thesis, risk, invalidation

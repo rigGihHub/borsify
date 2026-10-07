@@ -21,7 +21,7 @@ from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
 import importlib
 import model_bootstrap as _model_bootstrap
-if getattr(_model_bootstrap, "RELEASE", None) != "4.41.4-horizon-discovery":
+if getattr(_model_bootstrap, "RELEASE", None) != "4.41.5-business-outlook":
     _model_bootstrap = importlib.reload(_model_bootstrap)
 _model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
@@ -65,6 +65,7 @@ from research_merge import merge_research
 from purchase_consistency import reconcile_purchase_decisions
 from dividend_units import clean_legacy_dividend
 from horizon_alternatives import rank_horizon_alternatives
+from business_outlook import add_business_context, render_business_context
 from price_batching import partial_fallback_symbols, symbol_batches
 from first_choice_audit import build_first_choice_record, save_first_choice_records
 try:
@@ -947,7 +948,7 @@ def build_daily_shortlist(df: pd.DataFrame, profile: str, limit: int = 5) -> pd.
 
 def add_full_deal_evidence(df: pd.DataFrame, horizon: str) -> pd.DataFrame:
     """Apply the existing advisory evidence stack without creating a new score."""
-    ranked = add_action_signals(df, horizon)
+    ranked = add_action_signals(add_business_context(df), horizon)
     ranked = add_entry_timing(ranked, horizon)
     ranked = add_company_quality(ranked)
     ranked = add_good_deal(ranked, horizon)
@@ -3663,6 +3664,7 @@ def render_engine_board(df: pd.DataFrame) -> None:
 
 def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail", horizon: str = "long", rank: int = 0) -> None:
     st.subheader(f"{row['Namn']} · {row['Ticker']}")
+    render_business_context(st, row)
     _company_axis = assess_company_quality(row)
     _entry_axis = assess_entry_timing(row, horizon)
     _ca, _ea = st.columns(2)
@@ -4042,6 +4044,7 @@ def render_horizon_alternatives(source: pd.DataFrame, horizon: str) -> None:
     for rank, (_, row) in enumerate(alternatives.iterrows(), 1):
         with st.container(border=True):
             st.markdown(f"**{rank}. {_stock_identity(row)}**")
+            render_business_context(st, row, compact=True)
             st.metric("BORSIFY SLUTBETYG", f"{row['Borsify slutbetyg']:.0f}/100")
             st.markdown(f"**Beslut: {row['Signal']} · inget köpbeslut**")
             st.write(plain_finance_text(row["Alternativ varför"]))
@@ -4582,6 +4585,7 @@ def render_overview(
             score_text = f" · Borsify {first_score:.0f}/100" if np.isfinite(first_score) else ""
             st.caption(f"{first_ticker}{score_text}")
             st.markdown(f"**Beslut:** {first.get('Signal', '—')} · {first.get('Signal kort', '')}")
+            render_business_context(st, first, compact=True)
             st.markdown(f"**Varför Borsify gillar aktien:** {plain_finance_text(first.get('Decision Brief tes', first_why))}")
             st.markdown(f"**Varför aktien kan vara billigare än den borde:** {plain_finance_text(first.get('Decision Brief market wrong', '—'))}")
             st.markdown(f"**Vad kan få aktien att bli mer intressant:** {plain_finance_text(first.get('Decision Brief recognition', '—'))}")
@@ -4685,6 +4689,7 @@ def render_up_and_coming(df: pd.DataFrame, profile: str) -> pd.DataFrame:
         st.caption("HÖGST RANKADE KANDIDATEN ATT UNDERSÖKA")
         st.markdown(f"### {_stock_identity(first)}")
         st.markdown(f"**{first.get('Up and coming', '—')}**")
+        render_business_context(st, first, compact=True)
         st.write(plain_finance_text(first.get("Up and coming stöd", "—")))
         st.markdown(f"**Varför Borsify gillar aktien:** {plain_finance_text(first.get('Decision Brief tes', '—'))}")
         st.markdown(f"**Vad kan få aktien att bli mer intressant:** {plain_finance_text(first.get('Decision Brief recognition', '—'))}")
@@ -4698,6 +4703,8 @@ def render_up_and_coming(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     st.dataframe(table[["#", "Aktie", "Up and coming", "Up and coming köpstatus", "Börsvärde", "Tillväxt", "Up and coming blockerare"]], use_container_width=True, hide_index=True)
     for rank, (_, row) in enumerate(ranked.iterrows(), start=1):
         ticker = str(row.get("Ticker", "—"))
+        with st.expander(f"Vad gör {_stock_identity(row)}?", expanded=False):
+            render_business_context(st, row, compact=True)
         st.caption(f"{rank}. {_stock_identity(row)} · {row['Up and coming köpstatus']} · Att verifiera: {row.get('Up and coming blockerare') or 'köpläge och aktuell bolagsrapport'}")
         if st.button(f"{rank}. {_stock_identity(row)} →", key=f"open_upcoming_{ticker}_{rank}", use_container_width=True):
             st.session_state["bq_open_upcoming_ticker"] = ticker
@@ -7929,6 +7936,7 @@ def main() -> None:
                     if str(first.get("Bättre ingång", "—")) != "—":
                         _curr = str(first.get("Valuta", "") or "")
                         _axis2.info(f"**Bättre ingång:** {first.get('Bättre ingång')} {_curr}".strip())
+                    render_business_context(st, first, compact=True)
                     st.markdown("#### Affären sammanfattad")
                     st.markdown(f"**Varför Borsify gillar aktien:** {plain_finance_text(first.get('Decision Brief tes', '—'))}")
                     st.markdown(f"**Vad priset verkar kräva:** {first.get('Market-Implied Expectations', '❔ Kan inte bedömas')}")

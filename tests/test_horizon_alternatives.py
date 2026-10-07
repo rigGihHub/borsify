@@ -152,6 +152,7 @@ def test_alternative_cards_show_final_score_and_observational_decision():
         "pd": pd, "np": SimpleNamespace(isfinite=math.isfinite), "_num": lambda value: float(value) if value is not None else math.nan,
         "rank_horizon_alternatives": rank_horizon_alternatives,
         "add_full_deal_evidence": lambda frame, _h: frame,
+        "render_business_context": lambda *_a, **_k: None,
         "_stock_identity": lambda row: row["Ticker"], "plain_finance_text": str,
         "st": SimpleNamespace(
             info=display, markdown=display, caption=display, write=display,
