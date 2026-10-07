@@ -12,9 +12,14 @@ def _num(v: Any) -> float:
 def assess_holding(purchase_price: Any, current: dict[str,Any]|pd.Series) -> dict[str,Any]:
     buy=_num(purchase_price); now=_num(current.get("Pris"))
     ret=now/buy-1 if np.isfinite(now) and np.isfinite(buy) and buy>0 else np.nan
-    score=_num(current.get("Borsify Score"))
+    score=_num(current.get("Borsify slutbetyg", current.get("Borsify Score")))
     quality=_num(current.get("Kvalitet")); risk=_num(current.get("Risk"))
     m3=_num(current.get("3 mån")); dist=_num(current.get("Avstånd SMA200"))
+    required = {"kurs": now, "slutbetyg": score, "kvalitet": quality, "risk": risk, "trend": m3, "SMA200": dist}
+    missing = [k for k, v in required.items() if not np.isfinite(v)]
+    missing += [name for name, value in (("slutbetyg", score), ("kvalitet", quality), ("risk", risk)) if np.isfinite(value) and not 0 <= value <= 100]
+    if missing or now <= 0:
+        return {"Status": "KAN INTE BEDÖMAS", "Borsify råd": "Otillräckligt underlag för behåll- eller säljbedömning", "Utveckling": ret, "Skäl": "Saknas eller ogiltigt: " + ", ".join(missing or ["kurs"])}
     reasons=[]
     if np.isfinite(score) and score<45: reasons.append("Borsify Score är svag")
     if np.isfinite(quality) and quality<40: reasons.append("kvalitetsbilden är svag")

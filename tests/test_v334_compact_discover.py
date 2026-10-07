@@ -5,7 +5,7 @@ def test_discover_defaults_to_three_decision_horizons():
     assert 'st.markdown("## Vad rekommenderar Borsify idag?")' in APP
     assert 'Köp nu – sälj i närtid' in APP
     assert 'Köp nu – behåll upp till ett år' in APP
-    assert 'Köp för resten av livet' in APP
+    assert 'Långsiktigt ägande' in APP
 
 def test_discover_dense_sections_are_collapsed_or_removed():
     assert 'with st.expander("Sök på ett särskilt sätt", expanded=False):' in APP

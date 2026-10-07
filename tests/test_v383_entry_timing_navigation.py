@@ -36,7 +36,7 @@ def test_ui_has_direct_horizon_buttons_clickable_stocks_ai_and_version():
     assert 'APP_VERSION = "4.40.0"' in app
     assert "⚡ Köp nu · sälj snart" in app
     assert "📈 Köp nu · behåll 1 år" in app
-    assert "♾️ Köp för resten av livet" in app
+    assert "♾️ Långsiktigt ägande" in app
     assert 'st.session_state["bq_open_stock_ticker"]' in app
     assert "render_case_ai_qa(row, horizon, rank)" in app
     assert "Ingångsläge" in app

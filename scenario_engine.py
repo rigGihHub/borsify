@@ -56,8 +56,25 @@ def build_scenarios(row: dict, deep: dict | None = None, inflection: dict | None
             "confidence": 0,
         }
 
-    current_pe = fwd_pe if math.isfinite(fwd_pe) and fwd_pe > 0 else (pe if math.isfinite(pe) and pe > 0 else price / eps)
-    current_pe = _clip(current_pe, 6.0, 60.0)
+    if not isinstance(horizon_years, int) or horizon_years <= 0:
+        return {"status": "Otillräcklig data", "reason": "Positiv heltalshorisont krävs.", "confidence": 0}
+    descriptor = " ".join(str(row.get(k, "")) for k in ("Sektor", "Bransch")).lower()
+    if any(k in descriptor for k in ("bank", "insurance", "reit", "real estate", "investment company")):
+        return {"status": "Otillräcklig data", "reason": "Affärsmodellen kräver separat substans-, kapital- eller kassaflödesvärdering.", "confidence": 0}
+    cyclical = any(k in descriptor for k in ("oil", "gas", "shipping", "coal", "steel", "mining"))
+    normalized = _num(deep.get("Normaliserad EPS"))
+    quote_currency = str(row.get("Valuta") or "")
+    statement_currency = str(row.get("Finansiell valuta") or "")
+    if not quote_currency or quote_currency != statement_currency:
+        normalized = np.nan
+    if cyclical and (not math.isfinite(normalized) or normalized <= 0):
+        return {"status": "Otillräcklig data", "reason": "Cykliskt bolag: flerårig normaliserad vinst per aktie i samma valuta som kursen saknas.", "confidence": 0}
+    original_eps = eps
+    if math.isfinite(normalized) and normalized > 0:
+        eps = min(eps, normalized)
+    # Keep the observed trailing multiple; forward EPS must never be paired with it.
+    current_pe = price / original_eps
+    sector_cap = 18.0 if cyclical else (30.0 if "software" in descriptor else 25.0)
 
     growth_candidates = []
     for key in ("Revenue CAGR", "EPS CAGR", "FCF CAGR", "Vinst CAGR", "Omsättning CAGR"):
@@ -88,15 +105,15 @@ def build_scenarios(row: dict, deep: dict | None = None, inflection: dict | None
             "confidence": 20,
         }
 
-    base_growth = _clip(base_growth, -0.05, 0.22)
+    base_growth = _clip(base_growth, -0.30, 0.22)
     spread = 0.06 + min(0.05, abs(base_growth) * 0.25)
-    bear_growth = _clip(base_growth - spread, -0.15, 0.12)
+    bear_growth = min(base_growth, _clip(base_growth - spread, -0.50, 0.12))
     bull_growth = _clip(base_growth + spread, 0.02, 0.30)
 
     # Mean-reversion rather than assuming today's multiple persists forever.
-    base_pe = _clip(0.55 * current_pe + 0.45 * 20.0, 10.0, 32.0)
-    bear_pe = _clip(base_pe * 0.72, 7.0, 22.0)
-    bull_pe = _clip(base_pe * 1.22, 14.0, 38.0)
+    base_pe = min(current_pe, sector_cap)
+    bear_pe = base_pe * 0.72
+    bull_pe = min(base_pe * 1.22, 38.0)
 
     trap = _num(deep.get("Value Trap Risk") or deep.get("value_trap_risk"))
     if math.isfinite(trap):
@@ -112,7 +129,10 @@ def build_scenarios(row: dict, deep: dict | None = None, inflection: dict | None
         future_price = future_eps * exit_pe
         total = future_price / price - 1
         cagr = (future_price / price) ** (1 / horizon_years) - 1 if future_price > 0 else -1
+        unchanged_multiple_price = future_eps * current_pe
         return {
+            "earnings_contribution": unchanged_multiple_price / price - 1,
+            "multiple_contribution": (future_price - unchanged_multiple_price) / price,
             "name": name,
             "eps_growth": growth,
             "exit_pe": exit_pe,
@@ -165,7 +185,7 @@ def build_scenarios(row: dict, deep: dict | None = None, inflection: dict | None
         "verdict": verdict,
         "risk_label": risk_label,
         "confidence": confidence,
-        "note": "Scenarioanalys, inte prognos. Kursnivåerna beror direkt på synliga antaganden om EPS-tillväxt och framtida P/E.",
+        "note": "Scenarioanalys, inte prognos. Basfallet antar ingen högre P/E-multipel. Sektortaken är försiktighetsregler, inte observerade rättvisa värden. Flerårig EPS-median används när den finns; den bevisar inte en hel konjunkturcykel. Utdelning och framtida utspädning ingår inte.",
     }
 
 

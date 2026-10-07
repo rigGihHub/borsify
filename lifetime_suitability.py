@@ -16,7 +16,7 @@ def lifetime_blockers(row):
     context = business_context(row)
     industry = str(row.get("Bransch", "")).lower()
     if context["Bransch klassificering"] in {"tankers", "lpg", "oil"} or any(x in industry for x in ("marine shipping", "oil & gas", "thermal coal", "coking coal")):
-        reasons.append("starkt beroende av frakt- eller råvarucykler; hör inte hemma i kategorin resten av livet")
+        reasons.append("starkt beroende av frakt- eller råvarucykler; hör inte hemma i kategorin långsiktigt ägande")
     elif not context["Bransch bedömd"]:
         reasons.append("verksamhetens långsiktiga branschrisk är inte tillräckligt bedömd")
     for field, label in [("Historik omsättning år", "omsättning"), ("Historik vinst år", "vinst"), ("Historik FCF år", "fritt kassaflöde")]:

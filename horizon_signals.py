@@ -73,12 +73,12 @@ def action_signal(row: pd.Series | dict[str, Any], horizon: str, rank: int = 1) 
     if horizon == "lifetime":
         # Lifetime recommendations should be especially conservative about price.
         if np.isfinite(score) and score >= 78 and strong_evidence and (not np.isfinite(valuation) or valuation >= 55):
-            return HorizonSignal("KÖP / ÄG LÅNGSIKTIGT", "Stark livstidskandidat", "Bolagets uthålliga kvalitet och riskprofil är starka nog för mycket lång ägarhorisont, till ett pris som inte ser uppenbart ansträngt ut.")
+            return HorizonSignal("KÖP / ÄG LÅNGSIKTIGT", "Stark kandidat för långsiktigt ägande", "Bolagets uthålliga kvalitet och riskprofil är starka nog för mycket lång ägarhorisont, till ett pris som inte ser uppenbart ansträngt ut.")
         if np.isfinite(score) and score >= 72 and solid_evidence:
             if np.isfinite(valuation) and valuation < 50:
                 return HorizonSignal("BEVAKA PRISET", "Bra bolag, priset avgör", "Bolaget passar den långa horisonten bättre än dagens värdering. Borsify vill inte blanda ihop ett bra bolag med ett bra köppris.")
             return HorizonSignal("BYGG LÅNGSIKTIGT", "Köp stegvis över tid", "Bolaget har en stark långsiktig profil, men en mycket lång investering behöver inte tajmas till en enskild dag.")
-        return HorizonSignal("BEVAKA", "Inte stark nog ännu", "Bolaget finns högt i rankingen men Borsify har inte tillräckligt starkt underlag för en tydligare livstidssignal.")
+        return HorizonSignal("BEVAKA", "Inte stark nog ännu", "Bolaget finns högt i rankingen men Borsify har inte tillräckligt starkt underlag för en tydligare långsiktig ägarsignal.")
 
     raise ValueError(f"Okänd horisont: {horizon}")
 
@@ -113,6 +113,6 @@ def signal_legend(horizon: str) -> list[tuple[str, str]]:
             ("KÖP / ÄG LÅNGSIKTIGT", "Mycket stark långsiktig kandidat till rimligt pris."),
             ("BYGG LÅNGSIKTIGT", "Stark kandidat där stegvisa köp passar bättre."),
             ("BEVAKA PRISET", "Bra bolag, men värderingen gör att priset bör följas."),
-            ("BEVAKA", "Högt rankad men inte stark nog för en livstidssignal ännu."),
+            ("BEVAKA", "Högt rankad men inte stark nog för en långsiktig ägarsignal ännu."),
         ]
     return []

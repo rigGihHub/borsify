@@ -104,6 +104,9 @@ def build_deep_metrics(
     The function intentionally returns missing values rather than inferring figures.
     It is pure so it can be unit-tested without network access.
     """
+    annual_eps = _find_row(income, ["Diluted EPS", "Basic EPS"])
+    annual_eps = annual_eps.groupby(annual_eps.index.year).first() if not annual_eps.empty else annual_eps
+    normalized_eps = float(annual_eps.median()) if len(annual_eps) >= 3 else np.nan
     revenue = _find_row(income, ["Total Revenue", "Operating Revenue"])
     net_income = _find_row(income, ["Net Income", "Net Income Common Stockholders"])
     operating_income = _find_row(income, ["Operating Income", "EBIT"])
@@ -130,6 +133,8 @@ def build_deep_metrics(
     net_debt = latest_debt - latest_cash if np.isfinite(latest_debt) and np.isfinite(latest_cash) else np.nan
 
     return {
+        "Normaliserad EPS": normalized_eps,
+        "Historik EPS år": len(annual_eps),
         "Historik år": years,
         "Historik omsättning år": len(set(revenue.iloc[:4].index.year)),
         "Historik vinst år": len(set(net_income.iloc[:4].index.year)),

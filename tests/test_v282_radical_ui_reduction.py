@@ -5,7 +5,7 @@ def test_main_decision_copy_is_shorter():
     assert 'st.markdown("## Vad rekommenderar Borsify idag?")' in APP
     assert 'Köp nu – sälj i närtid' in APP
     assert 'Köp nu – behåll upp till ett år' in APP
-    assert 'Köp för resten av livet' in APP
+    assert 'Långsiktigt ägande' in APP
 
 def test_dense_tools_stay_secondary():
     assert 'with st.expander("Fler analysverktyg", expanded=False):' in APP

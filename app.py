@@ -21,7 +21,7 @@ from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
 import importlib
 import model_bootstrap as _model_bootstrap
-if getattr(_model_bootstrap, "RELEASE", None) != "4.41.8-research-breadth":
+if getattr(_model_bootstrap, "RELEASE", None) != "4.43.0-investment-controls":
     _model_bootstrap = importlib.reload(_model_bootstrap)
 _model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
@@ -265,6 +265,7 @@ from finalist_selection import select_deep_finalist_pool
 from investment_company_engine import add_investment_company_context
 from near_buy import near_buy_candidates
 from portfolio_advisor import assess_holding
+from investment_controls import checkpoints, holding_review, portfolio_exposure
 from market_universe import load_avanza_universe, universe_symbols, coverage_table, breadth_summary, audit_catalog, catalog_integrity_summary
 from universe_manager import nordic_total, universe_health, scan_result_user_text
 from universe_quality import apply_universe_quality, filter_rankable_universe, quality_summary
@@ -291,7 +292,7 @@ except Exception:
     create_client = None
 
 APP_VERSION = "4.40.0"
-MODEL_VERSION = "4.42.0"
+MODEL_VERSION = "4.43.0"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""
@@ -1463,6 +1464,8 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
                     assessment["Scenario Note"] = scenario.get("note", "—")
                     for label, key in (("Bear", "bear"), ("Base", "base"), ("Bull", "bull")):
                         s = scenario.get(key, {})
+                        assessment[f"{label} vinstbidrag"] = s.get("earnings_contribution", np.nan)
+                        assessment[f"{label} multipelbidrag"] = s.get("multiple_contribution", np.nan)
                         assessment[f"{label} EPS growth"] = s.get("eps_growth", np.nan)
                         assessment[f"{label} exit P/E"] = s.get("exit_pe", np.nan)
                         assessment[f"{label} future price"] = s.get("future_price", np.nan)
@@ -3798,6 +3801,8 @@ def render_detail(row: pd.Series, profile: str, key_prefix: str = "detail", hori
                 _vr2.metric("Base-range", f"{row.get('Fundamental Value Range base low')}–{row.get('Fundamental Value Range base high')}{_vr_unit}")
                 _vr3.metric("Bull-range", f"{row.get('Fundamental Value Range bull low')}–{row.get('Fundamental Value Range bull high')}{_vr_unit}")
                 st.caption(str(row.get("Fundamental Value Range assumptions") or ""))
+            if np.isfinite(_num(row.get("Base vinstbidrag"))):
+                st.write(f"Basfallets kursförändring: vinstutveckling/normalisering {fmt_pct(row.get('Base vinstbidrag'))}; ändrad värderingsmultipel {fmt_pct(row.get('Base multipelbidrag'))}. Bidragen summerar till modellerad kursförändring.")
             _vr_warning = str(row.get("Fundamental Value Range warnings") or "").strip()
             if _vr_warning:
                 st.warning(_vr_warning)
@@ -4513,6 +4518,8 @@ def render_holdings_portfolio(scored: pd.DataFrame, profile: str) -> None:
             extra = add_scores(extra_raw, profile)
             current = pd.concat([current, extra], ignore_index=True)
 
+    if not current.empty:
+        current = add_user_scores(current)
     lookup = {str(r["Ticker"]).upper(): r for _,r in current.iterrows()}
     rows=[]
     for _,h in holdings.iterrows():
@@ -4526,6 +4533,18 @@ def render_holdings_portfolio(scored: pd.DataFrame, profile: str) -> None:
             })
             continue
         assessment=assess_holding(h["purchase_price"], row)
+        try:
+            review, review_note = holding_review(h["holding_id"], row, DB_PATH)
+            if any(p["Status"] == "OMPRÖVA" for p in review):
+                assessment.update({"Status": "OMPRÖVA", "Borsify råd": "En sparad bevakningsgräns har passerats – kontrollera rapporten", "Skäl": "; ".join(p["Mått"] for p in review if p["Status"] == "OMPRÖVA")})
+            with st.expander("Följ upp " + sym, expanded=False):
+                st.caption(review_note)
+                if review:
+                    st.dataframe(pd.DataFrame(review)[["Mått", "Utgångsvärde", "Underlagsdatum", "Nu", "Ompröva om", "Status"]], hide_index=True)
+                    st.caption("Tillväxt, marginal och FCF-yield visas som decimaler: 0,10 = 10 %. Skuld/eget kapital visas i leverantörens enhet.")
+        except Exception as exc:
+            record_runtime_issue(st.session_state, "holding_review", exc, "sparade bevakningsgränser kunde inte kontrolleras")
+            st.warning("Tesuppföljning för " + sym + " kunde inte kontrolleras.")
         now=_num(row.get("Pris")); qty=_num(h.get("quantity"))
         rows.append({
             "ID": int(h["holding_id"]),
@@ -4549,6 +4568,23 @@ def render_holdings_portfolio(scored: pd.DataFrame, profile: str) -> None:
         if col in display:
             display[col] = display[col].map(lambda x: "—" if not np.isfinite(_num(x)) else f"{x:,.2f}".replace(",", " "))
     st.dataframe(display.style.apply(_holding_status_style, axis=1), use_container_width=True, hide_index=True)
+
+    with st.expander("Portföljrisk och effekten av ett nytt köp", expanded=False):
+        st.caption("Andelar av registrerade aktier med känt SEK-värde. Kontanter och andra tillgångar ingår inte. Noteringsvaluta är inte samma sak som bolagets intäktsvalutor. Sektorer visar gemensam exponering, inte uppmätt kurskorrelation.")
+        exposure, unknown = portfolio_exposure(holdings, current)
+        if unknown:
+            st.warning(f"{unknown} innehav saknar användbart SEK-värde. Andelarna beskriver bara den kända delen av portföljen.")
+        candidate_symbols = sorted(scored["Ticker"].dropna().astype(str).unique())
+        if candidate_symbols:
+            candidate_symbol = st.selectbox("Pröva ett nytt köp", candidate_symbols, key="exposure_candidate")
+            amount = st.number_input("Nytt kapital i köpet (SEK)", min_value=0.0, value=0.0, step=1000.0, key="exposure_amount")
+            candidate = scored[scored["Ticker"].eq(candidate_symbol)].iloc[0]
+            after, _ = portfolio_exposure(holdings, current, candidate, amount)
+            for dimension, before in exposure.items():
+                comparison = before.rename(columns={"Andel av känt aktievärde %": "Före %"}).merge(after[dimension].rename(columns={"Andel av känt aktievärde %": "Efter %"}), on=dimension, how="outer").fillna(0)
+                st.markdown("**" + dimension + "**")
+                st.dataframe(comparison.round(1), hide_index=True, use_container_width=True)
+            st.caption("Detta scenario tillför nytt kapital. Vid köp med befintlig kassa eller försäljning av andra innehav blir effekten en annan. Ingen automatisk rekommendation om portföljvikt ges.")
 
     with st.expander("Ta bort ett registrerat köp", expanded=False):
         opts={f"{r['Aktie']} · {r.get('Köpdatum','')}": int(r["ID"]) for _,r in table.iterrows()}
@@ -4930,6 +4966,10 @@ def render_case_plan(case: pd.Series | dict[str, Any]) -> None:
         st.markdown(f"**Det som skulle kunna få Borsify att ändra uppfattning**  \n{case.get('Case Plan Breaker','—')}")
         st.markdown(f"**Nästa kontrollpunkt**  \n{case.get('Case Plan Nästa kontroll','—')}")
         st.markdown(f"**Hur priset påverkar bedömningen**  \n{case.get('Case Plan Prisregel','—')}")
+        measured = checkpoints(case)
+        if measured:
+            st.dataframe(pd.DataFrame(measured)[["Mått", "Utgångsvärde", "Underlagsdatum", "Ompröva om"]], hide_index=True)
+            st.caption("Observerade startvärden, inga prognoser. Gränserna är bevakningsregler. Decimal 0,10 = 10 % för tillväxt, marginal och FCF-yield. Sparade innehav jämförs mot första daterade granskningen i portföljvyn.")
         st.caption(
             "Case-planen är en regelbaserad uppföljningsplan från aktuell Borsify-data. "
             "Den är inte en riktkurs, sannolikhet eller personlig köp-/säljrekommendation."
@@ -7257,7 +7297,7 @@ def main() -> None:
         st.session_state["main_page"] = "Fler aktier"
         st.rerun()
     _top_q3, _top_q4 = st.columns(2)
-    if _top_q3.button("♾️ Köp för resten av livet", use_container_width=True, key="top_quick_horizon_lifetime"):
+    if _top_q3.button("♾️ Långsiktigt ägande", use_container_width=True, key="top_quick_horizon_lifetime"):
         st.session_state["bq_horizon_focus"] = "lifetime"
         st.session_state["main_page"] = "Fler aktier"
         st.rerun()
@@ -8154,8 +8194,8 @@ def main() -> None:
             if not _focus or _focus == "lifetime":
                 if not _focus: st.divider()
                 ranked_lifetime = _horizon_section(
-                    "♾️ Köp för resten av livet",
-                    "Den hårdaste kategorin. Borsify prioriterar uthållig kvalitet, robust ekonomi och rimlig värdering. Aktien måste fortsätta förtjäna sin plats.",
+                    "♾️ Långsiktigt ägande",
+                    "Omprövas löpande. Borsify prioriterar uthållig kvalitet, robust ekonomi och rimlig värdering. Aktien måste fortsätta förtjäna sin plats.",
                     "lifetime", "Livstid Score"
                 )
 

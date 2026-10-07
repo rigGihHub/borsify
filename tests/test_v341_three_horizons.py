@@ -24,6 +24,6 @@ def test_year_score_exists_and_is_bounded():
 def test_app_has_three_clear_user_categories_and_top_ten():
     assert 'Köp nu – sälj i närtid' in APP
     assert 'Köp nu – behåll upp till ett år' in APP
-    assert 'Köp för resten av livet' in APP
+    assert 'Långsiktigt ägande' in APP
     assert 'Topp 10 i kategorin' in APP
     assert 'top_ranked(horizon_source, horizon, limit=10)' in APP
