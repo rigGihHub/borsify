@@ -6,6 +6,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+MAX_EMERGING_CAP_BSEK = 0.5
+
 
 def _num(value: Any) -> float:
     try:
@@ -28,19 +30,21 @@ def assess_up_and_coming(row: pd.Series | dict[str, Any]) -> dict[str, Any]:
     coverage = _num(row.get("Datatäckning"))
     confidence = _num(row.get("Analysis Confidence nivå"))
     turnover = _num(row.get("Omsättning MSEK/dag"))
-    avanza_catalog = bool(row.get("Avanza-universum", False))
+    avanza_catalog = str(row.get("Avanza-universum", False)).lower() == "true"
 
     blockers: list[str] = []
     if not avanza_catalog: blockers.append("saknas i Borsifys Avanza-katalog")
     if not np.isfinite(cap): blockers.append("börsvärde saknas")
     elif cap <= 0: blockers.append("ogiltigt börsvärde")
-    elif cap > 50: blockers.append("inte längre ett mindre bolag")
+    elif cap > MAX_EMERGING_CAP_BSEK: blockers.append("börsvärdet överstiger 500 miljoner SEK")
     if not np.isfinite(turnover): blockers.append("handelsaktivitet saknas")
     elif turnover < 0.10: blockers.append("för låg observerad handelsaktivitet")
     if str(row.get("Value Trap verdict") or "") == "VALUE_TRAP": blockers.append("trolig value trap")
     if str(row.get("Bolagsbedömning nivå") or "").lower() == "red": blockers.append("röd bolagsbedömning")
     if str(row.get("Ingångsläge nivå") or "").lower() == "red": blockers.append("kursen har redan gått för långt")
+    if not np.isfinite(confidence): blockers.append("analysförtroende saknas")
     if np.isfinite(confidence) and confidence <= 1: blockers.append("lågt analysförtroende")
+    if not np.isfinite(coverage): blockers.append("datatäckning saknas")
     if np.isfinite(coverage) and coverage < 0.50: blockers.append("för låg datatäckning")
     if np.isfinite(debt) and debt > 250: blockers.append("mycket hög skuldsättning")
 
@@ -69,6 +73,10 @@ def assess_up_and_coming(row: pd.Series | dict[str, Any]) -> dict[str, Any]:
     if not np.isfinite(debt):
         blockers.append("skuldsättning saknas")
 
+    if np.isfinite(revenue_growth) and revenue_growth <= 0:
+        blockers.append("omsättningen växer inte; vinstökning ensam bekräftar inte ett tillväxtcase")
+    if not np.isfinite(revenue_growth):
+        blockers.append("omsättningstillväxt saknas")
     eligible = not blockers and "tillväxt" in families and len(families) >= 3
     if eligible and len(families) == 4 and len(growth_reasons) == 2 and len(economics) >= 2:
         label = "💎 Stark emerging-kandidat"
@@ -109,13 +117,13 @@ def select_up_and_coming(frame: pd.DataFrame, limit: int = 5) -> pd.DataFrame:
         return assessed.iloc[:0]
     cap = pd.to_numeric(assessed.get("Börsvärde BSEK", pd.Series(index=assessed.index, dtype=float)), errors="coerce")
     catalog = assessed.get("Avanza-universum", pd.Series(False, index=assessed.index)).fillna(False).eq(True)
-    selected = assessed.loc[catalog & cap.gt(0) & cap.le(50)].copy()
+    selected = assessed.loc[catalog & cap.gt(0) & cap.le(MAX_EMERGING_CAP_BSEK)].copy()
     selected = selected.loc[selected["Ticker"].notna() & selected["Ticker"].astype(str).str.strip().ne("")].drop_duplicates("Ticker")
     if selected.empty:
         return selected
     def number(name):
         return pd.to_numeric(selected.get(name, pd.Series(np.nan, index=selected.index)), errors="coerce")
-    selected["__growth"] = pd.concat([number("Omsättningstillväxt"), number("Vinsttillväxt")], axis=1).max(axis=1).fillna(-np.inf)
+    selected["__growth"] = number("Omsättningstillväxt").fillna(-np.inf)
     selected["__score"] = number("Borsify slutbetyg") if "Borsify slutbetyg" in selected else number("Borsify Score") if "Borsify Score" in selected else number("Års Score")
     selected["__risk"] = [int(str(r.get("Value Trap verdict")) == "VALUE_TRAP" or str(r.get("Bolagsbedömning nivå")) == "red") for _, r in selected.iterrows()]
     selected["Up and coming köpstatus"] = "BEVAKA – inget köpbeslut"

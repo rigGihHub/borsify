@@ -21,7 +21,7 @@ from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
 import importlib
 import model_bootstrap as _model_bootstrap
-if getattr(_model_bootstrap, "RELEASE", None) != "4.41.6-lifetime-suitability":
+if getattr(_model_bootstrap, "RELEASE", None) != "4.41.7-logic-review":
     _model_bootstrap = importlib.reload(_model_bootstrap)
 _model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
@@ -4036,7 +4036,7 @@ def _stock_identity(row: pd.Series | dict[str, Any], include_name: bool = True) 
 def render_horizon_alternatives(source: pd.DataFrame, horizon: str) -> None:
     alternatives = rank_horizon_alternatives(source, horizon, limit=3, evidence_fn=add_full_deal_evidence)
     if alternatives.empty and horizon == "lifetime":
-        st.info("Ingen kandidat har tillräckligt verifierad uthållighet för resten av livet. Även bevakningsalternativ måste klara branschkontroll, flerårig vinst och kassaflöde samt en dokumenterad konkurrensfördel. Starkt cykliska frakt- och råvarubolag visas i andra tidshorisonter.")
+        st.info("Långsiktsbedömningen är ofullständig. Borsify saknar i dag automatisk insamling av verifierade konkurrensfördelar och kan därför inte färdigbedöma kandidaterna. Det betyder inte att alla bolag är olämpliga. Kraven på flerårig vinst, kassaflöde och branschkontroll gäller fortfarande. Starkt cykliska frakt- och råvarubolag utesluts från den här kategorin.")
         return
     if alternatives.empty:
         st.info("Det finns inga aktier med ett tillgängligt slutbetyg i ditt urval. Ändra sökningen eller uppdatera data.")
@@ -4677,7 +4677,7 @@ def render_up_and_coming(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     st.caption("De fem bästa tillgängliga mindre bolagen i ditt urval ur Borsifys Avanza-katalog. Kandidaterna rangordnas efter bekräftelse, risk, oberoende styrketecken och observerad tillväxt. Ingen lista kan veta vilka som får en fantastisk framtid.")
     pool = select_up_and_coming(df, limit=len(df))
     if pool.empty:
-        st.info("Inga bolag med verifierat positivt börsvärde högst 50 md SEK finns i urvalet. Bredda urvalet eller uppdatera data.")
+        st.info("Inga bolag med verifierat positivt börsvärde högst 500 miljoner SEK finns i urvalet. Bredda urvalet eller uppdatera data.")
         return pool
     reviewed = add_full_deal_evidence(pool, "year")
     # Keep discovery context aligned with the shared headline score. This does
@@ -4687,6 +4687,8 @@ def render_up_and_coming(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     if ranked.empty:
         st.info("Inga mindre bolag med verifierat börsvärde finns i det tillgängliga underlaget.")
         return ranked
+    if len(ranked) < 5:
+        st.info(f"Endast {len(ranked)} bolag i ditt urval har verifierat börsvärde inom storleksgränsen. Bredda urvalet för fler kandidater.")
     first = ranked.iloc[0]
     with st.container(border=True):
         st.caption("HÖGST RANKADE KANDIDATEN ATT UNDERSÖKA")
@@ -4701,9 +4703,10 @@ def render_up_and_coming(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     table = ranked.copy()
     table.insert(0, "#", range(1, len(table) + 1))
     table["Aktie"] = table.apply(_stock_identity, axis=1)
-    table["Börsvärde"] = pd.to_numeric(table.get("Börsvärde BSEK"), errors="coerce").map(lambda x: "—" if pd.isna(x) else f"{x:.1f} md SEK")
-    table["Tillväxt"] = pd.to_numeric(table.get("Omsättningstillväxt"), errors="coerce").map(lambda x: "—" if pd.isna(x) else f"{x:.0%}")
-    st.dataframe(table[["#", "Aktie", "Up and coming", "Up and coming köpstatus", "Börsvärde", "Tillväxt", "Up and coming blockerare"]], use_container_width=True, hide_index=True)
+    table["Börsvärde"] = pd.to_numeric(table.get("Börsvärde BSEK"), errors="coerce").map(lambda x: "—" if pd.isna(x) else f"{x * 1000:.0f} miljoner SEK")
+    table["Omsättningstillväxt"] = pd.to_numeric(table.get("Omsättningstillväxt"), errors="coerce").map(lambda x: "—" if pd.isna(x) else f"{x:.0%}")
+    table["Vinsttillväxt"] = pd.to_numeric(table.get("Vinsttillväxt", pd.Series(index=table.index, dtype=float)), errors="coerce").map(lambda x: "—" if pd.isna(x) else f"{x:.0%}")
+    st.dataframe(table[["#", "Aktie", "Up and coming", "Up and coming köpstatus", "Börsvärde", "Omsättningstillväxt", "Vinsttillväxt", "Up and coming blockerare"]], use_container_width=True, hide_index=True)
     for rank, (_, row) in enumerate(ranked.iterrows(), start=1):
         ticker = str(row.get("Ticker", "—"))
         with st.expander(f"Vad gör {_stock_identity(row)}?", expanded=False):
@@ -4715,7 +4718,7 @@ def render_up_and_coming(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     match = ranked[ranked["Ticker"].astype(str).eq(open_ticker)] if open_ticker else pd.DataFrame()
     if not match.empty:
         render_detail(match.iloc[0], profile, key_prefix=f"upcoming_{open_ticker}", horizon="year")
-    st.caption("Urvalet omfattar bolag med positivt börsvärde högst 50 md SEK i Borsifys Avanza-katalog. Svag handel, saknad tillväxt och andra brister visas som hinder i stället för att tömma listan. Listan är en bevakningslista, inte fem köpråd. Kontrollera alltid hos Avanza att order kan läggas. Det påverkar inte Borsify Score.")
+    st.caption("Urvalet omfattar bolag med positivt börsvärde högst 500 miljoner SEK i Borsifys Avanza-katalog. Svag handel, saknad tillväxt och andra brister visas som hinder i stället för att tömma listan. Listan är en bevakningslista, inte fem köpråd. Kontrollera alltid hos Avanza att order kan läggas. Det påverkar inte Borsify Score.")
     return ranked
 
 def save_ai_usage(request_id: str, symbol: str, model: str, input_tokens: int, output_tokens: int, cost_usd: float) -> None:

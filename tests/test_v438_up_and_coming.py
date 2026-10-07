@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _case(**changes):
     row = {
-        "Ticker": "GROW.ST", "Börsvärde BSEK": 8.0,
+        "Ticker": "GROW.ST", "Börsvärde BSEK": 0.3,
         "Omsättningstillväxt": 0.18, "Vinsttillväxt": 0.25,
         "Vinstmarginal": 0.10, "ROE": 0.15, "FCF-yield": 0.04,
         "Skuld/eget kapital": 70, "Kvalitet": 68, "Datatäckning": 0.80,

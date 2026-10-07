@@ -56,7 +56,9 @@ def _cagr(series: pd.Series, max_points: int = 4) -> float:
     if len(s) < 2:
         return np.nan
     latest, old = _num(s.iloc[0]), _num(s.iloc[-1])
-    periods = len(s) - 1
+    if not isinstance(s.index, pd.DatetimeIndex):
+        return np.nan
+    periods = (s.index[0] - s.index[-1]).days / 365.25
     if periods <= 0 or not (np.isfinite(latest) and np.isfinite(old)) or latest <= 0 or old <= 0:
         return np.nan
     return (latest / old) ** (1 / periods) - 1
