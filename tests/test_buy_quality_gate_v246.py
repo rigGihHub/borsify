@@ -48,7 +48,8 @@ def test_strong_candidate_passes_all_four_buy_gates():
         assert gate["Köpfilter"]=="KÖPCASE"
 
 def test_weak_candidate_is_not_filler_in_top_three():
-    good=strong_row("GOOD")
+    from test_lifetime_suitability import durable
+    good={**durable(), **strong_row("GOOD")}
     weak=strong_row("WEAK")
     weak.update({
         "Dagsförändring": -.08, "1 mån": -.25, "3 mån": -.30,

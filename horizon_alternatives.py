@@ -6,6 +6,7 @@ import math
 import pandas as pd
 
 from purchase_consistency import purchase_blockers
+from lifetime_suitability import filter_lifetime_suitable
 
 from anti_chase_gate import anti_chase_decision
 from buy_quality_gate import BUY_THRESHOLDS, apply_buy_gate
@@ -82,6 +83,10 @@ def rank_horizon_alternatives(frame: pd.DataFrame, horizon: str, limit: int = 3,
     score_col = {"medium": "Mellan Score", "year": "Års Score", "lifetime": "Livstid Score"}[horizon]
     if frame is None or frame.empty or limit <= 0 or "Ticker" not in frame:
         return pd.DataFrame()
+    if horizon == "lifetime":
+        frame = filter_lifetime_suitable(frame)
+        if frame.empty:
+            return frame
     gate_horizon = "long" if horizon == "year" else horizon
     derived = ["Daytrade Score", "Mellan Score", "Års Score", "Lång Score", "Livstid Score"]
     out = add_user_scores(add_horizon_scores(frame.drop(columns=derived, errors="ignore")))

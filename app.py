@@ -21,7 +21,7 @@ from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
 import importlib
 import model_bootstrap as _model_bootstrap
-if getattr(_model_bootstrap, "RELEASE", None) != "4.41.5-business-outlook":
+if getattr(_model_bootstrap, "RELEASE", None) != "4.41.6-lifetime-suitability":
     _model_bootstrap = importlib.reload(_model_bootstrap)
 _model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
@@ -4035,6 +4035,9 @@ def _stock_identity(row: pd.Series | dict[str, Any], include_name: bool = True) 
 
 def render_horizon_alternatives(source: pd.DataFrame, horizon: str) -> None:
     alternatives = rank_horizon_alternatives(source, horizon, limit=3, evidence_fn=add_full_deal_evidence)
+    if alternatives.empty and horizon == "lifetime":
+        st.info("Ingen kandidat har tillräckligt verifierad uthållighet för resten av livet. Även bevakningsalternativ måste klara branschkontroll, flerårig vinst och kassaflöde samt en dokumenterad konkurrensfördel. Starkt cykliska frakt- och råvarubolag visas i andra tidshorisonter.")
+        return
     if alternatives.empty:
         st.info("Det finns inga aktier med ett tillgängligt slutbetyg i ditt urval. Ändra sökningen eller uppdatera data.")
         return

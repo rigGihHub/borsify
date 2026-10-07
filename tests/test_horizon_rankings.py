@@ -37,7 +37,9 @@ def test_daytrade_prefers_strong_momentum_liquidity_combo():
     assert top.iloc[0]["Ticker"]=="A"
 
 def test_lifetime_rewards_quality_and_robustness():
-    top=top_three(sample(),"lifetime")
+    from test_lifetime_suitability import durable
+    frame = pd.DataFrame([{**durable(), **r} for r in sample().to_dict("records")])
+    top=top_three(frame,"lifetime")
     assert top.iloc[0]["Ticker"] in {"A","D"}
     assert "Horisontförklaring" in top.columns
 

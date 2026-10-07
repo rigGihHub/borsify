@@ -4,6 +4,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from buy_now_selection import select_buy_now
+from lifetime_suitability import filter_lifetime_suitable
 from buy_card import build_buy_card
 from near_buy import assess_overextension
 from risk_reward import build_risk_reward, risk_reward_rank_value
@@ -80,6 +81,9 @@ def horizon_reason(r,horizon):
 
 def top_ranked(df: pd.DataFrame,horizon: str,limit: int=3)->pd.DataFrame:
     if df is None or df.empty:return pd.DataFrame()
+    if horizon == "lifetime":
+        df=filter_lifetime_suitable(df)
+        if df.empty:return df
     col={"day":"Daytrade Score","medium":"Mellan Score","year":"Års Score","long":"Lång Score","lifetime":"Livstid Score"}[horizon]
     gate_horizon="long" if horizon=="year" else horizon
     out=add_horizon_scores(df); out=add_relative_strength(out); out=add_market_regime(out,gate_horizon)

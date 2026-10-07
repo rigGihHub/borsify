@@ -2,6 +2,7 @@
 import math
 import pandas as pd
 from analysis_confidence import assess_analysis_confidence
+from lifetime_suitability import lifetime_blockers
 
 BUY_SIGNALS = {"KÖP NU", "KÖP", "KÖP / ÄG", "BYGG POSITION", "KÖP / ÄG LÅNGSIKTIGT", "BYGG LÅNGSIKTIGT"}
 
@@ -28,6 +29,7 @@ def purchase_blockers(row, horizon="year"):
     if str(row.get("Value Trap verdict", "")) == "VALUE_TRAP":
         reasons.append("värdefällerisk måste undanröjas")
     if horizon == "lifetime":
+        reasons.extend(lifetime_blockers(row))
         years = number(row.get("Historik år"))
         if not math.isfinite(years) or years < 3:
             reasons.append("minst tre års jämförbar lönsamhets- och kassaflödeshistorik krävs")

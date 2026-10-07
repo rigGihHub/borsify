@@ -1,8 +1,8 @@
 """Attach research facts without replacing the scanner's scores or prices."""
 import pandas as pd
 
-RESEARCH_PREFIXES = ("Deep ", "Rapport", "KPI", "Report Delta", "Business ", "Management ")
-RESEARCH_FIELDS = {"Historik år", "Omsättning CAGR", "Vinst CAGR", "FCF CAGR", "Positiv FCF-andel", "Senaste FCF", "Rörelsemarginal trend", "Skuldförändring"}
+RESEARCH_PREFIXES = ("Deep ", "Rapport", "KPI", "Report Delta", "Business ", "Management ", "Historik ", "Konkurrensfördel ")
+RESEARCH_FIELDS = {"Historik år", "Omsättning CAGR", "Vinst CAGR", "FCF CAGR", "Positiv FCF-andel", "Senaste FCF", "Senaste vinst", "Positiv vinst-andel", "Rörelsemarginal trend", "Skuldförändring"}
 
 def merge_research(source, *frames):
     out = source.copy()

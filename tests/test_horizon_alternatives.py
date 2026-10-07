@@ -26,7 +26,8 @@ def case(ticker="CASE.ST", score=75, **extra):
 
 @pytest.mark.parametrize("horizon", ["medium", "year", "lifetime"])
 def test_empty_purchase_list_still_has_ranked_observational_alternatives(horizon):
-    source = pd.DataFrame([case(f"C{i}.ST", 50 + i) for i in range(5)])
+    from test_lifetime_suitability import durable
+    source = pd.DataFrame([{**durable(), **case(f"C{i}.ST", 50 + i)} for i in range(5)])
     original = source.copy(deep=True)
     before = top_ranked(source, horizon, limit=10)
     assert before.empty
@@ -61,7 +62,8 @@ def test_missing_fundamentals_and_severe_risks_are_explained_instead_of_hidden()
         "Datatäckning": .2, "Riskflaggor": "hög skuldsättning",
     }])
     out = rank_horizon_alternatives(source, "lifetime")
-    assert len(out) == 1
+    assert out.empty  # Lifetime suitability also applies to watch alternatives.
+    out = rank_horizon_alternatives(source, "year")
     row = out.iloc[0]
     assert row["Signal"] == "BEVAKA"
     assert "för lite relevant data" in row["Alternativ köpstopp"]
@@ -180,6 +182,8 @@ def test_horizon_fit_beats_shared_score_and_does_not_force_artificial_diversity(
                                     "Kvalitet": 95, "Risk": 90, "ROE": .25, "Vinstmarginal": .22}),
     ])
     short = rank_horizon_alternatives(source, "medium")
+    from test_lifetime_suitability import durable
+    source = pd.DataFrame([{**durable(), **r} for r in source.to_dict("records")])
     lifetime = rank_horizon_alternatives(source, "lifetime")
     assert short.iloc[0]["Ticker"] == "MOMENTUM"
     assert lifetime.iloc[0]["Ticker"] == "COMPOUNDER"

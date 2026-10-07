@@ -123,12 +123,15 @@ def build_deep_metrics(
     fcf_margin = _ratio_series(fcf, revenue)
     net_margin = _ratio_series(net_income, revenue)
 
-    years = int(max(len(revenue.iloc[:4]), len(net_income.iloc[:4]), len(fcf.iloc[:4])))
+    years = int(max(len(set(revenue.iloc[:4].index.year)), len(set(net_income.iloc[:4].index.year)), len(fcf.iloc[:4])))
     latest_debt, latest_cash = _latest(total_debt), _latest(cash)
     net_debt = latest_debt - latest_cash if np.isfinite(latest_debt) and np.isfinite(latest_cash) else np.nan
 
     return {
         "Historik år": years,
+        "Historik omsättning år": len(set(revenue.iloc[:4].index.year)),
+        "Historik vinst år": len(set(net_income.iloc[:4].index.year)),
+        "Historik FCF år": len(set(fcf.iloc[:4].index.year)),
         "Rapportdatum": _latest_statement_date(income, cashflow, balance),
         "Omsättning CAGR": _cagr(revenue),
         "Vinst CAGR": _cagr(net_income),
