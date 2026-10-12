@@ -3,6 +3,9 @@ import re
 from urllib.parse import urlsplit
 
 SOURCES = {
+    "proact it group": {"hosts": {"proact.eu", "www.proact.eu"}, "index": "https://www.proact.eu/financial-reports/", "evidence": "https://www.proact.eu/investor-relations/"},
+    "bavarian nordic": {"hosts": {"bavarian-nordic.com", "www.bavarian-nordic.com"}, "index": "https://www.bavarian-nordic.com/investor/financials.aspx", "evidence": "https://www.bavarian-nordic.com/investor/investor.aspx"},
+    "hafnia limited": {"hosts": {"investor.hafnia.com"}, "index": "https://investor.hafnia.com/ir-news/", "evidence": "https://investor.hafnia.com/"},
     "meds apotek": {
         "hosts": {"corporate.meds.se"},
         "index": "https://corporate.meds.se/media/pressmeddelanden/",
@@ -38,7 +41,8 @@ def issuer_name(value):
     return ' '.join(t for t in tokens if t not in {'ab', 'publ', 'plc', 'inc', 'asa', 'as', 'corp', 'corporation', 'ltd'})
 
 def source_for_issuer(name):
-    return SOURCES.get(issuer_name(name))
+    normalized = issuer_name(name)
+    return SOURCES.get(normalized) or (SOURCES["hafnia limited"] if normalized == "hafnia" else None)
 
 def verified_issuer_url(url, name):
     source = source_for_issuer(name)

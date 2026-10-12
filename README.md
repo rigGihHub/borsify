@@ -2403,3 +2403,19 @@ Consensus Change delar samma enda fresh-change-plats som Report Delta, Managemen
 Consensus Change har nu ett äkta point-in-time-minne. Borsify fryser dagens analytikerkonsensus per aktie och jämför bara med ett faktiskt äldre snapshot. Ingen historik rekonstrueras och ingen backfill görs.
 
 Minnet kan bland annat upptäcka att köpandelen breddas, riktkursmedianen stiger, fler analytiker ansluter eller att riktkurserna samlas kring en högre nivå. Negativa förändringar markeras separat. Lagret skapar ingen ny investeringsscore och ingen extra discovery-slot; det fördjupar den befintliga Consensus Change-signalen.
+
+
+### Analysis memory and prospective follow-up (4.44)
+
+The app now reuses an unchanged first-choice analysis for up to 15 minutes when switching views. Refresh forces a new assessment. Primary issuer discovery includes Proact, Bavarian Nordic and Hafnia, in addition to the previous registry. Adding a source does not imply its report has been successfully read.
+
+Analysis memory can be exported and restored from the portfolio view. Research-only backups are available under Fler aktier. Restore fills missing rows and never replaces an existing holding baseline. Signed-in baselines are isolated from anonymous/local holding IDs.
+
+For cloud recovery, apply the `analysis_memory` section in `supabase_schema.sql` to the **same Supabase project used by Borsify**. The table is private to each authenticated user through RLS. The UI reports unverified cloud storage rather than claiming local files survive server replacement. Existing anonymous baselines are not automatically assigned to a signed-in account.
+
+The daily scan and prospective outcome worker need these GitHub repository Actions secrets:
+
+- `BORSIFY_SUPABASE_URL`: the Borsify project URL.
+- `BORSIFY_SUPABASE_SERVICE_ROLE_KEY`: the matching server-side key. Configure it in GitHub Settings → Secrets and variables → Actions; never commit it or place it in a browser client.
+
+Latest inspected scheduled run (9 October 2026) failed because both values were missing. Once configured, run Borsify Daily Scan using workflow_dispatch and verify both scan and prospective follow-up steps. Future outcomes cannot be fabricated from today's analysis. Existing UI evaluation compares frozen observations with benchmarks after explicit cost scenarios; low sample counts are not evidence of accuracy.

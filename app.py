@@ -21,7 +21,7 @@ from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
 import importlib
 import model_bootstrap as _model_bootstrap
-if getattr(_model_bootstrap, "RELEASE", None) != "4.43.0-investment-controls":
+if getattr(_model_bootstrap, "RELEASE", None) != "4.44.0-memory-review":
     _model_bootstrap = importlib.reload(_model_bootstrap)
 _model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
@@ -266,6 +266,7 @@ from investment_company_engine import add_investment_company_context
 from near_buy import near_buy_candidates
 from portfolio_advisor import assess_holding
 from investment_controls import checkpoints, holding_review, portfolio_exposure
+from analysis_memory import export_memory, restore_memory, cloud_restore, cloud_save
 from market_universe import load_avanza_universe, universe_symbols, coverage_table, breadth_summary, audit_catalog, catalog_integrity_summary
 from universe_manager import nordic_total, universe_health, scan_result_user_text
 from universe_quality import apply_universe_quality, filter_rankable_universe, quality_summary
@@ -292,7 +293,7 @@ except Exception:
     create_client = None
 
 APP_VERSION = "4.40.0"
-MODEL_VERSION = "4.43.0"
+MODEL_VERSION = "4.44.0"
 
 def _borsify_today() -> str:
     """Runtime calendar date for point-in-time snapshots; never hardcode release date."""
@@ -1540,6 +1541,7 @@ def build_deep_longlist(df: pd.DataFrame, pool_size: int = 6, limit: int = 5) ->
     # independent quality, inflection, mispricing and scenario checks.
     try:
         save_research_batch(pool, DB_PATH)
+        st.session_state["bq_memory_dirty"] = True
     except Exception as exc:
         record_runtime_issue(st.session_state, "research_rotation", exc, "flerårsunderlaget kunde inte sparas för återanvändning")
     order = sorted(pool.index, key=lambda idx: case_gate_rank_key(pool.loc[idx]), reverse=True)
@@ -4479,6 +4481,40 @@ def _holding_status_style(row: pd.Series) -> list[str]:
     return [bg] * len(row)
 
 
+def _holding_review_db_path():
+    uid = current_user_id()
+    if not uid:
+        return DB_PATH
+    # Private baseline files are isolated from anonymous/local holding IDs.
+    return APP_DIR / ("review-" + hashlib.sha256(uid.encode()).hexdigest()[:24] + ".db")
+
+
+def sync_analysis_memory(holdings):
+    client, uid = _supabase_client(), current_user_id()
+    ids = holdings.get("holding_id", pd.Series(dtype=int)).tolist()
+    if client is None or not uid:
+        st.session_state["bq_memory_status"] = "Lokalt sparat – inte skyddat mot serverbyte. Säkerhetskopia kan laddas ned i portföljvyn."
+        return
+    failed = st.session_state.get("bq_memory_failure", {})
+    if failed.get("uid") == uid and time.time() - failed.get("time", 0) < 60:
+        return
+    try:
+        if st.session_state.get("bq_memory_restored_user") != uid:
+            cloud_restore(client, uid, DB_PATH, ids, _holding_review_db_path())
+            st.session_state["bq_memory_restored_user"] = uid
+        if st.session_state.get("bq_memory_dirty"):
+            fingerprint = hashlib.sha256(json.dumps(export_memory(DB_PATH, ids, _holding_review_db_path()), sort_keys=True).encode()).hexdigest()
+            if st.session_state.get("bq_memory_saved_hash") != (uid, fingerprint):
+                cloud_save(client, uid, DB_PATH, ids, _holding_review_db_path())
+                st.session_state["bq_memory_saved_hash"] = (uid, fingerprint)
+            st.session_state["bq_memory_dirty"] = False
+        st.session_state["bq_memory_status"] = "Molnlagring tillgänglig för ditt konto."
+    except Exception as exc:
+        st.session_state["bq_memory_failure"] = {"uid": uid, "time": time.time()}
+        st.session_state["bq_memory_status"] = "Molnlagringen för analysminnet kunde inte verifieras. Uppgifter sparas lokalt; ladda ned en säkerhetskopia."
+        record_runtime_issue(st.session_state, "analysis_memory", exc, "analysminnet kunde inte synkas till molnet")
+
+
 def render_holdings_portfolio(scored: pd.DataFrame, profile: str) -> None:
     st.markdown("## 💼 Mina aktieköp · säljkoll")
     st.caption(
@@ -4504,6 +4540,7 @@ def render_holdings_portfolio(scored: pd.DataFrame, profile: str) -> None:
                     st.rerun()
 
     holdings = get_holdings()
+    sync_analysis_memory(holdings)
     if holdings.empty:
         st.info("Du har inte lagt in några aktieköp ännu.")
         return
@@ -4534,7 +4571,8 @@ def render_holdings_portfolio(scored: pd.DataFrame, profile: str) -> None:
             continue
         assessment=assess_holding(h["purchase_price"], row)
         try:
-            review, review_note = holding_review(h["holding_id"], row, DB_PATH)
+            review, review_note = holding_review(h["holding_id"], row, _holding_review_db_path())
+            st.session_state["bq_memory_dirty"] = True
             if any(p["Status"] == "OMPRÖVA" for p in review):
                 assessment.update({"Status": "OMPRÖVA", "Borsify råd": "En sparad bevakningsgräns har passerats – kontrollera rapporten", "Skäl": "; ".join(p["Mått"] for p in review if p["Status"] == "OMPRÖVA")})
             with st.expander("Följ upp " + sym, expanded=False):
@@ -4585,6 +4623,22 @@ def render_holdings_portfolio(scored: pd.DataFrame, profile: str) -> None:
                 st.markdown("**" + dimension + "**")
                 st.dataframe(comparison.round(1), hide_index=True, use_container_width=True)
             st.caption("Detta scenario tillför nytt kapital. Vid köp med befintlig kassa eller försäljning av andra innehav blir effekten en annan. Ingen automatisk rekommendation om portföljvikt ges.")
+
+    sync_analysis_memory(holdings)
+    with st.expander("Spara och återställ analysunderlag", expanded=False):
+        st.caption(st.session_state.get("bq_memory_status", "Lagringen har inte kontrollerats."))
+        backup = export_memory(DB_PATH, holdings["holding_id"].tolist(), _holding_review_db_path())
+        st.download_button("Ladda ned säkerhetskopia", json.dumps(backup, ensure_ascii=False), file_name="borsify-analysis-memory.json", mime="application/json", key="analysis_backup")
+        uploaded = st.file_uploader("Återställ analysunderlag från säkerhetskopia", type=["json"], key="analysis_restore_file")
+        if uploaded is not None and st.button("Återställ saknat underlag", key="analysis_restore_apply"):
+            try:
+                if uploaded.size > 10000000:
+                    raise ValueError("Säkerhetskopian är för stor")
+                restore_memory(DB_PATH, json.loads(uploaded.getvalue()), holdings["holding_id"].tolist(), _holding_review_db_path())
+                st.session_state["bq_memory_dirty"] = True
+                st.success("Saknat analysunderlag återställt. Befintliga basvärden har bevarats.")
+            except (ValueError, TypeError, KeyError):
+                st.error("Säkerhetskopian kunde inte läsas. Kontrollera att den exporterats från Borsify.")
 
     with st.expander("Ta bort ett registrerat köp", expanded=False):
         opts={f"{r['Aktie']} · {r.get('Köpdatum','')}": int(r["ID"]) for _,r in table.iterrows()}
@@ -7476,7 +7530,13 @@ def main() -> None:
     discovery_pool_global = build_discovery_pool(filtered, max_candidates=min(36, len(filtered)))
     st.session_state["bq_discovery_coverage"] = discovery_coverage_summary(filtered, discovery_pool_global)
     top = filtered.head(top_n).copy()
-    daily_shortlist, evidence_finalists = build_evidence_gated_shortlist(filtered, profile, limit=min(5, len(filtered)))
+    _first_key = hashlib.sha256((filtered.drop(columns=["_history"], errors="ignore").to_json(default_handler=str) + profile + str(MODEL_VERSION)).encode()).hexdigest()
+    _first_cached = st.session_state.get("bq_first_choice_cache", {})
+    if not refresh and _first_cached.get("key") == _first_key and time.time() - _first_cached.get("time", 0) < 900:
+        daily_shortlist, evidence_finalists = _first_cached["shortlist"].copy(), _first_cached["finalists"].copy()
+    else:
+        daily_shortlist, evidence_finalists = build_evidence_gated_shortlist(filtered, profile, limit=min(5, len(filtered)))
+        st.session_state["bq_first_choice_cache"] = {"key": _first_key, "time": time.time(), "shortlist": daily_shortlist.copy(), "finalists": evidence_finalists.copy()}
     st.session_state["bq_evidence_finalists"] = evidence_finalists
     ungated_first = rank_close_daily_candidates(evidence_finalists.copy()).head(1) if not evidence_finalists.empty else pd.DataFrame()
     gated_first = daily_shortlist.head(1)
@@ -7612,10 +7672,13 @@ def main() -> None:
             st.session_state["bq_deep_view_cache"] = {"key": _deep_key, "time": time.time(), "long": deep_longlist.copy(), "short": short_longlist.copy()}
 
         try:
+            sync_analysis_memory(get_holdings())
             research_history = cached_research(DB_PATH)
         except Exception as exc:
             research_history = pd.DataFrame()
             record_runtime_issue(st.session_state, "research_rotation", exc, "sparad fördjupning kunde inte läsas")
+        st.caption(st.session_state.get("bq_memory_status", "Lagringen är inte verifierad."))
+        st.download_button("Säkerhetskopiera bolagsgranskningar", json.dumps(export_memory(DB_PATH), ensure_ascii=False), file_name="borsify-research.json", mime="application/json", key="research_backup")
         covered = int(filtered["Ticker"].isin(research_history.get("Ticker", pd.Series(dtype=str))).sum())
         st.caption(f"Flerårsunderlag hämtat för {covered} av {len(filtered)} bolag de senaste sju dagarna. Tillgängliga uppgifter kan fortfarande vara ofullständiga. Listorna visar bäst bland analyserade kandidater.")
         confirmed_view = st.session_state.get("bq_confirmed_why_now_radar", pd.DataFrame())

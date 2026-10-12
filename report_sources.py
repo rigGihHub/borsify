@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 
 from dataclasses import dataclass
 from typing import Any
@@ -32,7 +33,7 @@ def candidate_report(title: str, published_at: str, url: str, attachment_url: st
     meeting = "annual general meeting" in low or "årsstämma" in low
     if navigation or meeting: report_type="Other"
     elif "annual report" in low or "årsrapport" in low or "årsredovisning" in low: report_type="Annual Report"
-    elif "half-year" in low or "halvår" in low: report_type="Half-yearly Report"
+    elif "half-year" in low or "halvår" in low or re.search(r"\bh[12]\b.*\breport\b", low): report_type="Half-yearly Report"
     elif "interim" in low or "delårs" in low: report_type="Interim Report"
     elif "bokslutsrapport" in low or "bokslutskommunik" in low or "financial statement release" in low or "year-end" in low: report_type="Financial Statement Release"
     elif "quarter" in low or "kvartal" in low or "q1" in low or "q2" in low or "q3" in low or "q4" in low: report_type="Quarterly Report"

@@ -452,3 +452,19 @@ alter table public.missed_winner_snapshots add column if not exists profit_margi
 alter table public.missed_winner_snapshots add column if not exists roe double precision;
 alter table public.missed_winner_snapshots add column if not exists fcf_yield double precision;
 alter table public.missed_winner_snapshots add column if not exists forward_pe double precision;
+
+-- v4.44: private, account-scoped analysis recovery after server replacement.
+create table if not exists public.analysis_memory (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  memory_key text not null,
+  payload jsonb not null,
+  primary key (user_id, memory_key)
+);
+alter table public.analysis_memory enable row level security;
+grant select, insert, update on public.analysis_memory to authenticated;
+drop policy if exists "analysis_memory_select_own" on public.analysis_memory;
+create policy "analysis_memory_select_own" on public.analysis_memory for select to authenticated using ((select auth.uid()) = user_id);
+drop policy if exists "analysis_memory_insert_own" on public.analysis_memory;
+create policy "analysis_memory_insert_own" on public.analysis_memory for insert to authenticated with check ((select auth.uid()) = user_id);
+drop policy if exists "analysis_memory_update_own" on public.analysis_memory;
+create policy "analysis_memory_update_own" on public.analysis_memory for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
