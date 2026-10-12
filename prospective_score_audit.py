@@ -17,6 +17,8 @@ def prospective_score_audit(recommendations, outcomes, model_version, horizon, c
     if not {'record_id', 'horizon', 'evaluated_date', 'return_pct', 'benchmark_return_pct', 'benchmark_symbol'}.issubset(outcomes.columns):
         return pd.DataFrame(columns=columns)
     rec = recommendations[recommendations.model_version.astype(str).eq(str(model_version))].copy()
+    if rec.empty:
+        return pd.DataFrame(columns=columns)
     def snapshot(raw):
         try:
             value = json.loads(raw)
@@ -25,7 +27,7 @@ def prospective_score_audit(recommendations, outcomes, model_version, horizon, c
             return {}
     snap = rec.snapshot_json.map(snapshot)
     rec['visible_horizon'] = snap.map(lambda s: s.get('Visad horisont'))
-    valid = snap.map(lambda s: s.get('PIT Outcome Basis') == 'next_session_close_total_return_v1' and s.get('PIT Complete') is True)
+    valid = snap.map(lambda s: s.get('PIT Outcome Basis') == 'next_session_close_total_return_v1' and s.get('PIT Complete') is True).astype(bool)
     rec = rec[valid & rec.visible_horizon.isin(LABELS)].copy()
     out = outcomes[outcomes.horizon.astype(str).eq(horizon)].copy()
     work = rec.merge(out.drop(columns=['symbol'], errors='ignore'), on='record_id', suffixes=('', '_out'))
