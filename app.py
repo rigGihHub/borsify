@@ -79,6 +79,7 @@ except ImportError:
     def latest_first_choice(*_args, **_kwargs):
         return None
 from up_and_coming import select_up_and_coming
+from future_discovery import collect_future_pool, select_future_companies
 from scan_pipeline import assess_price_history
 from staged_scan_validation import validate_candidate_pool, activation_readiness
 from prefilter_history import save_prefilter_validation, get_prefilter_validation_history
@@ -4776,9 +4777,62 @@ def render_overview(
             st.caption("Rapportkontroll: källadress, rapportperiod och finansiellt innehåll. Report Delta beräknas från strukturerade data.")
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_future_discovery():
+    return collect_future_pool(fetch_fundamentals)
+
+
+def render_future_discovery():
+    st.markdown("## 🚀 Framtidsbolag · Up and coming")
+    st.write("Fem internationella bolag att undersöka för framtida tillväxt. Här finns ingen gräns på 500 miljoner SEK och inget krav på att bolaget redan gör vinst.")
+    st.caption("Eget urval: Nordamerika och Europa via en ny tillväxtsökning, kompletterat med sex rapportgranskade bevakningsbolag. Dina lands-, storleks- och prisfilter för aktieanalysen gäller inte här. Urvalet täcker inte hela världens börser.")
+    with st.expander("Hur hittar Borsify kandidaterna?"):
+        st.write("Den externa sökningen hämtar upp till 24 träffar per region med minst 15 % kvartalsvis omsättningstillväxt mot föregående år och börsvärde på minst 100 miljoner USD enligt Yahoo. Resultaten sorteras efter tillväxttakt, dubbletter tas bort och sex rapportgranskade bevakningsbolag läggs till. Upp till 54 unika kandidater jämförs. Förlustbolag får vara med. Den här vyn använder tillväxtsökning och daterade bolagsprofiler; den gör ingen fri AI-webbresearch.")
+    if st.button("↻ Uppdatera framtidsbolag", key="refresh_future_discovery"):
+        fetch_future_discovery.clear()
+    with st.spinner("Söker tillväxtbolag i Nordamerika och Europa och hämtar bolagsunderlag …"):
+        pool, health = fetch_future_discovery()
+    ranked = select_future_companies(pool, limit=5)
+    st.caption(f"{health['candidates']} unika kandidater · {health['screen_hits']} sökträffar före dubblettrensning · sökning utförd {health['fetched_at'][:16].replace('T', ' ')} UTC. Sökresultat cachas högst en timme; bolagsdata kan återanvändas ur ordinarie cache.")
+    if health["errors"]:
+        st.warning("Sökningen har databegränsningar. Tillgängliga kandidater visas med sina luckor; rapporturvalet kan användas när den externa sökningen inte fungerar.")
+        with st.expander("Visa sökningens källstatus"):
+            for error in health["errors"]:
+                st.write(error)
+    st.caption("Rangordning: bekräftad positiv omsättningstillväxt, därefter lönsamhet och kassaflöde, färre dataluckor/riskhinder och tillväxttakt (begränsad till 100 % i jämförelsen). Detta är idéurval, inte ett nytt Borsify-betyg eller ett godkänt köpläge. Bolagens egna uppgifter verifierar ingen vallgrav.")
+    if ranked.empty:
+        st.info("Inga identifierbara bolag finns i det tillgängliga underlaget. Försök uppdatera sökningen.")
+        return
+    if len(ranked) < 5:
+        st.info(f"{len(ranked)} identifierbara kandidater finns tillgängliga; fler bolag behöver hämtas för en full femlista.")
+    for rank, (_, row) in enumerate(ranked.iterrows(), start=1):
+        ticker = str(row["Ticker"])
+        with st.container(border=True):
+            st.markdown(f"### {rank}. {row['Namn']} · {ticker}")
+            st.caption(f"{row['Framtid tema']} · {row['Framtid köpstatus']}")
+            st.write(row["Framtid verksamhet"])
+            st.markdown(f"**Varför verksamheten kan växa:** {row['Framtid möjlighet']}")
+            st.markdown(f"**Konkurrens och bransch:** {row['Framtid konkurrens']}")
+            st.markdown(f"**Nästa sak att följa:** {row['Framtid milstolpe']}")
+            st.markdown(f"**Vad kan kullkasta caset:** {row['Framtid risk']}")
+            growth = row["Framtid tillväxt"]
+            growth_text = "saknas" if pd.isna(growth) else f"{growth:.1%}"
+            st.write(f"Tillgänglig omsättningstillväxt: {growth_text} · Källa: {row['Framtid tillväxtkälla']}.")
+            if row["Framtid rapportkälla"]:
+                st.write(f"Rapportobservation · {row['Framtid rapportperiod']}: {row['Framtid rapportfakta']}")
+                st.markdown(f"[Bolagets rapport, publicerad {row['Framtid rapportdatum']}]({row['Framtid rapportkälla']})")
+            st.caption(f"Underlag: {row['Framtid underlag']} · Upptäckt via: {row['Upptäckt via']}")
+            if str(row.get("Fundamental hämtad") or ""):
+                st.caption(f"Bolagsdata hämtade: {row['Fundamental hämtad']} · {row.get('Fundamental källa', 'källa saknas')}. Hämtningstid är inte rapportdatum.")
+            if row["Framtid hinder"]:
+                st.warning("Att granska: " + row["Framtid hinder"])
+            st.markdown(f"[Bolagsdata och rapportlänkar hos Yahoo Finance](https://finance.yahoo.com/quote/{quote(ticker, safe='')}/)")
+    st.caption("Ett spännande bolag kan vara en dyr aktie. Dagens pris, finansieringsutrymme och värdering måste prövas före köp. Listan innebär ingen garanti för avkastning eller möjlighet att lägga order hos en viss mäklare.")
+
+
 def render_up_and_coming(df: pd.DataFrame, profile: str) -> pd.DataFrame:
     """Render smaller evidence-backed companies without promising future winners."""
-    st.markdown("## 🚀 Up and coming")
+    st.markdown("## 🔬 Mikrobolag · högst 500 miljoner SEK")
     st.caption("De fem bästa tillgängliga mindre bolagen i ditt urval ur Borsifys Avanza-katalog. Kandidaterna rangordnas efter bekräftelse, risk, oberoende styrketecken och observerad tillväxt. Ingen lista kan veta vilka som får en fantastisk framtid.")
     pool = select_up_and_coming(df, limit=len(df))
     if pool.empty:
@@ -6987,6 +7041,23 @@ def main() -> None:
     st.markdown(f"""<div class='bq-hero'><div><span class='bq-mark'>BQ</span><span class='bq-title'>{APP_NAME}</span></div><div class='bq-sub'>Hitta intressanta aktier — och förstå varför · <span class='bq-domain'>{APP_DOMAIN}</span></div></div>""", unsafe_allow_html=True)
 
     init_db()
+    _discover_future, _discover_micro = st.columns(2)
+    if _discover_future.button("🚀 Framtidsbolag", key="direct_future_discovery", use_container_width=True):
+        st.session_state["bq_future_discovery_open"] = True
+        st.rerun()
+    if _discover_micro.button("🔬 Mikrobolag", key="direct_micro_discovery", use_container_width=True):
+        st.session_state["bq_future_discovery_open"] = False
+        st.session_state["bq_horizon_focus"] = "upcoming"
+        st.session_state["main_page"] = "Fler aktier"
+        st.rerun()
+    # Independent route: discovery must also work when the Nordic price scan or
+    # the user's local market filters yield no rankable companies.
+    if st.session_state.get("bq_future_discovery_open"):
+        if st.button("← Till aktieanalysen", key="leave_future_discovery"):
+            st.session_state["bq_future_discovery_open"] = False
+            st.rerun()
+        render_future_discovery()
+        return
     universe_df = load_universe_file()
     file_universe_symbols = universe_df["Ticker"].tolist()
     avanza_universe_df = load_avanza_universe(AVANZA_UNIVERSE_PATH)
@@ -7356,8 +7427,7 @@ def main() -> None:
         st.session_state["main_page"] = "Fler aktier"
         st.rerun()
     if _top_q4.button("🚀 Visa bästa up and coming-aktierna", use_container_width=True, key="top_quick_up_and_coming"):
-        st.session_state["bq_horizon_focus"] = "upcoming"
-        st.session_state["main_page"] = "Fler aktier"
+        st.session_state["bq_future_discovery_open"] = True
         st.rerun()
 
     if refresh:
