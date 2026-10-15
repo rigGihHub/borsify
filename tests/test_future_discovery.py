@@ -72,6 +72,29 @@ def test_cash_generation_beats_higher_growth_with_losses():
     assert select_future_companies(pd.DataFrame(rows)).iloc[0]["Ticker"] == "CASH"
 
 
+def test_future_business_precedes_cyclical_mines_and_established_mega_caps():
+    rows = [case("NEW", **{"Bransch": "Semiconductors", "Valuta": "USD", "_Raw marketCap": 5e9}),
+            case("MINE", **{"Bransch": "Gold", "Omsättningstillväxt": 3}),
+            case("GIANT", **{"Bransch": "Semiconductors", "Valuta": "USD", "_Raw marketCap": 2e12, "Omsättningstillväxt": 2})]
+    ranked = select_future_companies(pd.DataFrame(rows))
+    assert ranked.iloc[0].Ticker == "NEW"
+    assert "Cykliskt" in ranked.loc[ranked.Ticker.eq("MINE"), "Framtid kategori"].iloc[0]
+    assert "megabolag" in ranked.loc[ranked.Ticker.eq("GIANT"), "Framtid kategori"].iloc[0]
+
+
+def test_local_currency_market_cap_is_not_mistaken_for_dollars():
+    row = case("LOCAL", **{"Bransch": "Software - Application", "Valuta": "SEK", "_Raw marketCap": 120e9})
+    assert row["_future_fit"] == 2
+
+
+def test_industry_context_is_conditional_and_source_description_is_bounded():
+    row = case("NEW", **{"Bransch": "Software - Application", "Verksamhetsbeskrivning": "X" * 6000})
+    assert "kan" in row["Framtid möjlighet"]
+    assert "AI kan" in row["Framtid konkurrens"]
+    assert "gransk" not in row["Framtid verksamhet"]
+    assert len(row["Framtid källbeskrivning"]) == 1800
+
+
 def test_ranking_is_deterministic_deduplicated_and_has_no_second_score():
     rows = [case(f"T{i}") for i in range(8)] + [case(" t0 ")]
     selected = select_future_companies(pd.DataFrame(rows[::-1]))

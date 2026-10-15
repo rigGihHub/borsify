@@ -62,6 +62,62 @@ REPORTS = {
         url="https://www.sec.gov/Archives/edgar/data/1069183/000162828026053363/axon-20260805xex991.htm"),
 }
 
+# Exposure identifies what to research; these conditional scenarios do not
+# verify market-share gains, a moat or an automatic buy decision.
+INDUSTRY_CASES = [
+    (("semiconductor", "electronic components", "communication equipment"), "Halvledare och datainfrastruktur",
+     "utvecklar kretsar eller elektronik för databehandling och kommunikation",
+     "Mer databehandling och snabbare kommunikation kan öka efterfrågan. Följ faktisk produktförsäljning och kundernas investeringar.",
+     "Konkurrerande arkitekturer, kundernas egna kretsar och tekniska generationsskiften kan pressa marginalerna.",
+     "Följ produktmix, kundkoncentration, bruttomarginal och om tillväxten beror på volym eller priser."),
+    (("software", "information technology services", "internet content"), "Programvara och digitala tjänster",
+     "säljer programvara eller digitala tjänster",
+     "Digitalisering och automatisering kan ge fler kunder eller högre användning. Följ återkommande intäkter och kundnytta som kunder faktiskt betalar för.",
+     "AI kan både skapa nya tjänster och göra befintliga funktioner billigare att kopiera. Kundbehållning och försäljningskostnad avgör om tillväxten håller.",
+     "Följ kundbehållning, intäkt per kund, aktiebaserad ersättning och kassaflöde per aktie."),
+    (("medical devices", "medical instruments", "diagnostics", "biotechnology"), "Medicinsk teknik och behandling",
+     "utvecklar medicinsk teknik, diagnostik eller behandlingar",
+     "Nya behandlingar och bättre diagnostik kan möta medicinska behov, om studier, godkännanden och ersättningssystem stödjer användningen.",
+     "Kliniska misslyckanden, konkurrerande behandlingar och utebliven ersättning kan stoppa kommersialiseringen.",
+     "Följ kliniska resultat, regulatoriska beslut, faktisk försäljning och kassa fram till nästa milstolpe."),
+    (("aerospace", "defense"), "Flyg, rymd och säkerhet",
+     "levererar teknik eller system till flyg-, rymd- eller säkerhetsmarknader",
+     "Nya system och ökade säkerhetsbehov kan skapa efterfrågan. Order måste bli leveranser med fungerande marginaler.",
+     "Upphandlingsbeslut, fasta kontraktspriser, förseningar och tekniska fel kan göra en växande orderbok olönsam.",
+     "Följ orderingång, leveransförmåga, utvecklingskostnader och kassaflöde."),
+    (("solar", "electrical equipment", "specialty industrial machinery"), "Energi och industriell teknik",
+     "levererar teknik för energisystem eller industriella processer",
+     "Elektrifiering, energieffektivisering och automatisering kan driva investeringar, om kundernas projekt får ekonomi och finansiering.",
+     "Överkapacitet, prispress, ändrade stödregler och uppskjutna kundprojekt kan ge tillväxt utan lönsamhet.",
+     "Följ orderkvalitet, kapacitetsutnyttjande, serviceintäkter och avkastning på investerat kapital."),
+]
+
+
+def discovery_context(row, report):
+    """Describe exposure and maturity before comparing financial growth."""
+    industry = str(row.get("Bransch") or "").lower()
+    name = str(row.get("Namn") or row.get("Ticker") or "Bolaget")
+    matched = next((case for case in INDUSTRY_CASES if any(key in industry for key in case[0])), None)
+    cyclical = any(key in industry for key in ("gold", "silver", "precious metal", "oil & gas", "coal", "steel", "marine shipping", "copper", "aluminum"))
+    cap = _number(row.get("_Raw marketCap"))
+    # Compare only verified USD quotes. A local-currency cap must not be treated
+    # as dollars; unknown size is disclosed instead of assumed small.
+    established = str(row.get("Valuta") or "").upper() == "USD" and cap is not None and cap >= 100e9
+    fit = 2 if report or matched else 1
+    category = "Framtidsinriktad verksamhet" if fit == 2 else "Tillväxtuppslag · verksamhetsgranskning återstår"
+    if cyclical:
+        fit, category = 0, "Cykliskt bolag · tillväxten kan bero på råvarupriser"
+    if established:
+        fit, category = 0, "Etablerat megabolag · lägre prioritet i upptäcktslistan"
+    if matched:
+        _, theme, business, opportunity, competition, milestone = matched
+        return dict(fit=fit, category=category, theme=theme, business=f"{name} {business}. Branschklassning enligt bolagsdatakällan; produktbeskrivningen kan läsas nedan.", opportunity=opportunity, competition=competition, milestone=milestone)
+    return dict(fit=fit, category=category, theme=row.get("Bransch") or "Verksamhet behöver granskas",
+                business=f"{name}: bolagets verksamhet behöver granskas i källbeskrivningen nedan.",
+                opportunity="Tillväxtsökningen visar ett uppslag. Verifiera vilka produkter och kundbehov som kan driva fortsatt tillväxt; hög historisk tillväxt visar inte framtida efterfrågan.",
+                competition="Konkurrenter, prissättningsmakt och kundbehållning är ännu inte granskade. Ingen verifierad vallgrav tillskrivs bolaget.",
+                milestone="Kontrollera nästa rapports segmenttillväxt, kundutveckling och kassaflöde.")
+
 
 def _number(value):
     try:
@@ -145,6 +201,7 @@ def assess_future_candidate(row, now=None):
     ticker = str(row.get("Ticker") or "").strip().upper()
     out["Ticker"] = ticker
     report = REPORTS.get(ticker, {})
+    context = discovery_context(row, report)
     report_age = _age(report.get("date"), now)
     report_fresh = report_age is not None and 0 <= report_age <= 120
     live_age = _age(row.get("Fundamental hämtad"), now)
@@ -183,11 +240,13 @@ def assess_future_candidate(row, now=None):
     source = "Yahoo bolagsdata" if live_growth is not None else f"Bolagets {report.get('period', '')}, publicerad {report.get('date', '')}" if growth is not None else "Saknas"
     out.update({
         "Namn": report.get("name") or row.get("Namn") or ticker,
-        "Framtid tema": report.get("theme") or row.get("Bransch") or "Verksamhet behöver granskas",
-        "Framtid verksamhet": report.get("business") or str(row.get("Verksamhetsbeskrivning") or "Verksamhetsbeskrivning saknas; läs bolagets rapport innan caset bedöms."),
-        "Framtid möjlighet": report.get("opportunity") or "Tillväxtsökningen visar ett uppslag. Verifiera vilka produkter och kundbehov som kan driva fortsatt tillväxt; hög historisk tillväxt visar inte framtida efterfrågan.",
-        "Framtid konkurrens": report.get("competition") or "Konkurrenter, prissättningsmakt och kundbehållning är ännu inte granskade. Ingen verifierad vallgrav tillskrivs bolaget.",
-        "Framtid milstolpe": report.get("milestone") or "Kontrollera nästa rapports segmenttillväxt, kundutveckling och kassaflöde.",
+        "Framtid kategori": context["category"], "_future_fit": context["fit"],
+        "Framtid tema": report.get("theme") or context["theme"],
+        "Framtid verksamhet": report.get("business") or context["business"],
+        "Framtid källbeskrivning": str(row.get("Verksamhetsbeskrivning") or "")[:1800],
+        "Framtid möjlighet": report.get("opportunity") or context["opportunity"],
+        "Framtid konkurrens": report.get("competition") or context["competition"],
+        "Framtid milstolpe": report.get("milestone") or context["milestone"],
         "Framtid risk": report.get("risk") or "Tillväxten kan vara tillfällig, förvärvsdriven eller redan inprisad. Finansiering och konkurrens måste granskas.",
         "Framtid rapportfakta": report.get("fact", "Bolagsspecifik rapportgranskning återstår."),
         "Framtid rapportdatum": report.get("date", ""), "Framtid rapportperiod": report.get("period", ""),
@@ -210,5 +269,5 @@ def select_future_companies(frame, limit=5):
     out = frame.copy()
     out["Ticker"] = out["Ticker"].astype(str).str.strip().str.upper()
     out = out[out["Ticker"].ne("") & out["Ticker"].ne("NAN")]
-    out = out.sort_values(["_future_growth_confirmed", "_future_economics", "_future_risks", "_future_growth", "Ticker"], ascending=[False, False, True, False, True], kind="stable")
+    out = out.sort_values(["_future_fit", "_future_growth_confirmed", "_future_economics", "_future_risks", "_future_growth", "Ticker"], ascending=[False, False, False, True, False, True], kind="stable")
     return out.drop_duplicates("Ticker").head(max(0, int(limit))).reset_index(drop=True)

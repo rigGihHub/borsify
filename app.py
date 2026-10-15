@@ -21,7 +21,7 @@ from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
 import importlib
 import model_bootstrap as _model_bootstrap
-if getattr(_model_bootstrap, "RELEASE", None) != "4.44.1-future-discovery":
+if getattr(_model_bootstrap, "RELEASE", None) != "4.44.2-future-discovery":
     _model_bootstrap = importlib.reload(_model_bootstrap)
 _model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
@@ -4778,7 +4778,7 @@ def render_overview(
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_future_discovery(release="4.44.1"):
+def fetch_future_discovery(release="4.44.2"):
     return collect_future_pool(fetch_fundamentals)
 
 
@@ -4799,7 +4799,7 @@ def render_future_discovery():
         with st.expander("Visa sökningens källstatus"):
             for error in health["errors"]:
                 st.write(error)
-    st.caption("Rangordning: bekräftad positiv omsättningstillväxt, därefter lönsamhet och kassaflöde, färre dataluckor/riskhinder och tillväxttakt (begränsad till 100 % i jämförelsen). Detta är idéurval, inte ett nytt Borsify-betyg eller ett godkänt köpläge. Bolagens egna uppgifter verifierar ingen vallgrav.")
+    st.caption("Rangordning: först verksamhet inom framtidsinriktade områden, sedan bekräftad tillväxt, lönsamhet och kassaflöde, färre dataluckor/riskhinder och tillväxttakt (begränsad till 100 % i jämförelsen). Råvarucykliska bolag och USD-noterade megabolag med verifierat börsvärde från 100 miljarder USD prioriteras lägre. Branschkopplingen är en analysinriktning, inte bevis på framtida framgång. Detta är idéurval, inte ett nytt Borsify-betyg eller ett godkänt köpläge.")
     if ranked.empty:
         st.info("Inga identifierbara bolag finns i det tillgängliga underlaget. Försök uppdatera sökningen.")
         return
@@ -4810,7 +4810,11 @@ def render_future_discovery():
         with st.container(border=True):
             st.markdown(f"### {rank}. {row['Namn']} · {ticker}")
             st.caption(f"{row['Framtid tema']} · {row['Framtid köpstatus']}")
+            st.caption(row["Framtid kategori"])
             st.write(row["Framtid verksamhet"])
+            if row["Framtid källbeskrivning"]:
+                with st.expander("Bolagets verksamhetsbeskrivning från datakällan"):
+                    st.write(row["Framtid källbeskrivning"])
             st.markdown(f"**Varför verksamheten kan växa:** {row['Framtid möjlighet']}")
             st.markdown(f"**Konkurrens och bransch:** {row['Framtid konkurrens']}")
             st.markdown(f"**Nästa sak att följa:** {row['Framtid milstolpe']}")
@@ -4822,10 +4826,18 @@ def render_future_discovery():
                 st.write(f"Rapportobservation · {row['Framtid rapportperiod']}: {row['Framtid rapportfakta']}")
                 st.markdown(f"[Bolagets rapport, publicerad {row['Framtid rapportdatum']}]({row['Framtid rapportkälla']})")
             st.caption(f"Underlag: {row['Framtid underlag']} · Upptäckt via: {row['Upptäckt via']}")
+            _economic_values = []
+            for _field, _label, _percent in [("P/E", "P/E", False), ("Vinstmarginal", "Vinstmarginal", True), ("FCF-yield", "Kassaflöde/börsvärde", True)]:
+                _value = pd.to_numeric(row.get(_field), errors="coerce")
+                _text = "saknas" if pd.isna(_value) else (f"{_value:.1%}" if _percent else f"{_value:.1f}")
+                _economic_values.append(f"{_label}: {_text}")
+            st.caption("Tillgängliga bolagsmått · " + " · ".join(_economic_values))
             if str(row.get("Fundamental hämtad") or ""):
                 st.caption(f"Bolagsdata hämtade: {row['Fundamental hämtad']} · {row.get('Fundamental källa', 'källa saknas')}. Hämtningstid är inte rapportdatum.")
             if row["Framtid hinder"]:
                 st.warning("Att granska: " + row["Framtid hinder"])
+            if row.get("Fundamental käll-URL"):
+                st.markdown(f"[Källa för bolagsmåtten: {row.get('Fundamental källa', 'bolagsdata')}]({row['Fundamental käll-URL']})")
             st.markdown(f"[Bolagsdata och rapportlänkar hos Yahoo Finance](https://finance.yahoo.com/quote/{quote(ticker, safe='')}/)")
     st.caption("Ett spännande bolag kan vara en dyr aktie. Dagens pris, finansieringsutrymme och värdering måste prövas före köp. Listan innebär ingen garanti för avkastning eller möjlighet att lägga order hos en viss mäklare.")
 
