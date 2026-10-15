@@ -94,7 +94,7 @@ def screen_growth(regions):
     ])
     # yfinance shares its data session across Tickers and screen(). Do not replace
     # it with a temporary/closed session and break the main app's quote requests.
-    response = yf.screen(query, size=24, sortField="quarterlyrevenuegrowth.quarterly", sortAsc=False)
+    response = yf.screen(query, size=24, sortField="eodvolume", sortAsc=False)
     return (response or {}).get("quotes", [])
 
 
@@ -118,7 +118,9 @@ def collect_future_pool(fetch_fundamentals, screen=screen_growth, now=None):
                 hits += 1
                 candidates.setdefault(symbol, {"Ticker": symbol, "Namn": quote.get("shortName") or quote.get("longName") or symbol, "Upptäckt via": f"Yahoo tillväxtsökning · {label}"})
         except Exception as exc:
-            errors.append(f"{label}: tillväxtsökningen kunde inte hämtas ({type(exc).__name__}).")
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            detail = f"HTTP {int(status)}" if isinstance(status, int) else type(exc).__name__
+            errors.append(f"{label}: tillväxtsökningen kunde inte hämtas ({detail}).")
     rows = []
     with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {executor.submit(fetch_fundamentals, ticker): ticker for ticker in candidates}

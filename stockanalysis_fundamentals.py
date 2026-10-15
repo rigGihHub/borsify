@@ -16,6 +16,9 @@ _REQUESTS = Semaphore(2)
 
 
 def listing(symbol):
+    if re.fullmatch(r'[A-Z]{1,5}', str(symbol).upper()):
+        ticker = str(symbol).upper()
+        return 'us', ticker, 'USD', f'https://stockanalysis.com/stocks/{ticker.lower()}/statistics/'
     ticker, _, suffix = str(symbol).upper().rpartition('.')
     if suffix not in _EXCHANGES or not re.fullmatch(r'[A-Z0-9]+(?:-[A-Z0-9]+)*', ticker):
         return None
@@ -43,11 +46,14 @@ def parse_statistics(html, symbol, *, now=None):
     exchange, ticker, currency, url = identity
     soup = BeautifulSoup(html, 'html.parser')
     title = soup.title.get_text(' ', strip=True) if soup.title else ''
-    marker = f'({exchange.upper()}:{ticker})'
+    marker = f'({ticker})' if exchange == 'us' else f'({exchange.upper()}:{ticker})'
     if marker not in title:
         raise ValueError('Listing identity mismatch')
     text = soup.get_text(' ', strip=True)
-    if not re.search(r'Currency is\s+' + currency + r'\b', text):
+    currency_verified = bool(re.search(r'Currency is\s+' + currency + r'\b', text))
+    if exchange == 'us':
+        currency_verified = bool(re.search(r'(?:NASDAQ|NYSE|NYSEAMERICAN):\s*' + re.escape(ticker) + r'\s*·[^·]*·\s*USD\b', text))
+    if not currency_verified:
         raise ValueError('Listing currency missing or mismatched')
     dated = re.search(r'Last updated:\s*([A-Z][a-z]{2} \d{1,2}, \d{4})', text)
     if not dated:

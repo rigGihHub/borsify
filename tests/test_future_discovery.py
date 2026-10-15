@@ -131,6 +131,7 @@ def test_screen_queries_two_regions_and_has_no_earnings_gate(monkeypatch):
     assert "quarterlyrevenuegrowth" in str(query)
     assert "epsgrowth" not in str(query)
     assert options["size"] == 24
+    assert options["sortField"] == "eodvolume"  # documented Yahoo equity-screen ordering
     assert "session" not in options  # never replace yfinance's process-wide session
 
 

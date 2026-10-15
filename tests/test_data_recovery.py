@@ -27,6 +27,7 @@ def test_fallback_expires_and_failed_fetch_is_not_persisted(monkeypatch, tmp_pat
     class YF:
         Ticker = staticmethod(lambda s: T())
     monkeypatch.setattr(fa, '_yf', lambda: YF)
+    monkeypatch.setattr(fa, 'fetch_stockanalysis', lambda *args: ({}, {'errors': []}))
     data, health = fa.fetch_fundamentals('AAA', db, str)
     assert health['status'] == 'ERROR'
     assert np.isnan(data['P/E'])

@@ -14,6 +14,7 @@ def test_total_vendor_error_is_visible_and_not_cached(monkeypatch,tmp_path):
             def __init__(self,*a,**k): raise TimeoutError("x")
     monkeypatch.setattr(fa,"_yf",lambda:YF)
     monkeypatch.setattr(fa,"get_cached_fundamentals",lambda *a,**k:None)
+    monkeypatch.setattr(fa,"fetch_stockanalysis",lambda *a:({}, {"errors": []}))
     called=[]
     monkeypatch.setattr(fa,"put_cached_fundamentals",lambda *a,**k:called.append(1))
     payload,health=fa.fetch_fundamentals("AAA",tmp_path/"x.db",lambda x:x)

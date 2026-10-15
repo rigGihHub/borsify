@@ -59,6 +59,7 @@ def test_fundamental_timeout_surfaces_classified_error(monkeypatch,tmp_path):
             def __init__(self,*a,**k): raise TimeoutError("slow")
     monkeypatch.setattr(fa,"_yf",lambda:YF)
     monkeypatch.setattr(fa,"get_cached_fundamentals",lambda *a,**k:None)
+    monkeypatch.setattr(fa,"fetch_stockanalysis",lambda *a:({}, {"errors": []}))
     p,h=fa.fetch_fundamentals("AAA",tmp_path/"x.db",lambda x:x)
     assert h["error_type"]=="Timeout"
     assert h["retryable"] is True

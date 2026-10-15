@@ -6,6 +6,11 @@ from fundamental_cache import get_cached_fundamentals, put_cached_fundamentals
 from scan_snapshot_cache import fundamental_coverage, put_scan_snapshot, get_scan_snapshot
 
 
+@pytest.fixture(autouse=True)
+def no_external_fallback(monkeypatch):
+    monkeypatch.setattr(fa, 'fetch_stockanalysis', lambda *args: ({}, {'errors': []}))
+
+
 @pytest.mark.parametrize('info', [{}, {'shortName': 'A', 'currentPrice': 10}, {'marketCap': float('nan')}])
 def test_empty_financial_response_is_error_and_never_cached(monkeypatch, tmp_path, info):
     class T:

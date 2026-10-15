@@ -20,8 +20,20 @@ def test_exact_listing_mapping():
     assert listing('VOLV-B.ST')[:3] == ('sto','VOLV.B','SEK')
     assert listing('EQNR.OL')[:3] == ('osl','EQNR','NOK')
     assert listing('NOVO-B.CO')[:3] == ('cph','NOVO.B','DKK')
-    assert listing('AAA') is None
+    assert listing('ALAB') == ('us', 'ALAB', 'USD', 'https://stockanalysis.com/stocks/alab/statistics/')
     assert listing('../bad.ST') is None
+
+
+def test_us_statistics_require_exact_symbol_exchange_currency_and_fresh_date():
+    html = page(identity='ALAB', currency='USD').replace('Currency is USD', 'NASDAQ: ALAB · Real-Time Price · USD')
+    payload = parse_statistics(html, 'ALAB', now=NOW)
+    assert payload['Valuta'] == 'USD'
+    assert payload['Skuld/eget kapital'] == 147
+    assert payload['Fundamental käll-URL'] == 'https://stockanalysis.com/stocks/alab/statistics/'
+    assert math.isnan(payload['Omsättningstillväxt'])  # forecasts never become observations
+    for wrong in [html.replace('(ALAB)', '(AXON)'), html.replace('NASDAQ: ALAB', 'NASDAQ: AXON'), html.replace('· USD', '· CAD'), html.replace('Oct 6, 2026', 'Jan 6, 2026')]:
+        with pytest.raises(ValueError):
+            parse_statistics(wrong, 'ALAB', now=NOW)
 
 
 def test_units_and_growth_semantics():

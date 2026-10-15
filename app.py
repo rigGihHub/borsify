@@ -21,7 +21,7 @@ from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
 import importlib
 import model_bootstrap as _model_bootstrap
-if getattr(_model_bootstrap, "RELEASE", None) != "4.44.0-memory-review":
+if getattr(_model_bootstrap, "RELEASE", None) != "4.44.1-future-discovery":
     _model_bootstrap = importlib.reload(_model_bootstrap)
 _model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
@@ -4778,7 +4778,7 @@ def render_overview(
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_future_discovery():
+def fetch_future_discovery(release="4.44.1"):
     return collect_future_pool(fetch_fundamentals)
 
 
@@ -4787,7 +4787,7 @@ def render_future_discovery():
     st.write("Fem internationella bolag att undersöka för framtida tillväxt. Här finns ingen gräns på 500 miljoner SEK och inget krav på att bolaget redan gör vinst.")
     st.caption("Eget urval: Nordamerika och Europa via en ny tillväxtsökning, kompletterat med sex rapportgranskade bevakningsbolag. Dina lands-, storleks- och prisfilter för aktieanalysen gäller inte här. Urvalet täcker inte hela världens börser.")
     with st.expander("Hur hittar Borsify kandidaterna?"):
-        st.write("Den externa sökningen hämtar upp till 24 träffar per region med minst 15 % kvartalsvis omsättningstillväxt mot föregående år och börsvärde på minst 100 miljoner USD enligt Yahoo. Resultaten sorteras efter tillväxttakt, dubbletter tas bort och sex rapportgranskade bevakningsbolag läggs till. Upp till 54 unika kandidater jämförs. Förlustbolag får vara med. Den här vyn använder tillväxtsökning och daterade bolagsprofiler; den gör ingen fri AI-webbresearch.")
+        st.write("Den externa sökningen hämtar upp till 24 träffar per region med minst 15 % kvartalsvis omsättningstillväxt mot föregående år och börsvärde på minst 100 miljoner USD enligt Yahoo. Sökningen prioriterar handelsvolym bland träffarna; därefter jämför Borsify tillväxt och ekonomi. Dubbletter tas bort och sex rapportgranskade bevakningsbolag läggs till. Upp till 54 unika kandidater jämförs. Förlustbolag får vara med. Den här vyn använder tillväxtsökning och daterade bolagsprofiler; den gör ingen fri AI-webbresearch.")
     if st.button("↻ Uppdatera framtidsbolag", key="refresh_future_discovery"):
         fetch_future_discovery.clear()
     with st.spinner("Söker tillväxtbolag i Nordamerika och Europa och hämtar bolagsunderlag …"):
