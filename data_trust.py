@@ -16,7 +16,7 @@ def _num(v: Any) -> float:
         return np.nan
 
 
-def _age_days(value: Any) -> float:
+def _age_days(value: Any, *, precise: bool = False) -> float:
     if value is None or str(value).strip() in {"","—","nan","None"}:
         return np.nan
     try:
@@ -24,7 +24,10 @@ def _age_days(value: Any) -> float:
         if ts.tzinfo is not None:
             ts=ts.tz_convert("UTC").tz_localize(None)
         now=pd.Timestamp(datetime.now(timezone.utc)).tz_localize(None)
-        return float((now-ts).total_seconds()/86400)
+        if ts > now:
+            return -1.0
+        # Stable calendar age keeps unchanged price snapshots cacheable on reruns.
+        return float((now-ts).total_seconds()/86400) if precise else float((now.normalize()-ts.normalize()).days)
     except Exception:
         return np.nan
 
@@ -73,7 +76,7 @@ def assess_data_trust(row: pd.Series | dict[str,Any]) -> dict[str,Any]:
         warnings.append("datatäckningen kan inte mätas")
 
     if fundamental_at and fundamental_at not in {"—","None","nan"}:
-        fundamental_age = _age_days(fundamental_at)
+        fundamental_age = _age_days(fundamental_at, precise=True)
         if not np.isfinite(fundamental_age) or fundamental_age < 0:
             blockers.append("hämtningstid för bolagsdata är ogiltig eller ligger i framtiden")
         elif fundamental_age > 3:

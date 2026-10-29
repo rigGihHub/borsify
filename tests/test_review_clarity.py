@@ -59,3 +59,17 @@ def test_future_and_stale_observations_stop_data_trust_and_purchase():
         row.update(assess_data_trust(row))
         assert row['Data Trust status'] == 'STOPP'
         assert any('datakontrollen' in reason for reason in purchase_blockers(row))
+
+
+def test_unchanged_observations_keep_cache_inputs_stable_across_reruns(monkeypatch):
+    import data_trust
+    class Clock:
+        current = datetime(2026, 10, 29, 12, tzinfo=timezone.utc)
+        @classmethod
+        def now(cls, tz):
+            return cls.current
+    monkeypatch.setattr(data_trust, 'datetime', Clock)
+    row = {'Prisdatum': '2026-10-28', 'Fundamental hämtad': '2026-10-29T10:00:00Z'}
+    first = assess_data_trust(row)
+    Clock.current += timedelta(seconds=10)
+    assert assess_data_trust(row) == first
