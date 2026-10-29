@@ -21,7 +21,7 @@ from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
 import importlib
 import model_bootstrap as _model_bootstrap
-if getattr(_model_bootstrap, "RELEASE", None) != "4.44.4-review":
+if getattr(_model_bootstrap, "RELEASE", None) != "4.44.5-review":
     _model_bootstrap = importlib.reload(_model_bootstrap)
 _model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
@@ -4779,7 +4779,7 @@ def render_overview(
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_future_discovery(release="4.44.3"):
+def fetch_future_discovery(release="4.44.5"):
     return collect_future_pool(fetch_fundamentals)
 
 
@@ -4806,7 +4806,9 @@ def render_future_discovery():
         return
     if len(ranked) < 5:
         st.info(f"{len(ranked)} identifierbara kandidater finns tillgängliga; fler bolag behöver hämtas för en full femlista.")
-    st.dataframe(ranked.reindex(columns=["Namn", "Ticker", "Framtid tillväxt", "P/E", "Framtid underlag", "Framtid köpstatus"]).rename(columns={"Framtid tillväxt": "Omsättningstillväxt (andel)", "Framtid underlag": "Underlag", "Framtid köpstatus": "Beslut"}), hide_index=True, use_container_width=True)
+    _comparison = ranked.reindex(columns=["Namn", "Ticker", "Framtid tillväxt", "P/E", "Framtid underlag", "Framtid köpstatus"]).copy()
+    _comparison["Framtid tillväxt"] = pd.to_numeric(_comparison["Framtid tillväxt"], errors="coerce").map(lambda value: "—" if pd.isna(value) else f"{value:.1%}")
+    st.dataframe(_comparison.rename(columns={"Framtid tillväxt": "Omsättningstillväxt", "Framtid underlag": "Underlag", "Framtid köpstatus": "Beslut"}), hide_index=True, use_container_width=True)
     with st.expander("Vad kräver priset av framtida vinst?"):
         st.caption("Räkneexempel, inte prognos eller köpråd. Jämför dagens P/E med ett antaget P/E om fem år, vid 10 % årlig kursuppgång. Utdelningar ingår inte; vinsten måste räknas per aktie efter eventuell utspädning. Normaliserad vinst behövs för cykliska bolag.")
         _exit_pe = st.slider("Antaget P/E om fem år", min_value=10, max_value=50, value=25, step=5, key="future_terminal_pe")
@@ -4846,7 +4848,7 @@ def render_future_discovery():
                 st.caption(f"Bolagsdata hämtade: {row['Fundamental hämtad']} · {row.get('Fundamental källa', 'källa saknas')}. Hämtningstid är inte rapportdatum.")
             if row["Framtid hinder"]:
                 st.warning("Att granska: " + row["Framtid hinder"])
-            if row.get("Fundamental käll-URL"):
+            if isinstance(row.get("Fundamental käll-URL"), str) and row["Fundamental käll-URL"].startswith("https://"):
                 st.markdown(f"[Källa för bolagsmåtten: {row.get('Fundamental källa', 'bolagsdata')}]({row['Fundamental käll-URL']})")
             st.markdown(f"[Bolagsdata och rapportlänkar hos Yahoo Finance](https://finance.yahoo.com/quote/{quote(ticker, safe='')}/)")
     st.caption("Ett spännande bolag kan vara en dyr aktie. Dagens pris, finansieringsutrymme och värdering måste prövas före köp. Listan innebär ingen garanti för avkastning eller möjlighet att lägga order hos en viss mäklare.")

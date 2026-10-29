@@ -73,3 +73,13 @@ def test_unchanged_observations_keep_cache_inputs_stable_across_reruns(monkeypat
     first = assess_data_trust(row)
     Clock.current += timedelta(seconds=10)
     assert assess_data_trust(row) == first
+
+
+def test_freshly_fetched_data_is_evaluated_after_acquisition_starts():
+    from future_discovery import collect_future_pool
+    def fetch(ticker):
+        return {'P/E': 20, 'Omsättningstillväxt': .3,
+                'Fundamental hämtad': datetime.now(timezone.utc).isoformat()}
+    frame, _ = collect_future_pool(fetch, lambda regions: [])
+    assert frame['P/E'].eq(20).all()
+    assert frame['Framtid tillväxt'].eq(.3).all()

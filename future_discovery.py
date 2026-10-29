@@ -156,6 +156,7 @@ def screen_growth(regions):
 
 def collect_future_pool(fetch_fundamentals, screen=screen_growth, now=None):
     """Bounded acquisition. Failures retain dated research, never invented metrics."""
+    reference_now = now
     now = now or datetime.now(timezone.utc)
     candidates = {ticker: {"Ticker": ticker, "Namn": p["name"], "Upptäckt via": "Rapportbaserat bevakningsurval"} for ticker, p in REPORTS.items()}
     errors = []
@@ -191,7 +192,9 @@ def collect_future_pool(fetch_fundamentals, screen=screen_growth, now=None):
             except Exception as exc:
                 errors.append(f"{ticker}: bolagsdata saknas ({type(exc).__name__}).")
             row["Ticker"] = ticker
-            rows.append(assess_future_candidate(row, now))
+            # Fresh responses are timestamped after acquisition starts. Evaluate
+            # them at completion, not against the earlier scan-start clock.
+            rows.append(assess_future_candidate(row, reference_now or datetime.now(timezone.utc)))
     return pd.DataFrame(rows), {"candidates": len(candidates), "screen_hits": hits, "errors": errors, "fetched_at": now.isoformat()}
 
 
