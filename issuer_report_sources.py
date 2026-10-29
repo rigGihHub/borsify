@@ -3,6 +3,16 @@ import re
 from urllib.parse import urlsplit
 
 SOURCES = {
+    "atlas copco": {"hosts": {"www.atlascopcogroup.com", "atlascopcogroup.com"}, "index": "https://www.atlascopcogroup.com/en/investors/reports-and-presentations", "evidence": "https://www.atlascopcogroup.com/en/investors"},
+    "grab holdings limited": {"hosts": {"investors.grab.com", "www.grab.com"}, "index": "https://investors.grab.com/financial-information/quarterly-results/", "evidence": "https://investors.grab.com/overview/"},
+    "pharming group": {"hosts": {"www.pharming.com", "pharming.com"}, "index": "https://www.pharming.com/investors/investor-materials/financial-documents-reports", "evidence": "https://www.pharming.com/investors"},
+    "rolls royce holdings": {"hosts": {"www.rolls-royce.com", "rolls-royce.com"}, "index": "https://www.rolls-royce.com/investors/results-reports-and-presentations/financial-results.aspx", "evidence": "https://www.rolls-royce.com/investors"},
+    "astera labs": {"hosts": {"ir.asteralabs.com", "www.asteralabs.com"}, "index": "https://ir.asteralabs.com/", "evidence": "https://ir.asteralabs.com/"},
+    "credo technology": {"hosts": {"investors.credosemi.com"}, "index": "https://investors.credosemi.com/news-events/news/default.aspx", "evidence": "https://investors.credosemi.com/"},
+    "rocket lab": {"hosts": {"investors.rocketlabcorp.com"}, "index": "https://investors.rocketlabcorp.com/financial-information/quarterly-results", "evidence": "https://investors.rocketlabcorp.com/"},
+    "sentinelone": {"hosts": {"investors.sentinelone.com"}, "index": "https://investors.sentinelone.com/financials/quarterly-results/default.aspx", "evidence": "https://investors.sentinelone.com/"},
+    "samsara": {"hosts": {"investors.samsara.com"}, "index": "https://investors.samsara.com/overview/", "evidence": "https://investors.samsara.com/"},
+    "axon enterprise": {"hosts": {"investor.axon.com"}, "index": "https://investor.axon.com/quarterly-results", "evidence": "https://investor.axon.com/"},
     "proact it group": {"hosts": {"proact.eu", "www.proact.eu"}, "index": "https://www.proact.eu/financial-reports/", "evidence": "https://www.proact.eu/investor-relations/"},
     "bavarian nordic": {"hosts": {"bavarian-nordic.com", "www.bavarian-nordic.com"}, "index": "https://www.bavarian-nordic.com/investor/financials.aspx", "evidence": "https://www.bavarian-nordic.com/investor/investor.aspx"},
     "hafnia limited": {"hosts": {"investor.hafnia.com"}, "index": "https://investor.hafnia.com/ir-news/", "evidence": "https://investor.hafnia.com/"},

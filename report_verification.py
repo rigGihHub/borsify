@@ -23,7 +23,8 @@ FINANCIAL_TOPICS = {
     "substansvärde": r"\b(?:NAV|net asset value|substansvärde)\b",
 }
 REPORT_PERIOD = re.compile(
-    r"\b(?:Q[1-4]\s*[-/]?\s*20\d{2}|20\d{2}\s*[-/]?\s*Q[1-4]|"
+    r"\b(?:Q[1-4]\s*[-/]?\s*(?:FY\s*)?20\d{2}|20\d{2}\s*[-/]?\s*Q[1-4]|"
+    r"(?:first|second|third|fourth)[ -]quarter(?:\s+of)?(?:\s+fiscal)?(?:\s+year)?\s+20\d{2}|"
     r"(?:annual|quarterly|interim|half[- ]year(?:ly)?|year[- ]end) report\s*(?:for\s*)?20\d{2}|"
     r"(?:årsrapport|årsredovisning|delårsrapport|halvårsrapport|bokslutskommuniké|bokslutsrapport)\s*20\d{2}|"
     r"(?:1\s+)?januari\s*[-–]\s*(?:31\s+mars|30\s+juni|30\s+september|31\s+december)\s+20\d{2})\b",
@@ -93,11 +94,17 @@ def verify_report_text(candidate: dict[str, Any], country: str, text: str, compa
             "Rapport kontroll": "Rapportperiod och minst två ämnen med finansiella tal kunde inte verifieras i texten.",
         }
     title = str(candidate.get("title") or "")
-    title_quarter = re.search(r"\bQ([1-4])\b", title, re.IGNORECASE)
+    def quarter_number(value):
+        match = re.search(r"\bQ([1-4])\b", value, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+        match = re.search(r"\b(first|second|third|fourth)[ -]quarter\b", value, re.IGNORECASE)
+        return {"first": 1, "second": 2, "third": 3, "fourth": 4}.get(match.group(1).lower()) if match else None
+    title_quarter = quarter_number(title)
     title_year = re.search(r"\b20\d{2}\b", title)
     periods = [match.group(0) for match in REPORT_PERIOD.finditer(clean)]
     matching = [label for label in periods if (
-        (not title_quarter or f"q{title_quarter.group(1)}" in label.lower())
+        (not title_quarter or quarter_number(label) == title_quarter)
         and (not title_year or title_year.group(0) in label)
     )]
     if not matching:

@@ -21,7 +21,7 @@ from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
 import importlib
 import model_bootstrap as _model_bootstrap
-if getattr(_model_bootstrap, "RELEASE", None) != "4.44.5-review":
+if getattr(_model_bootstrap, "RELEASE", None) != "4.44.6-report-research":
     _model_bootstrap = importlib.reload(_model_bootstrap)
 _model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
@@ -4783,6 +4783,12 @@ def fetch_future_discovery(release="4.44.5"):
     return collect_future_pool(fetch_fundamentals)
 
 
+@st.cache_data(ttl=3600, max_entries=64, show_spinner=False)
+def fetch_discovery_research(ticker: str, checked_day: str):
+    from discovery_research import research_report
+    return research_report(ticker)
+
+
 def render_future_discovery():
     st.markdown("## 🚀 Framtidsbolag · Up and coming")
     st.write("Fem internationella bolag att undersöka för framtida tillväxt. Här finns ingen gräns på 500 miljoner SEK och inget krav på att bolaget redan gör vinst.")
@@ -4817,6 +4823,10 @@ def render_future_discovery():
             _required = earnings_hurdle(_candidate.get("P/E"), terminal_pe=_exit_pe)
             _message = "Kan inte beräknas med saknad eller negativ vinst." if _required is None else f"Vinsten per aktie behöver förändras med {_required:.1%} per år i detta scenario."
             st.write(f"{_candidate['Namn']}: {_message}")
+    _research_day = pd.Timestamp.now(tz="Europe/Stockholm").date().isoformat()
+    _research_store = st.session_state.setdefault("bq_discovery_research", {})
+    _read_count = sum(_research_store.get(f"{ticker}:{_research_day}", {}).get("status") == "Rapporttext kontrollerad" for ticker in ranked["Ticker"].astype(str))
+    st.caption(f"Originalrapportens text kontrollerad för {_read_count} av {len(ranked)} bolag i denna session idag. Branschresonemang och tidigare manuella profiler är separata underlag.")
     for rank, (_, row) in enumerate(ranked.iterrows(), start=1):
         ticker = str(row["Ticker"])
         with st.container(border=True):
@@ -4827,6 +4837,33 @@ def render_future_discovery():
             if row["Framtid källbeskrivning"]:
                 with st.expander("Bolagets verksamhetsbeskrivning från datakällan"):
                     st.write(row["Framtid källbeskrivning"])
+            with st.expander("Rapportgranskning · fakta och kvarvarande frågor"):
+                from discovery_research import ISSUERS
+                _research_key = f"{ticker}:{_research_day}"
+                if ticker not in ISSUERS:
+                    st.info("Bolaget saknar ännu en verifierad rapportkälla i Borsifys register.")
+                elif st.button("Hämta och granska rapport", key=f"research_report_{ticker}"):
+                    with st.spinner("Kontrollerar bolag, primärkälla och rapporttext …"):
+                        _research_store[_research_key] = fetch_discovery_research(ticker, _research_day)
+                    st.rerun()
+                _research = _research_store.get(_research_key)
+                if _research:
+                    st.write(_research["status"] + " · " + _research["message"])
+                    if _research.get("url"):
+                        st.markdown(f"[Kontrollerad rapportkälla]({_research['url']})")
+                        st.caption(f"Rapportperiod: {_research.get('period') or 'okänd'} · publicerad: {_research.get('published') or 'ej verifierat'} · kontroll: {_research.get('checked') or 'okänd'}")
+                        if not _research.get("publication_verified"):
+                            st.warning("Originalpubliceringens datum är inte oberoende avstämt. Textkontroll innebär inte att rapporten är den senaste.")
+                    for _excerpt in _research.get("excerpts", []):
+                        st.markdown(f"**{_excerpt['ämne']} · bolagets uppgift**")
+                        st.write(_excerpt["text"])
+                    if _research.get("status") == "Rapporttext kontrollerad" and not _research.get("excerpts"):
+                        st.info("Rapporttexten kontrollerades, men inga korta verksamhetsutdrag kunde visas. Läs källan för sammanhang.")
+                    if _research.get("limits"):
+                        st.caption(_research["limits"])
+                else:
+                    st.caption("Rapporttext har ännu inte kontrollerats för denna vy. Generella branschresonemang bevisar inte bolagets framtida tillväxt.")
+                st.write("Att pröva: Är tillväxten organisk eller förvärvad? Hur utvecklas kundbehov, marginaler och kassaflöde per aktie? Vilken konkret konkurrensfördel håller över tid?")
             st.markdown(f"**Varför verksamheten kan växa:** {row['Framtid möjlighet']}")
             st.markdown(f"**Konkurrens och bransch:** {row['Framtid konkurrens']}")
             st.markdown(f"**Nästa sak att följa:** {row['Framtid milstolpe']}")
