@@ -206,6 +206,11 @@ def assess_future_candidate(row, now=None):
     report_fresh = report_age is not None and 0 <= report_age <= 120
     live_age = _age(row.get("Fundamental hämtad"), now)
     live_fresh = live_age is not None and 0 <= live_age <= 3 and row.get("Fundamental source status") not in {"ERROR", "CIRCUIT_OPEN"}
+    live_fresh = live_fresh and any(_number(row.get(field)) is not None for field in ("Omsättningstillväxt", "Vinstmarginal", "FCF-yield", "P/E", "Skuld/eget kapital"))
+    if not live_fresh:
+        # Cards must not display rejected old metrics as if they were current.
+        for field in ("P/E", "Forward P/E", "EV/EBITDA", "Vinstmarginal", "FCF-yield", "Skuld/eget kapital", "Omsättningstillväxt", "Vinsttillväxt"):
+            out[field] = None
     live_growth = _number(row.get("Omsättningstillväxt")) if live_fresh else None
     # A newer declining business must not be rescued by an older growth report.
     growth = live_growth if live_growth is not None else report.get("growth") if report_fresh else None
@@ -237,7 +242,7 @@ def assess_future_candidate(row, now=None):
         flags.append("Hög vinstmultipel: mycket tillväxt kan redan vara inprisad")
     if report and not report_fresh:
         flags.append("Rapportunderlaget är äldre än 120 dagar eller har ogiltigt datum")
-    source = "Yahoo bolagsdata" if live_growth is not None else f"Bolagets {report.get('period', '')}, publicerad {report.get('date', '')}" if growth is not None else "Saknas"
+    source = str(row.get("Fundamental källa") or "Bolagsdatakällan") if live_growth is not None else f"Bolagets {report.get('period', '')}, publicerad {report.get('date', '')}" if growth is not None else "Saknas"
     out.update({
         "Namn": report.get("name") or row.get("Namn") or ticker,
         "Framtid kategori": context["category"], "_future_fit": context["fit"],
@@ -269,5 +274,5 @@ def select_future_companies(frame, limit=5):
     out = frame.copy()
     out["Ticker"] = out["Ticker"].astype(str).str.strip().str.upper()
     out = out[out["Ticker"].ne("") & out["Ticker"].ne("NAN")]
-    out = out.sort_values(["_future_fit", "_future_growth_confirmed", "_future_economics", "_future_risks", "_future_growth", "Ticker"], ascending=[False, False, False, True, False, True], kind="stable")
+    out = out.sort_values(["_future_growth_confirmed", "_future_fit", "_future_economics", "_future_risks", "_future_growth", "Ticker"], ascending=[False, False, False, True, False, True], kind="stable")
     return out.drop_duplicates("Ticker").head(max(0, int(limit))).reset_index(drop=True)

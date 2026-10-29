@@ -21,7 +21,7 @@ from acquisition_bootstrap import ensure_current_acquisition_modules
 ensure_current_acquisition_modules()
 import importlib
 import model_bootstrap as _model_bootstrap
-if getattr(_model_bootstrap, "RELEASE", None) != "4.44.2-future-discovery":
+if getattr(_model_bootstrap, "RELEASE", None) != "4.44.3-review":
     _model_bootstrap = importlib.reload(_model_bootstrap)
 _model_bootstrap.ensure_current_model_modules()
 from fundamental_acquisition import fetch_fundamentals as _fetch_fundamentals_source
@@ -80,6 +80,7 @@ except ImportError:
         return None
 from up_and_coming import select_up_and_coming
 from future_discovery import collect_future_pool, select_future_companies
+from review_clarity import observation_status
 from scan_pipeline import assess_price_history
 from staged_scan_validation import validate_candidate_pool, activation_readiness
 from prefilter_history import save_prefilter_validation, get_prefilter_validation_history
@@ -4778,7 +4779,7 @@ def render_overview(
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_future_discovery(release="4.44.2"):
+def fetch_future_discovery(release="4.44.3"):
     return collect_future_pool(fetch_fundamentals)
 
 
@@ -4799,12 +4800,21 @@ def render_future_discovery():
         with st.expander("Visa sökningens källstatus"):
             for error in health["errors"]:
                 st.write(error)
-    st.caption("Rangordning: först verksamhet inom framtidsinriktade områden, sedan bekräftad tillväxt, lönsamhet och kassaflöde, färre dataluckor/riskhinder och tillväxttakt (begränsad till 100 % i jämförelsen). Råvarucykliska bolag och USD-noterade megabolag med verifierat börsvärde från 100 miljarder USD prioriteras lägre. Branschkopplingen är en analysinriktning, inte bevis på framtida framgång. Detta är idéurval, inte ett nytt Borsify-betyg eller ett godkänt köpläge.")
+    st.caption("Rangordning: först bekräftad positiv tillväxt, sedan verksamhet inom framtidsinriktade områden, lönsamhet och kassaflöde, färre dataluckor/riskhinder och tillväxttakt (begränsad till 100 % i jämförelsen). Råvarucykliska bolag och USD-noterade megabolag med verifierat börsvärde från 100 miljarder USD prioriteras lägre. Branschkopplingen är en analysinriktning, inte bevis på framtida framgång. Detta är idéurval, inte ett nytt Borsify-betyg eller ett godkänt köpläge.")
     if ranked.empty:
         st.info("Inga identifierbara bolag finns i det tillgängliga underlaget. Försök uppdatera sökningen.")
         return
     if len(ranked) < 5:
         st.info(f"{len(ranked)} identifierbara kandidater finns tillgängliga; fler bolag behöver hämtas för en full femlista.")
+    st.dataframe(ranked.reindex(columns=["Namn", "Ticker", "Framtid tillväxt", "P/E", "Framtid underlag", "Framtid köpstatus"]).rename(columns={"Framtid tillväxt": "Omsättningstillväxt (andel)", "Framtid underlag": "Underlag", "Framtid köpstatus": "Beslut"}), hide_index=True, use_container_width=True)
+    with st.expander("Vad kräver priset av framtida vinst?"):
+        st.caption("Räkneexempel, inte prognos eller köpråd. Jämför dagens P/E med ett antaget P/E om fem år, vid 10 % årlig kursuppgång. Utdelningar ingår inte; vinsten måste räknas per aktie efter eventuell utspädning. Normaliserad vinst behövs för cykliska bolag.")
+        _exit_pe = st.slider("Antaget P/E om fem år", min_value=10, max_value=50, value=25, step=5, key="future_terminal_pe")
+        from review_clarity import earnings_hurdle
+        for _, _candidate in ranked.iterrows():
+            _required = earnings_hurdle(_candidate.get("P/E"), terminal_pe=_exit_pe)
+            _message = "Kan inte beräknas med saknad eller negativ vinst." if _required is None else f"Vinsten per aktie behöver förändras med {_required:.1%} per år i detta scenario."
+            st.write(f"{_candidate['Namn']}: {_message}")
     for rank, (_, row) in enumerate(ranked.iterrows(), start=1):
         ticker = str(row["Ticker"])
         with st.container(border=True):
@@ -7053,11 +7063,32 @@ def main() -> None:
     st.markdown(f"""<div class='bq-hero'><div><span class='bq-mark'>BQ</span><span class='bq-title'>{APP_NAME}</span></div><div class='bq-sub'>Hitta intressanta aktier — och förstå varför · <span class='bq-domain'>{APP_DOMAIN}</span></div></div>""", unsafe_allow_html=True)
 
     init_db()
-    _discover_future, _discover_micro = st.columns(2)
-    if _discover_future.button("🚀 Framtidsbolag", key="direct_future_discovery", use_container_width=True):
+    # Keep the core recommendation paths on the first screen, especially on
+    # mobile. The same session-state targets are used by the detailed view.
+    st.markdown("### Rekommendationer")
+    st.caption("Välj tidshorisont för att öppna Borsifys rekommendationer.")
+    _top_q1, _top_q2 = st.columns(2)
+    if _top_q1.button("⚡ Köp nu · sälj snart", use_container_width=True, key="top_quick_horizon_medium"):
+        st.session_state["bq_future_discovery_open"] = False
+        st.session_state["bq_horizon_focus"] = "medium"
+        st.session_state["main_page"] = "Fler aktier"
+        st.rerun()
+    if _top_q2.button("📈 Köp nu · behåll 1 år", use_container_width=True, key="top_quick_horizon_year"):
+        st.session_state["bq_future_discovery_open"] = False
+        st.session_state["bq_horizon_focus"] = "year"
+        st.session_state["main_page"] = "Fler aktier"
+        st.rerun()
+    _top_q3, _top_q4 = st.columns(2)
+    if _top_q3.button("♾️ Långsiktigt ägande", use_container_width=True, key="top_quick_horizon_lifetime"):
+        st.session_state["bq_future_discovery_open"] = False
+        st.session_state["bq_horizon_focus"] = "lifetime"
+        st.session_state["main_page"] = "Fler aktier"
+        st.rerun()
+    if _top_q4.button("🚀 Framtidsbolag", use_container_width=True, key="top_quick_up_and_coming"):
         st.session_state["bq_future_discovery_open"] = True
         st.rerun()
-    if _discover_micro.button("🔬 Mikrobolag", key="direct_micro_discovery", use_container_width=True):
+
+    if st.button("🔬 Mikrobolag", key="direct_micro_discovery", use_container_width=True):
         st.session_state["bq_future_discovery_open"] = False
         st.session_state["bq_horizon_focus"] = "upcoming"
         st.session_state["main_page"] = "Fler aktier"
@@ -7097,12 +7128,12 @@ def main() -> None:
             last_ts = pd.Timestamp(last_refresh)
             age_minutes = max(0.0, (pd.Timestamp.now(tz="UTC") - last_ts).total_seconds() / 60.0)
             if age_minutes <= 20:
-                refresh_status = "Färsk data"
+                refresh_status = "Uppdatering nyligen körd"
             elif age_minutes <= 120:
-                refresh_status = "Delvis färsk"
+                refresh_status = "Uppdatering tidigare körd"
             else:
-                refresh_status = "Gammal data"
-            refresh_detail = f"Senast manuellt uppdaterad {last_ts.tz_convert('Europe/Stockholm').strftime('%Y-%m-%d %H:%M')} · {age_minutes:.0f} min sedan."
+                refresh_status = "Uppdatering äldre än två timmar"
+            refresh_detail = f"Senast manuellt uppdaterad {last_ts.tz_convert('Europe/Stockholm').strftime('%Y-%m-%d %H:%M')} · {age_minutes:.0f} min sedan. Hämtningstid visar inte hur aktuella källuppgifterna är."
         except Exception:
             pass
 
@@ -7114,9 +7145,9 @@ def main() -> None:
         refresh = st.button("↻ Uppdatera data", type="primary", use_container_width=True, key="manual_refresh_top")
     with freshness_col:
         _refresh_feedback = st.empty()
-        if refresh_status == "Färsk data":
+        if refresh_status == "Uppdatering nyligen körd":
             _refresh_feedback.success(f"● {refresh_status} · {refresh_detail}")
-        elif refresh_status == "Delvis färsk":
+        elif refresh_status == "Uppdatering tidigare körd":
             _refresh_feedback.warning(f"● {refresh_status} · {refresh_detail}")
         else:
             _refresh_feedback.info(f"● {refresh_status} · {refresh_detail}")
@@ -7385,6 +7416,14 @@ def main() -> None:
         st.session_state["bq_active_scan"] = {"key": _session_key, "time": time.time() - (float(scan_snapshot.get("age_minutes", 0)) * 60 if scan_snapshot.get("hit") else 0), "frame": raw_df.copy()}
     raw_df = pd.DataFrame([clean_legacy_dividend(row) for row in raw_df.to_dict("records")])
     coverage = fundamental_coverage(raw_df)
+    _observations = observation_status(raw_df)
+    with st.expander("Hur aktuellt är underlaget?", expanded=False):
+        for _kind, _label in [("prices", "Kurser"), ("fundamentals", "Bolagsdata")]:
+            _obs = _observations[_kind]
+            st.write(f"{_label}: {_obs['known']}/{_observations['rows']} har giltigt observationsdatum · {_obs['missing']} saknar datum · {_obs['future']} har framtida datum · {_obs['old']} är äldre än {'sju' if _kind == 'prices' else 'tre'} kalenderdagar.")
+            if _obs['oldest']:
+                st.caption(f"Äldsta observation: {_obs['oldest'][:10]}")
+        st.caption("Bolagsdatas hämtningstid är inte rapportdatum. Helger och börshelgdagar kan förklara äldre kursdagar.")
     st.caption(f"Bolagsunderlag: {coverage['with_data']}/{coverage['rows']} aktier har minst en av 8 kärnuppgifter · {coverage['complete']} har alla 8.")
     if coverage["with_data"] < coverage["rows"]:
         st.warning(f"{coverage['rows'] - coverage['with_data']} aktier saknar samtliga 8 kärnuppgifter om ekonomi och värdering. Kursdata räcker inte för en fullständig bolagsbedömning.")
@@ -7420,27 +7459,6 @@ def main() -> None:
         else:
             st.info(_source_summary["message"])
 
-    # Keep the core recommendation paths on the first screen, especially on
-    # mobile. The same session-state targets are used by the detailed view.
-    st.markdown("### Rekommendationer")
-    st.caption("Välj tidshorisont för att öppna Borsifys rekommendationer.")
-    _top_q1, _top_q2 = st.columns(2)
-    if _top_q1.button("⚡ Köp nu · sälj snart", use_container_width=True, key="top_quick_horizon_medium"):
-        st.session_state["bq_horizon_focus"] = "medium"
-        st.session_state["main_page"] = "Fler aktier"
-        st.rerun()
-    if _top_q2.button("📈 Köp nu · behåll 1 år", use_container_width=True, key="top_quick_horizon_year"):
-        st.session_state["bq_horizon_focus"] = "year"
-        st.session_state["main_page"] = "Fler aktier"
-        st.rerun()
-    _top_q3, _top_q4 = st.columns(2)
-    if _top_q3.button("♾️ Långsiktigt ägande", use_container_width=True, key="top_quick_horizon_lifetime"):
-        st.session_state["bq_horizon_focus"] = "lifetime"
-        st.session_state["main_page"] = "Fler aktier"
-        st.rerun()
-    if _top_q4.button("🚀 Visa bästa up and coming-aktierna", use_container_width=True, key="top_quick_up_and_coming"):
-        st.session_state["bq_future_discovery_open"] = True
-        st.rerun()
 
     if refresh:
         st.session_state["bq_last_manual_refresh_completed"] = pd.Timestamp.now(tz="UTC").isoformat()

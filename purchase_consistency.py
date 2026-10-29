@@ -14,6 +14,8 @@ def number(value):
 
 def purchase_blockers(row, horizon="year"):
     reasons = []
+    if str(row.get("Data Trust status") or "") == "STOPP":
+        reasons.append("datakontrollen stoppar köp: " + str(row.get("Data Trust stopp") or "uppdatera och verifiera underlaget"))
     confidence = assess_analysis_confidence(row)
     conviction = number(row.get("Deal Conviction Score"))
     if not math.isfinite(conviction) or conviction < 60:

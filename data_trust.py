@@ -22,9 +22,9 @@ def _age_days(value: Any) -> float:
     try:
         ts=pd.Timestamp(value)
         if ts.tzinfo is not None:
-            ts=ts.tz_localize(None)
+            ts=ts.tz_convert("UTC").tz_localize(None)
         now=pd.Timestamp(datetime.now(timezone.utc)).tz_localize(None)
-        return float(max(0,(now.normalize()-ts.normalize()).days))
+        return float((now-ts).total_seconds()/86400)
     except Exception:
         return np.nan
 
@@ -53,7 +53,9 @@ def assess_data_trust(row: pd.Series | dict[str,Any]) -> dict[str,Any]:
         blockers.append("marknadsdatan har underkänts")
 
     if np.isfinite(price_age):
-        if price_age <= 4:
+        if price_age < 0:
+            blockers.append("kursdatum ligger i framtiden")
+        elif price_age <= 4:
             strengths.append("kursdatum är färskt")
         elif price_age <= 7:
             warnings.append(f"senaste kursen är {int(price_age)} dagar gammal")
@@ -71,7 +73,13 @@ def assess_data_trust(row: pd.Series | dict[str,Any]) -> dict[str,Any]:
         warnings.append("datatäckningen kan inte mätas")
 
     if fundamental_at and fundamental_at not in {"—","None","nan"}:
-        strengths.append("bolagsdata har en registrerad hämtningstid")
+        fundamental_age = _age_days(fundamental_at)
+        if not np.isfinite(fundamental_age) or fundamental_age < 0:
+            blockers.append("hämtningstid för bolagsdata är ogiltig eller ligger i framtiden")
+        elif fundamental_age > 3:
+            blockers.append("bolagsdata är äldre än 72 timmar; uppdatera före köpbedömning")
+        else:
+            strengths.append("bolagsdata har en registrerad hämtningstid")
     else:
         warnings.append("hämtningstid för bolagsdata saknas")
 

@@ -20,7 +20,8 @@ def test_manual_refresh_is_primary_and_clears_both_caches():
     assert "clear_fundamentals_cache(DB_PATH)" not in app
     assert "force_refresh=refresh" in app
     assert 'bq_last_manual_refresh_completed' in app
-    assert 'Färsk data' in app and 'Delvis färsk' in app and 'Gammal data' in app
+    assert 'Uppdatering nyligen körd' in app and 'Uppdatering tidigare körd' in app
+    assert 'observation_status(raw_df)' in app
 
 
 def test_refresh_does_not_delete_research_or_pit_history():
